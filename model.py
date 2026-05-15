@@ -725,12 +725,14 @@ class BrainWM(nn.Module):
             total_loss = total_loss + self.horizon_weights[i] * loss_k
 
         # --- Subject adversarial loss ---
-        adv_loss = torch.tensor(0.0, device=targets.device)
-        if subject_ids is not None and self.adv_alpha > 0:
-            subj_logits = self.subject_adversary(brain_states.detach() if False else brain_states,
-                                                  alpha=self.adv_alpha)
+        # Always compute (even when alpha=0) to keep DDP graph structure constant.
+        # When alpha=0, GRL passes zero gradients — mathematically equivalent to off.
+        subj_logits = self.subject_adversary(brain_states, alpha=self.adv_alpha)
+        if subject_ids is not None:
             adv_loss = F.cross_entropy(subj_logits, subject_ids)
-            total_loss = total_loss + self.adv_lambda * adv_loss
+        else:
+            adv_loss = subj_logits.sum() * 0.0  # zero loss but keeps graph alive
+        total_loss = total_loss + self.adv_lambda * adv_loss
 
         return {"total": total_loss, "adv": adv_loss, **pred_losses}
 

@@ -272,9 +272,7 @@ def main():
     raw_model = model
 
     if distributed:
-        model = DDP(model, device_ids=[int(os.environ["LOCAL_RANK"])],
-                    find_unused_parameters=True)
-        model._set_static_graph()
+        model = DDP(model, device_ids=[int(os.environ["LOCAL_RANK"])])
 
     n_params = sum(p.numel() for p in raw_model.parameters() if p.requires_grad)
     print_main(f"Trainable parameters: {n_params:,}")
