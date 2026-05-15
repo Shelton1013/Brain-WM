@@ -336,30 +336,12 @@ class BrainStateComposer(nn.Module):
 # 6. Subject Adversary (cross-subject generalization)
 # ============================================================
 
-class GradientReversal(torch.autograd.Function):
-    """Gradient Reversal Layer (GRL).
-
-    Forward: identity.
-    Backward: negates and scales gradients by alpha.
-
-    Forces the encoder to produce features that CANNOT distinguish subjects.
-    """
-    @staticmethod
-    def forward(ctx, x, alpha):
-        ctx.alpha = alpha
-        return x.clone()
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        return -ctx.alpha * grad_output, None
-
-
 class SubjectAdversary(nn.Module):
-    """Subject classifier with gradient reversal.
+    """Subject classifier with gradient reversal via register_hook.
 
-    During backprop, the GRL negates the gradient, so the encoder
-    learns to produce representations that the classifier CANNOT
-    use to identify subjects → subject-invariant features.
+    Uses tensor.register_hook() instead of custom autograd.Function
+    for DDP compatibility. The hook negates gradients flowing back
+    to the encoder, forcing subject-invariant representations.
     """
 
     def __init__(self, input_dim: int, n_subjects: int):
@@ -380,11 +362,14 @@ class SubjectAdversary(nn.Module):
             [B, n_subjects] subject classification logits
         """
         if brain_states.dim() == 3:
-            # Pool across time: [B, N, D] → [B, D]
-            x = brain_states.mean(dim=1)
+            x = brain_states.mean(dim=1)  # [B, D]
         else:
             x = brain_states
-        x = GradientReversal.apply(x, alpha)
+
+        # Gradient reversal via hook (DDP-friendly, no custom autograd.Function)
+        if x.requires_grad and alpha > 0:
+            x.register_hook(lambda grad: -alpha * grad)
+
         return self.classifier(x)
 
 
