@@ -97,10 +97,10 @@ def validate(model, dataloader, device):
 
 def main():
     parser = argparse.ArgumentParser(description="Train BrainWM v2")
-    parser.add_argument("--data_dir", type=str, default="./data/physionet")
+    parser.add_argument("--data_dir", type=str, default="/home/share/data_makchen/peng/datasets/physionet")
     parser.add_argument("--dataset", type=str, default="physionet",
                         choices=["physionet", "preprocessed"])
-    parser.add_argument("--output_dir", type=str, default="./checkpoints")
+    parser.add_argument("--output_dir", type=str, default="/home/share/data_makchen/peng/models/brainwm")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=5e-4)

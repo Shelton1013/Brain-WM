@@ -190,7 +190,7 @@ def main():
     parser.add_argument("--task", type=str, required=True,
                         choices=["oddball", "imagination", "linear_probe"])
     parser.add_argument("--data_dir", type=str, required=True)
-    parser.add_argument("--output_dir", type=str, default="./results")
+    parser.add_argument("--output_dir", type=str, default="/home/share/data_makchen/peng/models/brainwm/results")
     parser.add_argument("--device", type=str, default="auto")
     args = parser.parse_args()
 
