@@ -670,12 +670,16 @@ class BrainWM(nn.Module):
 
         result = {"brain_states": brain_states, "hidden_states": hidden_states}
 
+        # 5. Subject adversary (MUST be inside forward() for DDP compatibility)
+        subj_logits = self.subject_adversary(brain_states, alpha=self.adv_alpha)
+        result["subj_logits"] = subj_logits
+
         if return_predictions:
-            # 5. EMA targets
+            # 6. EMA targets
             with torch.no_grad():
                 target_states = self._get_target_states(eeg)
 
-            # 6. Multi-horizon predictions
+            # 7. Multi-horizon predictions
             predictions = {}
             for k in self.prediction_horizons:
                 pred = self.prediction_head(hidden_states[:, :-k, :], k=k)
@@ -689,13 +693,12 @@ class BrainWM(nn.Module):
     def compute_loss(self, outputs: dict, subject_ids: torch.Tensor = None) -> dict:
         """Smooth L1 prediction loss + subject adversarial loss.
 
-        Args:
-            outputs: forward() output dict
-            subject_ids: [B] integer subject labels (for adversarial training)
+        All tensors come from forward() output — no module calls here,
+        so DDP tracking is not broken.
         """
         predictions = outputs["predictions"]
         targets = outputs["targets"]
-        brain_states = outputs["brain_states"]
+        subj_logits = outputs["subj_logits"]
 
         pred_losses = {}
         total_loss = torch.tensor(0.0, device=targets.device)
@@ -709,14 +712,11 @@ class BrainWM(nn.Module):
             pred_losses[f"pred_k{k}"] = loss_k
             total_loss = total_loss + self.horizon_weights[i] * loss_k
 
-        # --- Subject adversarial loss ---
-        # Always compute (even when alpha=0) to keep DDP graph structure constant.
-        # When alpha=0, GRL passes zero gradients — mathematically equivalent to off.
-        subj_logits = self.subject_adversary(brain_states, alpha=self.adv_alpha)
+        # --- Subject adversarial loss (logits already computed in forward) ---
         if subject_ids is not None:
             adv_loss = F.cross_entropy(subj_logits, subject_ids)
         else:
-            adv_loss = subj_logits.sum() * 0.0  # zero loss but keeps graph alive
+            adv_loss = subj_logits.sum() * 0.0
         total_loss = total_loss + self.adv_lambda * adv_loss
 
         return {"total": total_loss, "adv": adv_loss, **pred_losses}
