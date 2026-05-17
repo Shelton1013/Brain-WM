@@ -61,6 +61,9 @@ class BrainWMConfig:
     aug_powerline_prob: float = 0.2          # prob of 50/60Hz interference
     aug_slow_drift_prob: float = 0.15        # prob of slow baseline drift
 
+    # ---------- Temporal masking ----------
+    temporal_mask_ratio: float = 0.5   # fraction of past timesteps to mask
+
     # ---------- Scheduled sampling ----------
     scheduled_sampling_start: float = 0.0
     scheduled_sampling_end: float = 0.3

@@ -1,25 +1,30 @@
 """
-BrainWM v3: Causal Predictive Coding Foundation Model for EEG
+BrainWM v3: Causal Masked Predictive Coding Foundation Model for EEG
 
-v3 changes from v2:
-  - Region masking (Brain-JEPA Cross-ROI inspired): predict masked brain
-    regions from unmasked ones via cross-attention
-  - InfoNCE contrastive prediction loss with within-sequence negatives
-  - VICReg (variance + covariance) regularization to prevent collapse
-  - Content-only EMA targets (no temporal position embedding) to prevent
-    position-matching shortcut in contrastive loss
+Key insight: temporal masking + region masking create information bottlenecks
+that make prediction non-trivial, enabling simple L2 loss (like Brain-JEPA /
+EchoJEPA) instead of complex InfoNCE + VICReg.
+
+v3 changes:
+  - Temporal masking: randomly mask ~50% of past timesteps with learnable
+    token before feeding to causal Mamba. Prediction from incomplete past
+    is inherently hard — no shortcut possible.
+  - Region masking (Brain-JEPA Cross-ROI): predict masked brain regions
+    from unmasked ones via cross-attention. Learns functional connectivity.
+  - Simple L2 loss: masking removes the need for contrastive loss (InfoNCE)
+    and anti-collapse regularization (VICReg).
   - EEG-specific augmentations: electrode pop, powerline noise, slow drift
   - Wider prediction horizons: k=[1, 3, 5] (100ms, 300ms, 500ms ahead)
   - Delayed adversarial training: GRL starts at 30% training progress
   - EMA decay caps at 0.9999 (never fully freezes target encoder)
+  - Content-only EMA targets (no temporal position embedding)
 
-v2 features retained:
+Architecture retained from v2:
   - 100ms state resolution (40 states/trial)
   - Channel-independent encoding with temporal attention
   - Regional cross-attention aggregation (5 brain regions)
   - Causal Mamba world model (forward-only prediction)
   - Subject adversarial training with gradient reversal
-  - Scheduled sampling for rollout robustness
 """
 
 import copy
@@ -586,15 +591,18 @@ class BrainWM(nn.Module):
     Pipeline:
         Raw EEG -> Augmentation -> ChannelEncoder (per channel, per 100ms)
         -> RegionalAttentionAggregation -> BrainStateComposition
-        -> [Region Masking] -> CausalMambaWorldModel -> PredictionHead
+        -> [Temporal Masking] -> [Region Masking] -> CausalMambaWorldModel
+        -> PredictionHead
         + RegionMaskPredictor (Cross-ROI prediction)
         + SubjectAdversary (gradient reversal)
 
-    Training objectives:
-        1. Within-sequence InfoNCE (temporal prediction, k=1,3,5)
+    Training objectives (simplified by masking):
+        1. L2 prediction loss (temporal, k=1,3,5 — masking makes it hard)
         2. Region masking prediction (spatial, Brain-JEPA inspired)
-        3. VICReg (variance + covariance regularization)
-        4. Subject adversarial (cross-subject invariance)
+        3. Subject adversarial (cross-subject invariance)
+
+    Key insight: temporal masking creates an information bottleneck that
+    prevents trivial prediction, eliminating the need for InfoNCE and VICReg.
     """
 
     def __init__(self, config: BrainWMConfig, n_subjects: int = 109):
@@ -606,6 +614,12 @@ class BrainWM(nn.Module):
         self.world_model = CausalMambaWorldModel(config)
         self.prediction_head = PredictionHead(config)
 
+        # Temporal masking: learnable token replaces masked timesteps
+        self.temporal_mask_token = nn.Parameter(
+            torch.randn(config.brain_state_dim) * 0.02
+        )
+        self.temporal_mask_ratio = config.temporal_mask_ratio
+
         # Region mask predictor (Brain-JEPA Cross-ROI inspired)
         self.region_mask_predictor = RegionMaskPredictor(config)
         self.region_mask_prob = 0.5     # probability of applying region masking
@@ -615,13 +629,9 @@ class BrainWM(nn.Module):
         self.subject_adversary = SubjectAdversary(config.brain_state_dim, n_subjects)
         self.adv_alpha = 0.0        # GRL strength, ramped up during training
         self.adv_lambda = 0.1       # adversarial loss weight
-        self.var_lambda = 5.0       # VICReg variance weight
-        self.cov_lambda = 1.0       # VICReg covariance weight
-        self.nce_temperature = 0.1  # InfoNCE temperature
 
         self.prediction_horizons = config.prediction_horizons
         self.horizon_weights = config.horizon_weights
-        self.smooth_l1_beta = config.smooth_l1_beta
 
         # EMA (initialized on first forward)
         self._ema_initialized = False
@@ -682,6 +692,31 @@ class BrainWM(nn.Module):
                     pred = self.prediction_head(hidden_states[:, t-1:t, :], k=1, start_pos=t-1)
                 states[:, t, :] = pred.squeeze(1).detach()
         return states
+
+    def _apply_temporal_masking(self, brain_states: torch.Tensor) -> torch.Tensor:
+        """Mask random past timesteps with a learnable token.
+
+        Causality is preserved: Mamba still only looks at past positions.
+        But some past positions are now replaced with mask tokens, creating
+        an information bottleneck that makes future prediction non-trivial.
+
+        The first timestep is always kept visible (need at least some context).
+        """
+        if not self.training:
+            return brain_states
+
+        B, N, D = brain_states.shape
+        n_mask = int((N - 1) * self.temporal_mask_ratio)
+        if n_mask == 0:
+            return brain_states
+
+        # Random positions to mask (exclude position 0)
+        mask_positions = torch.randperm(N - 1, device=brain_states.device)[:n_mask] + 1
+
+        masked_states = brain_states.clone()
+        masked_states[:, mask_positions, :] = self.temporal_mask_token
+
+        return masked_states
 
     def _apply_region_masking(self, brain_states: torch.Tensor, content_states: torch.Tensor):
         """Mask 1-2 brain regions and predict them from the rest.
@@ -758,25 +793,22 @@ class BrainWM(nn.Module):
         pos_emb = self.brain_state_composer.temporal_embedding(pos).unsqueeze(0)
         content_states = brain_states - pos_emb
 
-        # 3. Region masking (training only)
+        # 3. Masking (training only)
         result = {"brain_states": brain_states}
         wm_input = brain_states
 
         if self.training and return_predictions:
-            region_mask_info = self._apply_region_masking(brain_states, content_states)
+            # 3a. Temporal masking: replace random past timesteps with mask token
+            wm_input = self._apply_temporal_masking(wm_input)
+
+            # 3b. Region masking: mask 1-2 brain regions
+            region_mask_info = self._apply_region_masking(wm_input, content_states)
             if region_mask_info is not None:
                 wm_input = region_mask_info["masked_states"]
                 result["region_mask_info"] = region_mask_info
 
         # 4. World model (causal): [B, N, D] -> [B, N, d_model]
         hidden_states = self.world_model(wm_input)
-
-        # 5. Scheduled sampling (training only)
-        if self.training and self.ss_prob > 0:
-            brain_states_ss = self._apply_scheduled_sampling(brain_states, hidden_states)
-            if not torch.equal(brain_states_ss, brain_states):
-                hidden_states = self.world_model(brain_states_ss)
-                brain_states = brain_states_ss
 
         result["hidden_states"] = hidden_states
 
@@ -801,47 +833,29 @@ class BrainWM(nn.Module):
         return result
 
     def compute_loss(self, outputs: dict, subject_ids: torch.Tensor = None) -> dict:
-        """Within-sequence InfoNCE + region masking + VICReg + adversarial loss."""
+        """L2 prediction + region masking + adversarial loss.
+
+        Temporal masking creates an information bottleneck that makes L2
+        prediction non-trivial, eliminating the need for InfoNCE and VICReg.
+        """
         predictions = outputs["predictions"]
         targets = outputs["targets"]
         subj_logits = outputs["subj_logits"]
-        brain_states = outputs["brain_states"]
 
         pred_losses = {}
         total_loss = torch.tensor(0.0, device=targets.device)
 
-        # --- Prediction loss (within-sequence InfoNCE) ---
+        # --- Prediction loss (L2, simple like Brain-JEPA/EchoJEPA) ---
+        # Temporal masking makes this hard: model saw incomplete past,
+        # must still predict correct future states.
         for i, k in enumerate(self.prediction_horizons):
             pred = predictions[k]                    # [B, M, D]
             target = targets[:, k:, :].detach()      # [B, M, D]
-            B_cur, M, D = pred.shape
-
-            pred_norm = F.normalize(pred, dim=-1)
-            target_norm = F.normalize(target, dim=-1)
-
-            # Per-sample similarity: [B, M, M]
-            logits = torch.bmm(pred_norm, target_norm.transpose(1, 2)) / self.nce_temperature
-            labels = torch.arange(M, device=logits.device).unsqueeze(0).expand(B_cur, -1)
-            loss_k = F.cross_entropy(logits.reshape(-1, M), labels.reshape(-1))
-
+            loss_k = F.mse_loss(pred, target)
             pred_losses[f"pred_k{k}"] = loss_k
             total_loss = total_loss + self.horizon_weights[i] * loss_k
 
-        # --- VICReg variance + covariance regularization ---
-        B, N, D = brain_states.shape
-        states_flat = brain_states.reshape(-1, D)
-
-        std_per_dim = states_flat.std(dim=0)
-        var_loss = F.relu(1.0 - std_per_dim).mean()
-
-        states_centered = states_flat - states_flat.mean(dim=0, keepdim=True)
-        cov = (states_centered.T @ states_centered) / max(states_flat.shape[0] - 1, 1)
-        cov_loss = (cov.fill_diagonal_(0).pow(2).sum() / D)
-
-        vicreg_loss = self.var_lambda * var_loss + self.cov_lambda * cov_loss
-        total_loss = total_loss + vicreg_loss
-
-        # --- Region masking loss (Brain-JEPA Cross-ROI) ---
+        # --- Region masking loss (L2, Brain-JEPA Cross-ROI) ---
         region_mask_loss = torch.tensor(0.0, device=targets.device)
         if "region_mask_info" in outputs:
             info = outputs["region_mask_info"]
@@ -853,10 +867,7 @@ class BrainWM(nn.Module):
                 [targets[:, :, r.item()*d:(r.item()+1)*d] for r in masked_idx],
                 dim=2,
             )
-
-            pred_flat = F.normalize(pred_r.reshape(-1, d), dim=-1)
-            target_flat = F.normalize(target_regions.detach().reshape(-1, d), dim=-1)
-            region_mask_loss = 2.0 - 2.0 * (pred_flat * target_flat).sum(-1).mean()
+            region_mask_loss = F.mse_loss(pred_r, target_regions.detach())
 
         total_loss = total_loss + self.region_mask_lambda * region_mask_loss
 
@@ -869,7 +880,6 @@ class BrainWM(nn.Module):
 
         return {
             "total": total_loss, "adv": adv_loss,
-            "var": var_loss, "cov": cov_loss,
             "rmask": region_mask_loss,
             **pred_losses,
         }
