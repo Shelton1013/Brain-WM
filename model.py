@@ -329,6 +329,10 @@ class BrainStateComposer(nn.Module):
         # Add temporal position embedding
         pos = torch.arange(N, device=states.device)
         states = states + self.temporal_embedding(pos).unsqueeze(0)
+
+        # Also store content-only states (without position) for contrastive targets
+        self._content_states = region_latents.reshape(B, N, -1)
+
         return states
 
 
@@ -629,8 +633,15 @@ class BrainWM(nn.Module):
 
     @torch.no_grad()
     def _get_target_states(self, eeg: torch.Tensor) -> torch.Tensor:
+        """Return content-only targets (no temporal position embedding).
+
+        The EMA encoder runs the full forward (including position embedding),
+        but we grab _content_states which is stored before position is added.
+        This prevents the contrastive loss from being solved by position matching.
+        """
         self._init_ema()
-        return self.ema_encoder(eeg)
+        self.ema_encoder(eeg)  # trigger forward, populates _content_states
+        return self.ema_encoder.target_encoder._content_states
 
     def _apply_scheduled_sampling(
         self, brain_states: torch.Tensor, hidden_states: torch.Tensor
