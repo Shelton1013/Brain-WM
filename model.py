@@ -629,6 +629,7 @@ class BrainWM(nn.Module):
         self.subject_adversary = SubjectAdversary(config.brain_state_dim, n_subjects)
         self.adv_alpha = 0.0        # GRL strength, ramped up during training
         self.adv_lambda = 0.1       # adversarial loss weight
+        self.var_lambda = 5.0       # variance regularization (anti-collapse safety net)
 
         self.prediction_horizons = config.prediction_horizons
         self.horizon_weights = config.horizon_weights
@@ -701,6 +702,7 @@ class BrainWM(nn.Module):
         an information bottleneck that makes future prediction non-trivial.
 
         The first timestep is always kept visible (need at least some context).
+        Uses torch.where instead of in-place ops for DDP/autograd safety.
         """
         if not self.training:
             return brain_states
@@ -710,13 +712,15 @@ class BrainWM(nn.Module):
         if n_mask == 0:
             return brain_states
 
-        # Random positions to mask (exclude position 0)
-        mask_positions = torch.randperm(N - 1, device=brain_states.device)[:n_mask] + 1
+        # Boolean mask: True = masked
+        mask = torch.zeros(N, dtype=torch.bool, device=brain_states.device)
+        positions = torch.randperm(N - 1, device=brain_states.device)[:n_mask] + 1
+        mask[positions] = True
 
-        masked_states = brain_states.clone()
-        masked_states[:, mask_positions, :] = self.temporal_mask_token
-
-        return masked_states
+        # torch.where: no in-place ops, clean autograd graph
+        mask_expanded = mask.unsqueeze(0).unsqueeze(-1)  # [1, N, 1]
+        token_expanded = self.temporal_mask_token.unsqueeze(0).unsqueeze(0)  # [1, 1, D]
+        return torch.where(mask_expanded, token_expanded, brain_states)
 
     def _apply_region_masking(self, brain_states: torch.Tensor, content_states: torch.Tensor):
         """Mask 1-2 brain regions and predict them from the rest.
@@ -740,12 +744,16 @@ class BrainWM(nn.Module):
         masked_idx = perm[:n_mask]
         unmasked_idx = perm[n_mask:]
 
-        # Replace masked region slices with mask tokens in full states
-        masked_states = brain_states.clone()
+        # Replace masked region slices with mask tokens (no in-place ops)
+        region_mask = torch.zeros(D, dtype=torch.bool, device=brain_states.device)
+        token_values = torch.zeros(D, device=brain_states.device)
         for r in masked_idx:
             start, end = r.item() * d, (r.item() + 1) * d
-            mask_token = self.region_mask_predictor.mask_tokens[r]
-            masked_states[:, :, start:end] = mask_token.unsqueeze(0).unsqueeze(0)
+            region_mask[start:end] = True
+            token_values[start:end] = self.region_mask_predictor.mask_tokens[r]
+        region_mask = region_mask.unsqueeze(0).unsqueeze(0)  # [1, 1, D]
+        token_values = token_values.unsqueeze(0).unsqueeze(0)  # [1, 1, D]
+        masked_states = torch.where(region_mask, token_values, brain_states)
 
         # Extract unmasked region latents from CONTENT states (no position)
         unmasked_regions = torch.stack(
@@ -833,21 +841,21 @@ class BrainWM(nn.Module):
         return result
 
     def compute_loss(self, outputs: dict, subject_ids: torch.Tensor = None) -> dict:
-        """L2 prediction + region masking + adversarial loss.
+        """L2 prediction + region masking + variance reg + adversarial loss.
 
-        Temporal masking creates an information bottleneck that makes L2
-        prediction non-trivial, eliminating the need for InfoNCE and VICReg.
+        Temporal masking creates an information bottleneck. Variance
+        regularization prevents the encoder from collapsing all states
+        to a constant (EEG's low SNR makes masking alone insufficient).
         """
         predictions = outputs["predictions"]
         targets = outputs["targets"]
         subj_logits = outputs["subj_logits"]
+        brain_states = outputs["brain_states"]
 
         pred_losses = {}
         total_loss = torch.tensor(0.0, device=targets.device)
 
-        # --- Prediction loss (L2, simple like Brain-JEPA/EchoJEPA) ---
-        # Temporal masking makes this hard: model saw incomplete past,
-        # must still predict correct future states.
+        # --- Prediction loss (L2) ---
         for i, k in enumerate(self.prediction_horizons):
             pred = predictions[k]                    # [B, M, D]
             target = targets[:, k:, :].detach()      # [B, M, D]
@@ -855,7 +863,17 @@ class BrainWM(nn.Module):
             pred_losses[f"pred_k{k}"] = loss_k
             total_loss = total_loss + self.horizon_weights[i] * loss_k
 
-        # --- Region masking loss (L2, Brain-JEPA Cross-ROI) ---
+        # --- Variance regularization (anti-collapse) ---
+        # EEG signals are low-SNR; masking alone can't prevent collapse.
+        # Per-dimension std must be >= 1 — if encoder collapses to constant,
+        # this pushes representations apart.
+        B, N, D = brain_states.shape
+        states_flat = brain_states.reshape(-1, D)
+        std_per_dim = states_flat.std(dim=0)
+        var_loss = F.relu(1.0 - std_per_dim).mean()
+        total_loss = total_loss + self.var_lambda * var_loss
+
+        # --- Region masking loss (L2) ---
         region_mask_loss = torch.tensor(0.0, device=targets.device)
         if "region_mask_info" in outputs:
             info = outputs["region_mask_info"]
@@ -880,7 +898,7 @@ class BrainWM(nn.Module):
 
         return {
             "total": total_loss, "adv": adv_loss,
-            "rmask": region_mask_loss,
+            "var": var_loss, "rmask": region_mask_loss,
             **pred_losses,
         }
 
