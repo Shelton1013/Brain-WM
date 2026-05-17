@@ -585,7 +585,8 @@ class BrainWM(nn.Module):
         self.subject_adversary = SubjectAdversary(config.brain_state_dim, n_subjects)
         self.adv_alpha = 0.0        # GRL strength, ramped up during training
         self.adv_lambda = 0.1       # adversarial loss weight
-        self.var_lambda = 1.0       # variance regularization weight (anti-collapse)
+        self.var_lambda = 5.0       # VICReg variance weight (anti-collapse)
+        self.cov_lambda = 1.0       # VICReg covariance weight (decorrelation)
 
         self.prediction_horizons = config.prediction_horizons
         self.horizon_weights = config.horizon_weights
@@ -609,9 +610,12 @@ class BrainWM(nn.Module):
             self.config.scheduled_sampling_start
             + (self.config.scheduled_sampling_end - self.config.scheduled_sampling_start) * progress
         )
-        # Ramp up adversarial strength: 0 → 1.0 over training
-        # Let the model learn prediction first, then gradually add subject invariance
-        self.adv_alpha = min(progress * 2.0, 1.0)  # reaches 1.0 at 50% training
+        # Ramp up adversarial strength: 0 until 30% training, then → 1.0 at 80%
+        # Must let prediction establish meaningful representations first
+        if progress < 0.3:
+            self.adv_alpha = 0.0
+        else:
+            self.adv_alpha = min((progress - 0.3) / 0.5, 1.0)
 
     def _init_ema(self):
         if not self._ema_initialized:
@@ -692,7 +696,7 @@ class BrainWM(nn.Module):
         return result
 
     def compute_loss(self, outputs: dict, subject_ids: torch.Tensor = None) -> dict:
-        """Smooth L1 prediction loss + subject adversarial loss.
+        """Prediction loss (cosine) + VICReg regularization + adversarial loss.
 
         All tensors come from forward() output — no module calls here,
         so DDP tracking is not broken.
@@ -700,33 +704,55 @@ class BrainWM(nn.Module):
         predictions = outputs["predictions"]
         targets = outputs["targets"]
         subj_logits = outputs["subj_logits"]
+        brain_states = outputs["brain_states"]
 
         pred_losses = {}
         total_loss = torch.tensor(0.0, device=targets.device)
 
-        # --- Prediction loss ---
+        # --- Prediction loss (negative cosine similarity) ---
+        # Cosine loss cannot be trivially satisfied by collapse (unlike L1 on unnormalized)
         for i, k in enumerate(self.prediction_horizons):
-            pred = predictions[k]
-            target = targets[:, k:, :]
-            target = F.layer_norm(target, [target.shape[-1]])
-            loss_k = F.smooth_l1_loss(pred, target, beta=self.smooth_l1_beta)
+            pred = predictions[k]                    # [B, N-k, D]
+            target = targets[:, k:, :].detach()      # [B, N-k, D]
+            # Normalize to unit sphere
+            pred_norm = F.normalize(pred, dim=-1)
+            target_norm = F.normalize(target, dim=-1)
+            # Negative cosine similarity (minimize → align pred with target)
+            loss_k = 2.0 - 2.0 * (pred_norm * target_norm).sum(dim=-1).mean()
             pred_losses[f"pred_k{k}"] = loss_k
             total_loss = total_loss + self.horizon_weights[i] * loss_k
 
-        # --- Variance regularization (anti-collapse) ---
-        brain_states = outputs["brain_states"]
-        std = brain_states.std(dim=0).mean()  # avg std across time and features
-        var_loss = F.relu(1.0 - std)  # hinge: no penalty if std >= 1
-        total_loss = total_loss + self.var_lambda * var_loss
+        # --- VICReg variance + covariance regularization ---
+        # Flatten brain_states to [B*N, D] for statistics
+        B, N, D = brain_states.shape
+        states_flat = brain_states.reshape(-1, D)  # [B*N, D]
 
-        # --- Subject adversarial loss (logits already computed in forward) ---
+        # Variance: per-dimension std must be >= 1 (hinge)
+        std_per_dim = states_flat.std(dim=0)  # [D]
+        var_loss = F.relu(1.0 - std_per_dim).mean()  # avg over dimensions
+
+        # Covariance: off-diagonal elements of cov matrix should be zero
+        states_centered = states_flat - states_flat.mean(dim=0, keepdim=True)
+        cov = (states_centered.T @ states_centered) / max(states_flat.shape[0] - 1, 1)
+        # Zero out diagonal, penalize off-diagonal
+        cov_loss = (cov.fill_diagonal_(0).pow(2).sum() / D)
+
+        vicreg_loss = self.var_lambda * var_loss + self.cov_lambda * cov_loss
+        total_loss = total_loss + vicreg_loss
+
+        # --- Subject adversarial loss ---
+        # Only apply GRL after prediction is established (adv_alpha handles ramp)
         if subject_ids is not None:
             adv_loss = F.cross_entropy(subj_logits, subject_ids)
         else:
             adv_loss = subj_logits.sum() * 0.0
         total_loss = total_loss + self.adv_lambda * adv_loss
 
-        return {"total": total_loss, "adv": adv_loss, "var": var_loss, **pred_losses}
+        return {
+            "total": total_loss, "adv": adv_loss,
+            "var": var_loss, "cov": cov_loss,
+            **pred_losses,
+        }
 
     def update_ema(self):
         if self.ema_encoder is not None:

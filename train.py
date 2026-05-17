@@ -94,7 +94,7 @@ def train_one_epoch(model, raw_model, dataloader, optimizer, scheduler, config,
         raw_model: unwrapped model (for EMA update and progress setting)
     """
     model.train()
-    total_losses = {"total": 0, "adv": 0, "var": 0}
+    total_losses = {"total": 0, "adv": 0, "var": 0, "cov": 0}
     for k in config.prediction_horizons:
         total_losses[f"pred_k{k}"] = 0
     n_batches = 0
@@ -138,6 +138,7 @@ def train_one_epoch(model, raw_model, dataloader, optimizer, scheduler, config,
                 f"k3={losses.get('pred_k3', 0):.4f} "
                 f"adv={losses.get('adv', 0):.4f} "
                 f"var={losses.get('var', 0):.4f} "
+                f"cov={losses.get('cov', 0):.4f} "
                 f"lr={lr:.2e} ema={ema_m:.4f} α={raw_model.adv_alpha:.2f}"
             )
 
