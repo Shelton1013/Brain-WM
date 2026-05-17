@@ -94,7 +94,7 @@ def train_one_epoch(model, raw_model, dataloader, optimizer, scheduler, config,
         raw_model: unwrapped model (for EMA update and progress setting)
     """
     model.train()
-    total_losses = {"total": 0, "adv": 0, "var": 0, "cov": 0}
+    total_losses = {"total": 0, "adv": 0, "var": 0, "cov": 0, "rmask": 0}
     for k in config.prediction_horizons:
         total_losses[f"pred_k{k}"] = 0
     n_batches = 0
@@ -130,16 +130,18 @@ def train_one_epoch(model, raw_model, dataloader, optimizer, scheduler, config,
         if batch_idx % 50 == 0:
             lr = optimizer.param_groups[0]["lr"]
             ema_m = raw_model.ema_encoder.current_decay if raw_model.ema_encoder else 0
+            pred_str = " ".join(
+                f"k{k}={losses.get(f'pred_k{k}', 0):.4f}" for k in config.prediction_horizons
+            )
             print_main(
                 f"  Epoch {epoch} [{batch_idx}/{len(dataloader)}] "
                 f"loss={losses['total']:.4f} "
-                f"k1={losses.get('pred_k1', 0):.4f} "
-                f"k2={losses.get('pred_k2', 0):.4f} "
-                f"k3={losses.get('pred_k3', 0):.4f} "
+                f"{pred_str} "
                 f"adv={losses.get('adv', 0):.4f} "
                 f"var={losses.get('var', 0):.4f} "
                 f"cov={losses.get('cov', 0):.4f} "
-                f"lr={lr:.2e} ema={ema_m:.4f} α={raw_model.adv_alpha:.2f}"
+                f"rmask={losses.get('rmask', 0):.4f} "
+                f"lr={lr:.2e} ema={ema_m:.4f} \u03b1={raw_model.adv_alpha:.2f}"
             )
 
     avg = {k: v / max(n_batches, 1) for k, v in total_losses.items()}

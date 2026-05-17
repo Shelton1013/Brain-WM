@@ -1,4 +1,4 @@
-"""BrainWM v2 configuration."""
+"""BrainWM v3 configuration."""
 
 from dataclasses import dataclass, field
 from typing import List
@@ -41,7 +41,7 @@ class BrainWMConfig:
     mamba_d_conv: int = 4
 
     # ---------- Prediction ----------
-    prediction_horizons: List[int] = field(default_factory=lambda: [1, 2, 3])
+    prediction_horizons: List[int] = field(default_factory=lambda: [1, 3, 5])
     predictor_hidden_dim: int = 512
     horizon_weights: List[float] = field(default_factory=lambda: [1.0, 0.5, 0.25])
 
@@ -50,13 +50,16 @@ class BrainWMConfig:
     ema_decay_end: float = 0.9999
 
     # ---------- Loss ----------
-    smooth_l1_beta: float = 1.0     # v2: Smooth L1 instead of Cosine+VICReg
+    smooth_l1_beta: float = 1.0
 
     # ---------- Data augmentation ----------
-    aug_time_shift_samples: int = 6     # ±25ms at 256Hz
+    aug_time_shift_samples: int = 6     # +-25ms at 256Hz
     aug_amplitude_scale: tuple = (0.8, 1.2)
     aug_gaussian_noise_std: float = 0.1  # relative to channel std
     aug_channel_dropout_p: float = 0.1
+    aug_electrode_pop_prob: float = 0.15     # prob of spike artifact per trial
+    aug_powerline_prob: float = 0.2          # prob of 50/60Hz interference
+    aug_slow_drift_prob: float = 0.15        # prob of slow baseline drift
 
     # ---------- Scheduled sampling ----------
     scheduled_sampling_start: float = 0.0

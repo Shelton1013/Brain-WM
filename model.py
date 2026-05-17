@@ -1,17 +1,25 @@
 """
-BrainWM v2: A World Model for Brain Signals
+BrainWM v3: Causal Predictive Coding Foundation Model for EEG
 
-v2 changes from v1:
-  - 100ms state resolution (was 500ms) → 40 states/trial (was 8)
-  - Channel-independent encoding with temporal attention (was signal-level aggregation)
-  - Regional cross-attention in latent space (was signal-level weighted sum)
-  - Smooth L1 loss (was Cosine + VICReg)
-  - Horizon + position embedding in prediction heads
+v3 changes from v2:
+  - Region masking (Brain-JEPA Cross-ROI inspired): predict masked brain
+    regions from unmasked ones via cross-attention
+  - InfoNCE contrastive prediction loss with within-sequence negatives
+  - VICReg (variance + covariance) regularization to prevent collapse
+  - Content-only EMA targets (no temporal position embedding) to prevent
+    position-matching shortcut in contrastive loss
+  - EEG-specific augmentations: electrode pop, powerline noise, slow drift
+  - Wider prediction horizons: k=[1, 3, 5] (100ms, 300ms, 500ms ahead)
+  - Delayed adversarial training: GRL starts at 30% training progress
+  - EMA decay caps at 0.9999 (never fully freezes target encoder)
+
+v2 features retained:
+  - 100ms state resolution (40 states/trial)
+  - Channel-independent encoding with temporal attention
+  - Regional cross-attention aggregation (5 brain regions)
+  - Causal Mamba world model (forward-only prediction)
+  - Subject adversarial training with gradient reversal
   - Scheduled sampling for rollout robustness
-  - EMA momentum scheduling (0.996 → 1.0)
-  - Data augmentation
-  - Euclidean Alignment preprocessing (in dataset.py)
-  - Subject adversarial training with gradient reversal (cross-subject generalization)
 """
 
 import copy
@@ -24,11 +32,20 @@ from config import BrainWMConfig
 
 
 # ============================================================
-# 1. Data Augmentation
+# 1. Data Augmentation (v3: + EEG-specific perturbations)
 # ============================================================
 
 class EEGAugmentation(nn.Module):
-    """EEG data augmentation applied during training."""
+    """EEG data augmentation with domain-specific perturbations.
+
+    Generic augmentations (v2):
+      - Time shift, amplitude scaling, Gaussian noise, channel dropout
+
+    EEG-specific augmentations (v3, EchoJEPA-inspired domain adaptation):
+      - Electrode pop: sudden spike on a single channel
+      - Powerline interference: 50/60Hz sinusoidal noise
+      - Slow drift: low-frequency baseline wander
+    """
 
     def __init__(self, config: BrainWMConfig):
         super().__init__()
@@ -36,20 +53,18 @@ class EEGAugmentation(nn.Module):
         self.amp_lo, self.amp_hi = config.aug_amplitude_scale
         self.noise_std = config.aug_gaussian_noise_std
         self.chan_drop_p = config.aug_channel_dropout_p
+        self.pop_prob = config.aug_electrode_pop_prob
+        self.powerline_prob = config.aug_powerline_prob
+        self.drift_prob = config.aug_slow_drift_prob
+        self.sample_rate = config.sample_rate
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: [B, T, C] raw EEG
-        Returns:
-            [B, T, C] augmented EEG
-        """
         if not self.training:
             return x
 
         B, T, C = x.shape
 
-        # 1. Random time shift (±25ms)
+        # 1. Random time shift (+-25ms)
         if self.time_shift > 0:
             shift = torch.randint(-self.time_shift, self.time_shift + 1, (1,)).item()
             if shift != 0:
@@ -69,6 +84,36 @@ class EEGAugmentation(nn.Module):
         if self.chan_drop_p > 0:
             mask = torch.bernoulli(torch.full((1, 1, C), 1 - self.chan_drop_p, device=x.device))
             x = x * mask
+
+        # 5. Electrode pop artifact: brief high-amplitude spike on 1 channel
+        if torch.rand(1).item() < self.pop_prob:
+            ch = torch.randint(0, C, (1,)).item()
+            t_center = torch.randint(0, T, (1,)).item()
+            width = torch.randint(3, 10, (1,)).item()
+            t_start = max(0, t_center - width)
+            t_end = min(T, t_center + width)
+            amplitude = x[:, :, ch].std() * torch.empty(1, device=x.device).uniform_(3.0, 8.0)
+            t_range = torch.arange(t_start, t_end, device=x.device, dtype=x.dtype)
+            spike = amplitude * torch.exp(-0.5 * ((t_range - t_center) / max(width / 3, 1)) ** 2)
+            x[:, t_start:t_end, ch] = x[:, t_start:t_end, ch] + spike.unsqueeze(0)
+
+        # 6. Powerline interference: 50/60Hz sinusoidal on all channels
+        if torch.rand(1).item() < self.powerline_prob:
+            t = torch.arange(T, device=x.device, dtype=x.dtype) / self.sample_rate
+            freq = 50.0 if torch.rand(1).item() < 0.5 else 60.0
+            phase = torch.rand(1, device=x.device) * 2 * math.pi
+            amplitude = x.std() * torch.empty(1, device=x.device).uniform_(0.05, 0.2)
+            interference = amplitude * torch.sin(2 * math.pi * freq * t + phase)
+            x = x + interference.unsqueeze(0).unsqueeze(-1)
+
+        # 7. Slow baseline drift on random channels
+        if torch.rand(1).item() < self.drift_prob:
+            n_ch = torch.randint(1, max(2, C // 8), (1,)).item()
+            channels = torch.randperm(C, device=x.device)[:n_ch]
+            t = torch.arange(T, device=x.device, dtype=x.dtype) / T
+            freq = torch.empty(1, device=x.device).uniform_(0.1, 0.5)
+            drift = x.std() * 0.5 * torch.sin(2 * math.pi * freq * t)
+            x[:, :, channels] = x[:, :, channels] + drift.unsqueeze(0).unsqueeze(-1)
 
         return x
 
@@ -110,12 +155,12 @@ class LearnableFilterBank(nn.Module):
                 self.filters.weight.data[i, 0, :] = bp
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """[B, T] → [B, n_filters, T]"""
+        """[B, T] -> [B, n_filters, T]"""
         return self.filters(x.unsqueeze(1))
 
 
 # ============================================================
-# 3. Channel Encoder (v2: with Temporal Attention)
+# 3. Channel Encoder (with Temporal Attention)
 # ============================================================
 
 class TemporalAttentionBlock(nn.Module):
@@ -137,7 +182,7 @@ class TemporalAttentionBlock(nn.Module):
 class ChannelEncoder(nn.Module):
     """Encode a single channel's 100ms window into a latent vector.
 
-    Pipeline: FilterBank → reshape to tokens → Temporal Attention → pool → project
+    Pipeline: FilterBank -> reshape to tokens -> Temporal Attention -> pool -> project
     """
 
     def __init__(self, config: BrainWMConfig):
@@ -147,62 +192,39 @@ class ChannelEncoder(nn.Module):
         self.attn_dim = config.channel_attn_dim
 
         self.filter_bank = LearnableFilterBank(config)
-
-        # Project each (filter, time_sample) into attention dim
         self.token_proj = nn.Linear(1, config.channel_attn_dim)
 
-        # Learnable position encoding for filter-time tokens
-        n_tokens = config.n_freq_filters * config.state_samples  # 5 * 26 = 130
+        n_tokens = config.n_freq_filters * config.state_samples
         self.pos_embed = nn.Parameter(torch.randn(1, n_tokens, config.channel_attn_dim) * 0.02)
 
-        # Temporal attention layers
         self.attn_layers = nn.ModuleList([
             TemporalAttentionBlock(config.channel_attn_dim, config.channel_attn_heads)
             for _ in range(config.channel_attn_layers)
         ])
 
-        # Pool + project to encoder_hidden_dim
         self.output_proj = nn.Sequential(
             nn.LayerNorm(config.channel_attn_dim),
             nn.Linear(config.channel_attn_dim, config.encoder_hidden_dim),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: [B, state_samples] single channel, single 100ms window
-        Returns:
-            [B, d] latent vector (d = encoder_hidden_dim = 128)
-        """
-        # [B, n_filters, state_samples]
+        """[B, state_samples] -> [B, d]"""
         freq = self.filter_bank(x)
         B = freq.shape[0]
-
-        # Reshape to tokens: [B, n_filters * state_samples, 1]
         tokens = freq.reshape(B, -1, 1)
-        # Project: [B, n_tokens, attn_dim]
         tokens = self.token_proj(tokens) + self.pos_embed
-
-        # Temporal attention
         for layer in self.attn_layers:
             tokens = layer(tokens)
-
-        # Average pool: [B, attn_dim]
         pooled = tokens.mean(dim=1)
-        # Project: [B, encoder_hidden_dim]
         return self.output_proj(pooled)
 
 
 # ============================================================
-# 4. Regional Attention Aggregation (v2: cross-attention in latent space)
+# 4. Regional Attention Aggregation
 # ============================================================
 
 class RegionalAttentionAggregation(nn.Module):
-    """Aggregate channel latents into region latents via cross-attention.
-
-    v1 aggregated raw signals (64 channels → 5 scalars). Information loss 12.8x.
-    v2 aggregates latent vectors (64×128d → 5×128d). Information preserved.
-    """
+    """Aggregate channel latents into region latents via cross-attention."""
 
     def __init__(self, config: BrainWMConfig):
         super().__init__()
@@ -210,10 +232,7 @@ class RegionalAttentionAggregation(nn.Module):
         self.d = config.encoder_hidden_dim
         self.electrode_region_map = config.get_electrode_region_map()
 
-        # Learnable query per region
         self.region_queries = nn.Parameter(torch.randn(config.n_regions, config.encoder_hidden_dim) * 0.02)
-
-        # Cross-attention: query=region, key/value=channel latents
         self.cross_attn = nn.MultiheadAttention(
             config.encoder_hidden_dim, num_heads=4, batch_first=True,
         )
@@ -229,12 +248,7 @@ class RegionalAttentionAggregation(nn.Module):
                 self.region_to_indices[region].append(idx)
 
     def forward(self, channel_latents: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            channel_latents: [B, C, d] latent per channel
-        Returns:
-            [B, R, d] latent per region (R = n_regions)
-        """
+        """[B, C, d] -> [B, R, d]"""
         B, C, d = channel_latents.shape
         region_outputs = []
 
@@ -243,35 +257,27 @@ class RegionalAttentionAggregation(nn.Module):
             if len(indices) == 0:
                 region_outputs.append(torch.zeros(B, 1, d, device=channel_latents.device))
                 continue
-
-            # Key/Value: channel latents in this region [B, n_elec, d]
             kv = channel_latents[:, indices, :]
-            # Query: region query [B, 1, d]
             q = self.region_queries[r:r+1].unsqueeze(0).expand(B, -1, -1)
-
-            # Cross-attention
-            out, _ = self.cross_attn(q, kv, kv)  # [B, 1, d]
+            out, _ = self.cross_attn(q, kv, kv)
             region_outputs.append(out)
 
-        # [B, R, d]
         regions = torch.cat(region_outputs, dim=1)
         return self.norm(regions)
 
 
 # ============================================================
-# 5. Brain State Composer (v2)
+# 5. Brain State Composer
 # ============================================================
 
 class BrainStateComposer(nn.Module):
     """Compose channel-level EEG into brain state sequences.
 
     Pipeline:
-      1. Reshape all (time_windows × channels) into one batch → single encoder call
-      2. RegionalAttentionAggregation per time step (batched across time)
-      3. Concatenate R regions → brain state [D]
-
-    v2 performance fix: no Python loops over channels/windows.
-    All channel×window encoding done in ONE batched forward pass.
+      1. Batched channel encoding (all channels x windows in one pass)
+      2. Regional cross-attention aggregation per time step
+      3. Concatenate R regions -> brain state [D]
+      4. Optionally add temporal position embedding
     """
 
     def __init__(self, config: BrainWMConfig):
@@ -283,57 +289,106 @@ class BrainStateComposer(nn.Module):
         self.channel_encoder = ChannelEncoder(config)
         self.regional_agg = RegionalAttentionAggregation(config)
 
-        # Region embedding
         self.region_embedding = nn.Parameter(
             torch.randn(config.n_regions, config.encoder_hidden_dim) * 0.02
         )
-        # Temporal position embedding
         self.temporal_embedding = nn.Embedding(256, config.brain_state_dim)
 
     def initialize_for_electrodes(self, electrode_names: list[str]):
         self.regional_agg.initialize_for_electrodes(electrode_names)
         self.n_channels = len(electrode_names)
 
-    def forward(self, eeg: torch.Tensor) -> torch.Tensor:
+    def forward(self, eeg: torch.Tensor, return_content_only: bool = False) -> torch.Tensor:
         """
         Args:
             eeg: [B, T, C] raw EEG (after augmentation)
+            return_content_only: if True, return states WITHOUT temporal position
+                embedding (used by EMA target encoder for contrastive targets)
         Returns:
             [B, N, D] brain state sequence (N=40 for 4s trial, D=640)
         """
         B, T, C = eeg.shape
         S = self.state_samples
-        N = T // S  # number of 100ms states
+        N = T // S
 
-        # ---- Batched channel encoding (no Python loops) ----
-        # Reshape: [B, T, C] → [B, N, S, C] → [B*N*C, S]
+        # ---- Batched channel encoding ----
         eeg_windowed = eeg[:, :N * S, :].reshape(B, N, S, C)
         eeg_flat = eeg_windowed.permute(0, 1, 3, 2).reshape(B * N * C, S)
-
-        # Single forward pass for ALL channels × ALL windows
-        z_flat = self.channel_encoder(eeg_flat)         # [B*N*C, d]
-        z_all = z_flat.reshape(B, N, C, self.d)         # [B, N, C, d]
+        z_flat = self.channel_encoder(eeg_flat)
+        z_all = z_flat.reshape(B, N, C, self.d)
 
         # ---- Batched regional aggregation ----
-        # Merge B and N for batched cross-attention: [B*N, C, d]
         z_bn = z_all.reshape(B * N, C, self.d)
-        region_latents = self.regional_agg(z_bn)        # [B*N, R, d]
+        region_latents = self.regional_agg(z_bn)
         region_latents = region_latents.reshape(B, N, self.n_regions, self.d)
 
-        # Add region embedding: [1, 1, R, d]
+        # Add region embedding
         region_latents = region_latents + self.region_embedding.unsqueeze(0).unsqueeze(0)
 
         # Concat regions: [B, N, R*d] = [B, N, D]
-        states = region_latents.reshape(B, N, -1)
+        content_states = region_latents.reshape(B, N, -1)
 
-        # Add temporal position embedding
-        pos = torch.arange(N, device=states.device)
-        states = states + self.temporal_embedding(pos).unsqueeze(0)
+        if return_content_only:
+            return content_states
 
-        # Also store content-only states (without position) for contrastive targets
-        self._content_states = region_latents.reshape(B, N, -1)
-
+        # Add temporal position embedding (only for online encoder path)
+        pos = torch.arange(N, device=content_states.device)
+        states = content_states + self.temporal_embedding(pos).unsqueeze(0)
         return states
+
+
+# ============================================================
+# 5b. Region Mask Predictor (Brain-JEPA Cross-ROI inspired)
+# ============================================================
+
+class RegionMaskPredictor(nn.Module):
+    """Predict masked brain region latents from unmasked regions.
+
+    Inspired by Brain-JEPA's Cross-ROI masking: given latents from
+    visible brain regions, predict representations of masked regions
+    via cross-attention. Forces the model to learn inter-region
+    functional connectivity.
+    """
+
+    def __init__(self, config: BrainWMConfig):
+        super().__init__()
+        d = config.encoder_hidden_dim
+        self.d = d
+
+        self.mask_tokens = nn.Parameter(torch.randn(config.n_regions, d) * 0.02)
+
+        self.cross_attn = nn.MultiheadAttention(d, num_heads=4, batch_first=True)
+        self.norm1 = nn.LayerNorm(d)
+        self.ffn = nn.Sequential(
+            nn.Linear(d, d * 2),
+            nn.GELU(),
+            nn.Linear(d * 2, d),
+        )
+        self.norm2 = nn.LayerNorm(d)
+
+    def forward(
+        self,
+        unmasked_regions: torch.Tensor,
+        masked_indices: torch.Tensor,
+        region_embedding: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Args:
+            unmasked_regions: [BN, R_unmasked, d] latents of visible regions
+            masked_indices: [R_masked] indices of masked regions
+            region_embedding: [R, d] region embeddings from BrainStateComposer
+        Returns:
+            [BN, R_masked, d] predicted latents for masked regions
+        """
+        BN = unmasked_regions.shape[0]
+
+        q = self.mask_tokens[masked_indices] + region_embedding[masked_indices]
+        q = q.unsqueeze(0).expand(BN, -1, -1)
+
+        out, _ = self.cross_attn(q, unmasked_regions, unmasked_regions)
+        out = self.norm1(out + q)
+        out = out + self.ffn(self.norm2(out))
+        return out
 
 
 # ============================================================
@@ -341,12 +396,7 @@ class BrainStateComposer(nn.Module):
 # ============================================================
 
 class SubjectAdversary(nn.Module):
-    """Subject classifier with gradient reversal via register_hook.
-
-    Uses tensor.register_hook() instead of custom autograd.Function
-    for DDP compatibility. The hook negates gradients flowing back
-    to the encoder, forcing subject-invariant representations.
-    """
+    """Subject classifier with gradient reversal via register_hook."""
 
     def __init__(self, input_dim: int, n_subjects: int):
         super().__init__()
@@ -358,19 +408,11 @@ class SubjectAdversary(nn.Module):
         )
 
     def forward(self, brain_states: torch.Tensor, alpha: float = 1.0) -> torch.Tensor:
-        """
-        Args:
-            brain_states: [B, N, D] or [B, D] brain state representations
-            alpha: gradient reversal strength (ramp up during training)
-        Returns:
-            [B, n_subjects] subject classification logits
-        """
         if brain_states.dim() == 3:
-            x = brain_states.mean(dim=1)  # [B, D]
+            x = brain_states.mean(dim=1)
         else:
             x = brain_states
 
-        # Gradient reversal via hook (DDP-friendly, no custom autograd.Function)
         if x.requires_grad and alpha > 0:
             x.register_hook(lambda grad: -alpha * grad)
 
@@ -382,11 +424,7 @@ class SubjectAdversary(nn.Module):
 # ============================================================
 
 class MambaBlock(nn.Module):
-    """Causal selective state space block.
-
-    h(t+1) = A·h(t) + B·x(t)  — state only flows forward in time
-    y(t)   = C·h(t) + D·x(t)  — output depends only on past
-    """
+    """Causal selective state space block."""
 
     def __init__(self, d_model: int, d_state: int = 64, d_conv: int = 4, expand: int = 2):
         super().__init__()
@@ -417,13 +455,11 @@ class MambaBlock(nn.Module):
         xz = self.in_proj(x)
         x_path, z = xz.chunk(2, dim=-1)
 
-        # Causal conv
         x_path = x_path.transpose(1, 2)
         x_path = self.conv1d(x_path)[:, :, :L]
         x_path = x_path.transpose(1, 2)
         x_path = F.silu(x_path)
 
-        # Causal SSM scan
         y = self._selective_scan(x_path)
 
         z = F.silu(z)
@@ -464,7 +500,7 @@ class CausalMambaWorldModel(nn.Module):
         self.final_norm = nn.LayerNorm(config.mamba_d_model)
 
     def forward(self, states: torch.Tensor) -> torch.Tensor:
-        """[B, N, D] → [B, N, d_model]  (causal: each position sees only past)"""
+        """[B, N, D] -> [B, N, d_model]  (causal)"""
         x = self.input_proj(states)
         for layer in self.layers:
             x = layer(x)
@@ -472,28 +508,21 @@ class CausalMambaWorldModel(nn.Module):
 
 
 # ============================================================
-# 8. Prediction Heads (v2: with horizon + position embedding)
+# 8. Prediction Head (with horizon + position embedding)
 # ============================================================
 
 class PredictionHead(nn.Module):
-    """Shared MLP with horizon and position embeddings.
-
-    v2 improvement: the head knows WHICH future step it is predicting (horizon)
-    and WHERE in time the target is (position).
-    """
+    """Shared MLP with horizon and position embeddings."""
 
     def __init__(self, config: BrainWMConfig):
         super().__init__()
         d = config.mamba_d_model
 
-        # Horizon embedding: one per prediction step k
         self.horizon_embedding = nn.Embedding(
             max(config.prediction_horizons) + 1, d
         )
-        # Position embedding: target temporal position
         self.position_embedding = nn.Embedding(256, d)
 
-        # Shared MLP
         self.mlp = nn.Sequential(
             nn.Linear(d, config.predictor_hidden_dim),
             nn.GELU(),
@@ -502,20 +531,10 @@ class PredictionHead(nn.Module):
         )
 
     def forward(self, hidden: torch.Tensor, k: int, start_pos: int = 0) -> torch.Tensor:
-        """
-        Args:
-            hidden: [B, M, d_model] Mamba hidden states
-            k: prediction horizon (1, 2, or 3)
-            start_pos: starting temporal position index
-        Returns:
-            [B, M, D] predicted brain states
-        """
         B, M, d = hidden.shape
-        # Add horizon embedding (same for all positions)
         h_emb = self.horizon_embedding(torch.tensor(k, device=hidden.device))
         x = hidden + h_emb.unsqueeze(0).unsqueeze(0)
 
-        # Add target position embedding
         target_positions = torch.arange(start_pos + k, start_pos + k + M, device=hidden.device)
         target_positions = target_positions.clamp(max=255)
         p_emb = self.position_embedding(target_positions)
@@ -525,13 +544,14 @@ class PredictionHead(nn.Module):
 
 
 # ============================================================
-# 9. EMA Target Encoder (v2: momentum scheduling)
+# 9. EMA Target Encoder
 # ============================================================
 
 class EMAEncoder:
     """EMA copy of state composer for prediction targets.
 
-    v2: momentum schedules from 0.996 → 1.0 (linear).
+    Always returns content-only states (no temporal position embedding)
+    so contrastive loss cannot be solved by position matching.
     """
 
     def __init__(self, online_encoder: nn.Module, decay_start: float = 0.996, decay_end: float = 1.0):
@@ -543,7 +563,6 @@ class EMAEncoder:
             p.requires_grad = False
 
     def set_decay(self, progress: float):
-        """Update decay based on training progress (0.0 → 1.0)."""
         self.current_decay = self.decay_start + (self.decay_end - self.decay_start) * progress
 
     @torch.no_grad()
@@ -554,26 +573,28 @@ class EMAEncoder:
 
     def __call__(self, *args, **kwargs):
         self.target_encoder.eval()
-        return self.target_encoder(*args, **kwargs)
+        return self.target_encoder(*args, return_content_only=True, **kwargs)
 
 
 # ============================================================
-# 10. Full BrainWM v2 Model
+# 10. Full BrainWM v3 Model
 # ============================================================
 
 class BrainWM(nn.Module):
-    """Brain World Model v2.
+    """Brain World Model v3.
 
     Pipeline:
-        Raw EEG → Augmentation → ChannelEncoder (per channel, per 100ms)
-        → RegionalAttentionAggregation → BrainStateComposition
-        → CausalMambaWorldModel → PredictionHead (with horizon/position emb)
-        + SubjectAdversary (gradient reversal for cross-subject invariance)
+        Raw EEG -> Augmentation -> ChannelEncoder (per channel, per 100ms)
+        -> RegionalAttentionAggregation -> BrainStateComposition
+        -> [Region Masking] -> CausalMambaWorldModel -> PredictionHead
+        + RegionMaskPredictor (Cross-ROI prediction)
+        + SubjectAdversary (gradient reversal)
 
-    100ms state resolution enables MMN/P300 analysis.
-    Causal Mamba ensures forward-only prediction (world model).
-    Smooth L1 loss (no VICReg needed).
-    EA preprocessing + adversarial training for cross-subject generalization.
+    Training objectives:
+        1. Within-sequence InfoNCE (temporal prediction, k=1,3,5)
+        2. Region masking prediction (spatial, Brain-JEPA inspired)
+        3. VICReg (variance + covariance regularization)
+        4. Subject adversarial (cross-subject invariance)
     """
 
     def __init__(self, config: BrainWMConfig, n_subjects: int = 109):
@@ -585,13 +606,18 @@ class BrainWM(nn.Module):
         self.world_model = CausalMambaWorldModel(config)
         self.prediction_head = PredictionHead(config)
 
+        # Region mask predictor (Brain-JEPA Cross-ROI inspired)
+        self.region_mask_predictor = RegionMaskPredictor(config)
+        self.region_mask_prob = 0.5     # probability of applying region masking
+        self.region_mask_lambda = 1.0   # region prediction loss weight
+
         # Subject adversary for cross-subject invariance
         self.subject_adversary = SubjectAdversary(config.brain_state_dim, n_subjects)
         self.adv_alpha = 0.0        # GRL strength, ramped up during training
         self.adv_lambda = 0.1       # adversarial loss weight
-        self.var_lambda = 5.0       # VICReg variance weight (anti-collapse)
-        self.cov_lambda = 1.0       # VICReg covariance weight (decorrelation)
-        self.nce_temperature = 0.1  # InfoNCE temperature (lower = harder contrasts)
+        self.var_lambda = 5.0       # VICReg variance weight
+        self.cov_lambda = 1.0       # VICReg covariance weight
+        self.nce_temperature = 0.1  # InfoNCE temperature
 
         self.prediction_horizons = config.prediction_horizons
         self.horizon_weights = config.horizon_weights
@@ -608,15 +634,14 @@ class BrainWM(nn.Module):
         self.brain_state_composer.initialize_for_electrodes(electrode_names)
 
     def set_training_progress(self, progress: float):
-        """Update EMA decay, scheduled sampling, and adversary strength (0→1)."""
+        """Update EMA decay, scheduled sampling, and adversary strength."""
         if self.ema_encoder is not None:
             self.ema_encoder.set_decay(progress)
         self.ss_prob = (
             self.config.scheduled_sampling_start
             + (self.config.scheduled_sampling_end - self.config.scheduled_sampling_start) * progress
         )
-        # Ramp up adversarial strength: 0 until 30% training, then → 1.0 at 80%
-        # Must let prediction establish meaningful representations first
+        # Delayed adversarial: 0 until 30%, ramp to 1.0 at 80%
         if progress < 0.3:
             self.adv_alpha = 0.0
         else:
@@ -635,13 +660,11 @@ class BrainWM(nn.Module):
     def _get_target_states(self, eeg: torch.Tensor) -> torch.Tensor:
         """Return content-only targets (no temporal position embedding).
 
-        The EMA encoder runs the full forward (including position embedding),
-        but we grab _content_states which is stored before position is added.
-        This prevents the contrastive loss from being solved by position matching.
+        EMA encoder's __call__ passes return_content_only=True to
+        BrainStateComposer, so returned states have no position info.
         """
         self._init_ema()
-        self.ema_encoder(eeg)  # trigger forward, populates _content_states
-        return self.ema_encoder.target_encoder._content_states
+        return self.ema_encoder(eeg)
 
     def _apply_scheduled_sampling(
         self, brain_states: torch.Tensor, hidden_states: torch.Tensor
@@ -658,9 +681,63 @@ class BrainWM(nn.Module):
                 with torch.no_grad():
                     pred = self.prediction_head(hidden_states[:, t-1:t, :], k=1, start_pos=t-1)
                 states[:, t, :] = pred.squeeze(1).detach()
-                # Re-run world model from this point would be expensive,
-                # so we just replace the input state
         return states
+
+    def _apply_region_masking(self, brain_states: torch.Tensor, content_states: torch.Tensor):
+        """Mask 1-2 brain regions and predict them from the rest.
+
+        Args:
+            brain_states: [B, N, D] full states with position embedding
+            content_states: [B, N, D] content-only states (no position)
+        Returns:
+            dict with masked_states, predicted/original regions, or None
+        """
+        if not self.training or torch.rand(1).item() > self.region_mask_prob:
+            return None
+
+        B, N, D = brain_states.shape
+        d = self.config.encoder_hidden_dim  # 128
+        R = self.config.n_regions           # 5
+
+        # Randomly mask 1-2 regions
+        n_mask = torch.randint(1, 3, (1,)).item()
+        perm = torch.randperm(R, device=brain_states.device)
+        masked_idx = perm[:n_mask]
+        unmasked_idx = perm[n_mask:]
+
+        # Replace masked region slices with mask tokens in full states
+        masked_states = brain_states.clone()
+        for r in masked_idx:
+            start, end = r.item() * d, (r.item() + 1) * d
+            mask_token = self.region_mask_predictor.mask_tokens[r]
+            masked_states[:, :, start:end] = mask_token.unsqueeze(0).unsqueeze(0)
+
+        # Extract unmasked region latents from CONTENT states (no position)
+        unmasked_regions = torch.stack(
+            [content_states[:, :, r.item()*d:(r.item()+1)*d] for r in unmasked_idx],
+            dim=2,
+        )  # [B, N, R_unmasked, d]
+
+        # Extract original masked region latents from content states
+        original_regions = torch.stack(
+            [content_states[:, :, r.item()*d:(r.item()+1)*d] for r in masked_idx],
+            dim=2,
+        )  # [B, N, n_mask, d]
+
+        # Predict masked regions from unmasked ones
+        unmasked_flat = unmasked_regions.reshape(B * N, -1, d)
+        region_emb = self.brain_state_composer.region_embedding.detach()
+        predicted = self.region_mask_predictor(
+            unmasked_flat, masked_idx, region_emb,
+        )  # [B*N, n_mask, d]
+        predicted = predicted.reshape(B, N, n_mask, d)
+
+        return {
+            "masked_states": masked_states,
+            "masked_indices": masked_idx,
+            "predicted_regions": predicted,
+            "original_regions": original_regions,
+        }
 
     def forward(self, eeg: torch.Tensor, return_predictions: bool = True) -> dict:
         """
@@ -673,30 +750,46 @@ class BrainWM(nn.Module):
         eeg = self.augmentation(eeg)
 
         # 2. Encode to brain states: [B, N, D]
-        brain_states = self.brain_state_composer(eeg)
+        brain_states = self.brain_state_composer(eeg)  # with position embedding
 
-        # 3. World model (causal): [B, N, D] → [B, N, d_model]
-        hidden_states = self.world_model(brain_states)
+        # 2b. Get content-only states for region masking (subtract position)
+        N = brain_states.shape[1]
+        pos = torch.arange(N, device=brain_states.device)
+        pos_emb = self.brain_state_composer.temporal_embedding(pos).unsqueeze(0)
+        content_states = brain_states - pos_emb
 
-        # 4. Scheduled sampling (training only, re-encode with replaced states)
+        # 3. Region masking (training only)
+        result = {"brain_states": brain_states}
+        wm_input = brain_states
+
+        if self.training and return_predictions:
+            region_mask_info = self._apply_region_masking(brain_states, content_states)
+            if region_mask_info is not None:
+                wm_input = region_mask_info["masked_states"]
+                result["region_mask_info"] = region_mask_info
+
+        # 4. World model (causal): [B, N, D] -> [B, N, d_model]
+        hidden_states = self.world_model(wm_input)
+
+        # 5. Scheduled sampling (training only)
         if self.training and self.ss_prob > 0:
             brain_states_ss = self._apply_scheduled_sampling(brain_states, hidden_states)
             if not torch.equal(brain_states_ss, brain_states):
                 hidden_states = self.world_model(brain_states_ss)
                 brain_states = brain_states_ss
 
-        result = {"brain_states": brain_states, "hidden_states": hidden_states}
+        result["hidden_states"] = hidden_states
 
-        # 5. Subject adversary (MUST be inside forward() for DDP compatibility)
+        # 6. Subject adversary (MUST be inside forward() for DDP)
         subj_logits = self.subject_adversary(brain_states, alpha=self.adv_alpha)
         result["subj_logits"] = subj_logits
 
         if return_predictions:
-            # 6. EMA targets
+            # 7. EMA targets (content-only, no position embedding)
             with torch.no_grad():
                 target_states = self._get_target_states(eeg)
 
-            # 7. Multi-horizon predictions
+            # 8. Multi-horizon predictions
             predictions = {}
             for k in self.prediction_horizons:
                 pred = self.prediction_head(hidden_states[:, :-k, :], k=k)
@@ -708,11 +801,7 @@ class BrainWM(nn.Module):
         return result
 
     def compute_loss(self, outputs: dict, subject_ids: torch.Tensor = None) -> dict:
-        """InfoNCE contrastive prediction + VICReg regularization + adversarial loss.
-
-        All tensors come from forward() output — no module calls here,
-        so DDP tracking is not broken.
-        """
+        """Within-sequence InfoNCE + region masking + VICReg + adversarial loss."""
         predictions = outputs["predictions"]
         targets = outputs["targets"]
         subj_logits = outputs["subj_logits"]
@@ -722,22 +811,16 @@ class BrainWM(nn.Module):
         total_loss = torch.tensor(0.0, device=targets.device)
 
         # --- Prediction loss (within-sequence InfoNCE) ---
-        # For each sample independently: pred[t] must identify target[t+k]
-        # among ALL timesteps in THAT SAME trial. This forces the model to
-        # learn temporal dynamics, not just inter-sample differences.
         for i, k in enumerate(self.prediction_horizons):
-            pred = predictions[k]                    # [B, M, D] where M = N-k
+            pred = predictions[k]                    # [B, M, D]
             target = targets[:, k:, :].detach()      # [B, M, D]
             B_cur, M, D = pred.shape
 
-            # Normalize
-            pred_norm = F.normalize(pred, dim=-1)       # [B, M, D]
-            target_norm = F.normalize(target, dim=-1)   # [B, M, D]
+            pred_norm = F.normalize(pred, dim=-1)
+            target_norm = F.normalize(target, dim=-1)
 
-            # Per-sample similarity: [B, M, M] — each pred vs all targets in same trial
+            # Per-sample similarity: [B, M, M]
             logits = torch.bmm(pred_norm, target_norm.transpose(1, 2)) / self.nce_temperature
-
-            # Labels: pred[t] should match target[t] (diagonal)
             labels = torch.arange(M, device=logits.device).unsqueeze(0).expand(B_cur, -1)
             loss_k = F.cross_entropy(logits.reshape(-1, M), labels.reshape(-1))
 
@@ -746,19 +829,36 @@ class BrainWM(nn.Module):
 
         # --- VICReg variance + covariance regularization ---
         B, N, D = brain_states.shape
-        states_flat = brain_states.reshape(-1, D)  # [B*N, D]
+        states_flat = brain_states.reshape(-1, D)
 
-        # Variance: per-dimension std must be >= 1 (hinge)
-        std_per_dim = states_flat.std(dim=0)  # [D]
+        std_per_dim = states_flat.std(dim=0)
         var_loss = F.relu(1.0 - std_per_dim).mean()
 
-        # Covariance: off-diagonal elements of cov matrix should be zero
         states_centered = states_flat - states_flat.mean(dim=0, keepdim=True)
         cov = (states_centered.T @ states_centered) / max(states_flat.shape[0] - 1, 1)
         cov_loss = (cov.fill_diagonal_(0).pow(2).sum() / D)
 
         vicreg_loss = self.var_lambda * var_loss + self.cov_lambda * cov_loss
         total_loss = total_loss + vicreg_loss
+
+        # --- Region masking loss (Brain-JEPA Cross-ROI) ---
+        region_mask_loss = torch.tensor(0.0, device=targets.device)
+        if "region_mask_info" in outputs:
+            info = outputs["region_mask_info"]
+            pred_r = info["predicted_regions"]      # [B, N, n_mask, d]
+            masked_idx = info["masked_indices"]
+
+            d = self.config.encoder_hidden_dim
+            target_regions = torch.stack(
+                [targets[:, :, r.item()*d:(r.item()+1)*d] for r in masked_idx],
+                dim=2,
+            )
+
+            pred_flat = F.normalize(pred_r.reshape(-1, d), dim=-1)
+            target_flat = F.normalize(target_regions.detach().reshape(-1, d), dim=-1)
+            region_mask_loss = 2.0 - 2.0 * (pred_flat * target_flat).sum(-1).mean()
+
+        total_loss = total_loss + self.region_mask_lambda * region_mask_loss
 
         # --- Subject adversarial loss ---
         if subject_ids is not None:
@@ -770,6 +870,7 @@ class BrainWM(nn.Module):
         return {
             "total": total_loss, "adv": adv_loss,
             "var": var_loss, "cov": cov_loss,
+            "rmask": region_mask_loss,
             **pred_losses,
         }
 
@@ -806,11 +907,12 @@ class BrainWM(nn.Module):
         self.eval()
         outputs = self.forward(eeg, return_predictions=True)
         pred = outputs["predictions"][1]
-        target = F.layer_norm(outputs["targets"][:, 1:, :], [outputs["targets"].shape[-1]])
+        target = outputs["targets"][:, 1:, :]
 
-        # Smooth L1 per timestep
-        pe = F.smooth_l1_loss(pred, target, beta=self.smooth_l1_beta, reduction="none")
-        return pe.mean(dim=-1)  # [B, N-1]
+        pred_norm = F.normalize(pred, dim=-1)
+        target_norm = F.normalize(target, dim=-1)
+        pe = 1.0 - (pred_norm * target_norm).sum(dim=-1)
+        return pe  # [B, N-1]
 
     @torch.no_grad()
     def compute_regional_prediction_error(self, eeg: torch.Tensor) -> dict:
@@ -818,16 +920,14 @@ class BrainWM(nn.Module):
         self.eval()
         outputs = self.forward(eeg, return_predictions=True)
         pred = outputs["predictions"][1]
-        target = F.layer_norm(outputs["targets"][:, 1:, :], [outputs["targets"].shape[-1]])
+        target = outputs["targets"][:, 1:, :]
 
         d = self.config.encoder_hidden_dim
         region_errors = {}
         for r, name in enumerate(self.config.region_names):
             start, end = r * d, (r + 1) * d
-            pe_r = F.smooth_l1_loss(
-                pred[:, :, start:end], target[:, :, start:end],
-                beta=self.smooth_l1_beta, reduction="none"
-            )
-            region_errors[name] = pe_r.mean(dim=-1)  # [B, N-1]
+            pred_r = F.normalize(pred[:, :, start:end], dim=-1)
+            tgt_r = F.normalize(target[:, :, start:end], dim=-1)
+            region_errors[name] = 1.0 - (pred_r * tgt_r).sum(dim=-1)
 
         return region_errors
