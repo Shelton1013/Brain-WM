@@ -614,10 +614,6 @@ class BrainWM(nn.Module):
         self.world_model = CausalMambaWorldModel(config)
         self.prediction_head = PredictionHead(config)
 
-        # Temporal masking: learnable token replaces masked timesteps
-        self.temporal_mask_token = nn.Parameter(
-            torch.randn(config.brain_state_dim) * 0.02
-        )
         self.temporal_mask_ratio = config.temporal_mask_ratio
 
         # Region mask predictor (Brain-JEPA Cross-ROI inspired)
@@ -694,33 +690,39 @@ class BrainWM(nn.Module):
                 states[:, t, :] = pred.squeeze(1).detach()
         return states
 
-    def _apply_temporal_masking(self, brain_states: torch.Tensor) -> torch.Tensor:
-        """Mask random past timesteps with a learnable token.
+    def _apply_temporal_masking_raw(self, eeg: torch.Tensor) -> torch.Tensor:
+        """Mask random 100ms windows in raw EEG BEFORE encoding.
 
-        Causality is preserved: Mamba still only looks at past positions.
-        But some past positions are now replaced with mask tokens, creating
-        an information bottleneck that makes future prediction non-trivial.
+        Unlike masking after encoding (which is trivially solved because the
+        encoder already saw everything), this forces the encoder to work with
+        genuinely missing input. Zeroed-out windows produce uninformative
+        representations, creating a real information bottleneck.
 
-        The first timestep is always kept visible (need at least some context).
-        Uses torch.where instead of in-place ops for DDP/autograd safety.
+        The first window is always kept (need at least some context).
+        Causality is still preserved: Mamba processes causally regardless.
         """
         if not self.training:
-            return brain_states
+            return eeg
 
-        B, N, D = brain_states.shape
+        B, T, C = eeg.shape
+        S = self.config.state_samples  # 26 samples per 100ms window
+        N = T // S                     # 40 windows
+
         n_mask = int((N - 1) * self.temporal_mask_ratio)
         if n_mask == 0:
-            return brain_states
+            return eeg
 
-        # Boolean mask: True = masked
-        mask = torch.zeros(N, dtype=torch.bool, device=brain_states.device)
-        positions = torch.randperm(N - 1, device=brain_states.device)[:n_mask] + 1
-        mask[positions] = True
+        # Select windows to mask (skip window 0)
+        positions = torch.randperm(N - 1, device=eeg.device)[:n_mask] + 1
 
-        # torch.where: no in-place ops, clean autograd graph
-        mask_expanded = mask.unsqueeze(0).unsqueeze(-1)  # [1, N, 1]
-        token_expanded = self.temporal_mask_token.unsqueeze(0).unsqueeze(0)  # [1, 1, D]
-        return torch.where(mask_expanded, token_expanded, brain_states)
+        # Create sample-level mask: True = keep, False = zero out
+        keep_mask = torch.ones(N, dtype=torch.bool, device=eeg.device)
+        keep_mask[positions] = False
+        # Expand to sample level: [N] → [N*S] → [T]
+        sample_mask = keep_mask.repeat_interleave(S)[:T]  # [T]
+        sample_mask = sample_mask.float().unsqueeze(0).unsqueeze(-1)  # [1, T, 1]
+
+        return eeg * sample_mask
 
     def _apply_region_masking(self, brain_states: torch.Tensor, content_states: torch.Tensor):
         """Mask 1-2 brain regions and predict them from the rest.
@@ -792,30 +794,34 @@ class BrainWM(nn.Module):
         # 1. Augmentation (training only)
         eeg = self.augmentation(eeg)
 
-        # 2. Encode to brain states: [B, N, D]
-        brain_states = self.brain_state_composer(eeg)  # with position embedding
+        # 2. Temporal masking at RAW EEG level (training only)
+        #    Must happen BEFORE encoder so encoder sees genuinely incomplete input.
+        #    EMA target encoder will see the full (unmasked) EEG.
+        if self.training and return_predictions:
+            eeg_for_encoder = self._apply_temporal_masking_raw(eeg)
+        else:
+            eeg_for_encoder = eeg
 
-        # 2b. Get content-only states for region masking (subtract position)
+        # 3. Encode (possibly masked) EEG to brain states: [B, N, D]
+        brain_states = self.brain_state_composer(eeg_for_encoder)
+
+        # 3b. Get content-only states for region masking (subtract position)
         N = brain_states.shape[1]
         pos = torch.arange(N, device=brain_states.device)
         pos_emb = self.brain_state_composer.temporal_embedding(pos).unsqueeze(0)
         content_states = brain_states - pos_emb
 
-        # 3. Masking (training only)
+        # 4. Region masking (training only)
         result = {"brain_states": brain_states}
         wm_input = brain_states
 
         if self.training and return_predictions:
-            # 3a. Temporal masking: replace random past timesteps with mask token
-            wm_input = self._apply_temporal_masking(wm_input)
-
-            # 3b. Region masking: mask 1-2 brain regions
             region_mask_info = self._apply_region_masking(wm_input, content_states)
             if region_mask_info is not None:
                 wm_input = region_mask_info["masked_states"]
                 result["region_mask_info"] = region_mask_info
 
-        # 4. World model (causal): [B, N, D] -> [B, N, d_model]
+        # 5. World model (causal): [B, N, D] -> [B, N, d_model]
         hidden_states = self.world_model(wm_input)
 
         result["hidden_states"] = hidden_states
