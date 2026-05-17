@@ -710,31 +710,25 @@ class BrainWM(nn.Module):
         pred_losses = {}
         total_loss = torch.tensor(0.0, device=targets.device)
 
-        # --- Prediction loss (InfoNCE contrastive) ---
-        # For each prediction, the correct target is positive;
-        # all other timesteps in the same batch are negatives.
-        # Forces model to distinguish WHICH future state, not just "something similar."
+        # --- Prediction loss (within-sequence InfoNCE) ---
+        # For each sample independently: pred[t] must identify target[t+k]
+        # among ALL timesteps in THAT SAME trial. This forces the model to
+        # learn temporal dynamics, not just inter-sample differences.
         for i, k in enumerate(self.prediction_horizons):
             pred = predictions[k]                    # [B, M, D] where M = N-k
             target = targets[:, k:, :].detach()      # [B, M, D]
             B_cur, M, D = pred.shape
 
-            # Normalize for cosine similarity
+            # Normalize
             pred_norm = F.normalize(pred, dim=-1)       # [B, M, D]
             target_norm = F.normalize(target, dim=-1)   # [B, M, D]
 
-            # Compute logits: each pred vs all targets across batch×time
-            # Reshape to [B*M, D]
-            pred_flat = pred_norm.reshape(-1, D)         # [L, D]
-            target_flat = target_norm.reshape(-1, D)     # [L, D]
-            L = pred_flat.shape[0]
+            # Per-sample similarity: [B, M, M] — each pred vs all targets in same trial
+            logits = torch.bmm(pred_norm, target_norm.transpose(1, 2)) / self.nce_temperature
 
-            # Similarity matrix [L, L]: each pred vs every target
-            logits = torch.mm(pred_flat, target_flat.t()) / self.nce_temperature  # [L, L]
-
-            # Labels: diagonal is the correct match
-            labels = torch.arange(L, device=logits.device)
-            loss_k = F.cross_entropy(logits, labels)
+            # Labels: pred[t] should match target[t] (diagonal)
+            labels = torch.arange(M, device=logits.device).unsqueeze(0).expand(B_cur, -1)
+            loss_k = F.cross_entropy(logits.reshape(-1, M), labels.reshape(-1))
 
             pred_losses[f"pred_k{k}"] = loss_k
             total_loss = total_loss + self.horizon_weights[i] * loss_k
