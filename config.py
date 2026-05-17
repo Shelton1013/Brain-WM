@@ -47,7 +47,7 @@ class BrainWMConfig:
 
     # ---------- EMA target encoder ----------
     ema_decay_start: float = 0.996
-    ema_decay_end: float = 1.0
+    ema_decay_end: float = 0.9999
 
     # ---------- Loss ----------
     smooth_l1_beta: float = 1.0     # v2: Smooth L1 instead of Cosine+VICReg

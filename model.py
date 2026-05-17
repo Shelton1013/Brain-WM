@@ -585,6 +585,7 @@ class BrainWM(nn.Module):
         self.subject_adversary = SubjectAdversary(config.brain_state_dim, n_subjects)
         self.adv_alpha = 0.0        # GRL strength, ramped up during training
         self.adv_lambda = 0.1       # adversarial loss weight
+        self.var_lambda = 1.0       # variance regularization weight (anti-collapse)
 
         self.prediction_horizons = config.prediction_horizons
         self.horizon_weights = config.horizon_weights
@@ -712,6 +713,12 @@ class BrainWM(nn.Module):
             pred_losses[f"pred_k{k}"] = loss_k
             total_loss = total_loss + self.horizon_weights[i] * loss_k
 
+        # --- Variance regularization (anti-collapse) ---
+        brain_states = outputs["brain_states"]
+        std = brain_states.std(dim=0).mean()  # avg std across time and features
+        var_loss = F.relu(1.0 - std)  # hinge: no penalty if std >= 1
+        total_loss = total_loss + self.var_lambda * var_loss
+
         # --- Subject adversarial loss (logits already computed in forward) ---
         if subject_ids is not None:
             adv_loss = F.cross_entropy(subj_logits, subject_ids)
@@ -719,7 +726,7 @@ class BrainWM(nn.Module):
             adv_loss = subj_logits.sum() * 0.0
         total_loss = total_loss + self.adv_lambda * adv_loss
 
-        return {"total": total_loss, "adv": adv_loss, **pred_losses}
+        return {"total": total_loss, "adv": adv_loss, "var": var_loss, **pred_losses}
 
     def update_ema(self):
         if self.ema_encoder is not None:
