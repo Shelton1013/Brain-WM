@@ -587,6 +587,7 @@ class BrainWM(nn.Module):
         self.adv_lambda = 0.1       # adversarial loss weight
         self.var_lambda = 5.0       # VICReg variance weight (anti-collapse)
         self.cov_lambda = 1.0       # VICReg covariance weight (decorrelation)
+        self.nce_temperature = 0.1  # InfoNCE temperature (lower = harder contrasts)
 
         self.prediction_horizons = config.prediction_horizons
         self.horizon_weights = config.horizon_weights
@@ -696,7 +697,7 @@ class BrainWM(nn.Module):
         return result
 
     def compute_loss(self, outputs: dict, subject_ids: torch.Tensor = None) -> dict:
-        """Prediction loss (cosine) + VICReg regularization + adversarial loss.
+        """InfoNCE contrastive prediction + VICReg regularization + adversarial loss.
 
         All tensors come from forward() output — no module calls here,
         so DDP tracking is not broken.
@@ -709,39 +710,52 @@ class BrainWM(nn.Module):
         pred_losses = {}
         total_loss = torch.tensor(0.0, device=targets.device)
 
-        # --- Prediction loss (negative cosine similarity) ---
-        # Cosine loss cannot be trivially satisfied by collapse (unlike L1 on unnormalized)
+        # --- Prediction loss (InfoNCE contrastive) ---
+        # For each prediction, the correct target is positive;
+        # all other timesteps in the same batch are negatives.
+        # Forces model to distinguish WHICH future state, not just "something similar."
         for i, k in enumerate(self.prediction_horizons):
-            pred = predictions[k]                    # [B, N-k, D]
-            target = targets[:, k:, :].detach()      # [B, N-k, D]
-            # Normalize to unit sphere
-            pred_norm = F.normalize(pred, dim=-1)
-            target_norm = F.normalize(target, dim=-1)
-            # Negative cosine similarity (minimize → align pred with target)
-            loss_k = 2.0 - 2.0 * (pred_norm * target_norm).sum(dim=-1).mean()
+            pred = predictions[k]                    # [B, M, D] where M = N-k
+            target = targets[:, k:, :].detach()      # [B, M, D]
+            B_cur, M, D = pred.shape
+
+            # Normalize for cosine similarity
+            pred_norm = F.normalize(pred, dim=-1)       # [B, M, D]
+            target_norm = F.normalize(target, dim=-1)   # [B, M, D]
+
+            # Compute logits: each pred vs all targets across batch×time
+            # Reshape to [B*M, D]
+            pred_flat = pred_norm.reshape(-1, D)         # [L, D]
+            target_flat = target_norm.reshape(-1, D)     # [L, D]
+            L = pred_flat.shape[0]
+
+            # Similarity matrix [L, L]: each pred vs every target
+            logits = torch.mm(pred_flat, target_flat.t()) / self.nce_temperature  # [L, L]
+
+            # Labels: diagonal is the correct match
+            labels = torch.arange(L, device=logits.device)
+            loss_k = F.cross_entropy(logits, labels)
+
             pred_losses[f"pred_k{k}"] = loss_k
             total_loss = total_loss + self.horizon_weights[i] * loss_k
 
         # --- VICReg variance + covariance regularization ---
-        # Flatten brain_states to [B*N, D] for statistics
         B, N, D = brain_states.shape
         states_flat = brain_states.reshape(-1, D)  # [B*N, D]
 
         # Variance: per-dimension std must be >= 1 (hinge)
         std_per_dim = states_flat.std(dim=0)  # [D]
-        var_loss = F.relu(1.0 - std_per_dim).mean()  # avg over dimensions
+        var_loss = F.relu(1.0 - std_per_dim).mean()
 
         # Covariance: off-diagonal elements of cov matrix should be zero
         states_centered = states_flat - states_flat.mean(dim=0, keepdim=True)
         cov = (states_centered.T @ states_centered) / max(states_flat.shape[0] - 1, 1)
-        # Zero out diagonal, penalize off-diagonal
         cov_loss = (cov.fill_diagonal_(0).pow(2).sum() / D)
 
         vicreg_loss = self.var_lambda * var_loss + self.cov_lambda * cov_loss
         total_loss = total_loss + vicreg_loss
 
         # --- Subject adversarial loss ---
-        # Only apply GRL after prediction is established (adv_alpha handles ramp)
         if subject_ids is not None:
             adv_loss = F.cross_entropy(subj_logits, subject_ids)
         else:
