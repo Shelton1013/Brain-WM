@@ -706,7 +706,8 @@ class BrainWM(nn.Module):
 
         B, T, C = eeg.shape
         S = self.config.state_samples  # 26 samples per 100ms window
-        N = T // S                     # 40 windows
+        N = T // S                     # actual number of complete windows
+        T_used = N * S                 # samples that map to complete windows
 
         n_mask = int((N - 1) * self.temporal_mask_ratio)
         if n_mask == 0:
@@ -718,10 +719,15 @@ class BrainWM(nn.Module):
         # Create sample-level mask: True = keep, False = zero out
         keep_mask = torch.ones(N, dtype=torch.bool, device=eeg.device)
         keep_mask[positions] = False
-        # Expand to sample level: [N] → [N*S] → [T]
-        sample_mask = keep_mask.repeat_interleave(S)[:T]  # [T]
-        sample_mask = sample_mask.float().unsqueeze(0).unsqueeze(-1)  # [1, T, 1]
+        # Expand to sample level: [N] → [N*S]
+        sample_mask = keep_mask.repeat_interleave(S)  # [N*S]
 
+        # Pad to full T if there are leftover samples (keep them)
+        if T_used < T:
+            pad = torch.ones(T - T_used, dtype=torch.bool, device=eeg.device)
+            sample_mask = torch.cat([sample_mask, pad])
+
+        sample_mask = sample_mask.float().unsqueeze(0).unsqueeze(-1)  # [1, T, 1]
         return eeg * sample_mask
 
     def _apply_region_masking(self, brain_states: torch.Tensor, content_states: torch.Tensor):
