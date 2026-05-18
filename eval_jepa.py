@@ -155,8 +155,24 @@ def main():
         val_subjects, data_dir=args.data_dir, use_ea=True,
     )
     n_channels = len(train_dataset.electrode_names)
+
+    # Remove rest class (label=0) — it dominates and makes accuracy misleading
+    # Only evaluate on motor imagery: left(1), right(2), both_fists(3), both_feet(4)
+    def filter_rest(dataset):
+        mask = dataset.labels != 0
+        dataset.trials = dataset.trials[mask]
+        dataset.labels = dataset.labels[mask]
+        # Remap: 1->0, 2->1, 3->2, 4->3
+        dataset.labels = dataset.labels - 1
+        unique, counts = np.unique(dataset.labels, return_counts=True)
+        print(f"  After removing rest: {len(dataset.trials)} trials, "
+              f"classes: {dict(zip(unique, counts))}")
+
+    filter_rest(train_dataset)
+    filter_rest(val_dataset)
+
     n_classes = len(np.unique(train_dataset.labels))
-    print(f"Channels: {n_channels}, Classes: {n_classes}")
+    print(f"Channels: {n_channels}, Classes: {n_classes} (motor imagery only)")
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
                               shuffle=True, num_workers=4, drop_last=True)
