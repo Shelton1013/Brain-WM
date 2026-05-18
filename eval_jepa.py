@@ -45,32 +45,41 @@ class JEPALinearProbe(nn.Module):
     def forward(self, eeg: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
             self.jepa.eval()
-            # Tokenize + encode ALL positions (no masking during eval)
-            tokens = self.jepa._tokenize(eeg)    # [B, N, D]
-            encoded = self.jepa._encode(tokens)   # [B, N, D]
-            pooled = encoded.mean(dim=1)          # [B, D]
+            tokens = self.jepa._tokenize(eeg)
+            encoded = self.jepa._encode(tokens)
+            pooled = encoded.mean(dim=1)
         return self.classifier(self.bn(pooled))
 
 
-def run_probe(jepa, train_loader, val_loader, n_classes, device,
-              n_epochs=100, lr=1e-3, label=""):
-    """Train linear probe and return best val accuracy."""
-    probe = JEPALinearProbe(jepa, n_classes).to(device)
-    optimizer = torch.optim.Adam(
-        list(probe.bn.parameters()) + list(probe.classifier.parameters()),
-        lr=lr,
-    )
+class JEPAFinetune(nn.Module):
+    """Unfrozen EEG-JEPA encoder + classifier. End-to-end fine-tuning."""
+
+    def __init__(self, jepa: EEGJEPA, n_classes: int):
+        super().__init__()
+        self.jepa = jepa  # NOT frozen
+        self.bn = nn.BatchNorm1d(jepa.d_model)
+        self.classifier = nn.Linear(jepa.d_model, n_classes)
+
+    def forward(self, eeg: torch.Tensor) -> torch.Tensor:
+        tokens = self.jepa._tokenize(eeg)
+        encoded = self.jepa._encode(tokens)
+        pooled = encoded.mean(dim=1)
+        return self.classifier(self.bn(pooled))
+
+
+def _train_eval_loop(model, train_loader, val_loader, device, optimizer,
+                     n_epochs, label):
+    """Shared train/eval loop for both probe and finetune."""
     criterion = nn.CrossEntropyLoss()
     best_acc = 0.0
     best_epoch = 0
 
     for epoch in range(1, n_epochs + 1):
-        # Train
-        probe.train()
+        model.train()
         correct, total = 0, 0
         for eeg, labels in train_loader:
             eeg, labels = eeg.to(device), labels.to(device).long()
-            logits = probe(eeg)
+            logits = model(eeg)
             loss = criterion(logits, labels)
             optimizer.zero_grad()
             loss.backward()
@@ -79,14 +88,13 @@ def run_probe(jepa, train_loader, val_loader, n_classes, device,
             total += labels.shape[0]
         train_acc = correct / max(total, 1)
 
-        # Validate
-        probe.eval()
+        model.eval()
         correct, total = 0, 0
         all_preds, all_labels = [], []
         with torch.no_grad():
             for eeg, labels in val_loader:
                 eeg, labels = eeg.to(device), labels.to(device).long()
-                logits = probe(eeg)
+                logits = model(eeg)
                 preds = logits.argmax(-1)
                 correct += (preds == labels).sum().item()
                 total += labels.shape[0]
@@ -102,7 +110,6 @@ def run_probe(jepa, train_loader, val_loader, n_classes, device,
             print(f"  [{label}] Epoch {epoch}: train={train_acc:.4f} "
                   f"val={val_acc:.4f} (best={best_acc:.4f} @ep{best_epoch})")
 
-    # Per-class accuracy at final epoch
     all_preds = np.array(all_preds)
     all_labels = np.array(all_labels)
     per_class = {}
@@ -111,6 +118,33 @@ def run_probe(jepa, train_loader, val_loader, n_classes, device,
         per_class[int(c)] = float((all_preds[mask] == c).mean())
 
     return best_acc, per_class
+
+
+def run_probe(jepa, train_loader, val_loader, n_classes, device,
+              n_epochs=100, lr=1e-3, label=""):
+    """Frozen encoder + trainable linear head."""
+    probe = JEPALinearProbe(jepa, n_classes).to(device)
+    optimizer = torch.optim.Adam(
+        list(probe.bn.parameters()) + list(probe.classifier.parameters()),
+        lr=lr,
+    )
+    return _train_eval_loop(probe, train_loader, val_loader, device,
+                            optimizer, n_epochs, label)
+
+
+def run_finetune(jepa, train_loader, val_loader, n_classes, device,
+                 n_epochs=100, lr=1e-4, label=""):
+    """Unfrozen encoder + classifier. End-to-end with lower LR."""
+    model = JEPAFinetune(jepa, n_classes).to(device)
+    # Layer-wise LR: encoder gets smaller LR, head gets larger
+    encoder_params = list(model.jepa.parameters())
+    head_params = list(model.bn.parameters()) + list(model.classifier.parameters())
+    optimizer = torch.optim.AdamW([
+        {"params": encoder_params, "lr": lr},           # encoder: small LR
+        {"params": head_params, "lr": lr * 10},          # head: 10x LR
+    ], weight_decay=0.01)
+    return _train_eval_loop(model, train_loader, val_loader, device,
+                            optimizer, n_epochs, label)
 
 
 # ============================================================
@@ -194,35 +228,69 @@ def main():
     del random_model
     torch.cuda.empty_cache()
 
-    # ---- Pretrained ----
+    # ---- Pretrained (frozen probe) ----
     if args.checkpoint:
-        print("\n--- Pretrained EEG-JEPA ---")
+        print("\n--- Pretrained EEG-JEPA (frozen probe) ---")
         ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
         ckpt_args = ckpt.get("args", {})
 
-        pretrained = EEGJEPA(
-            n_channels=n_channels,
-            d_model=ckpt_args.get("d_model", 256),
-            encoder_layers=ckpt_args.get("encoder_layers", 6),
-        ).to(device)
-        pretrained.load_state_dict(ckpt["model_state_dict"])
+        def load_pretrained():
+            m = EEGJEPA(
+                n_channels=n_channels,
+                d_model=ckpt_args.get("d_model", 256),
+                encoder_layers=ckpt_args.get("encoder_layers", 6),
+            ).to(device)
+            m.load_state_dict(ckpt["model_state_dict"])
+            return m
+
+        pretrained = load_pretrained()
         print(f"  Loaded checkpoint: epoch {ckpt.get('epoch', '?')}, "
               f"val_loss={ckpt.get('val_loss', '?')}")
 
         pre_acc, pre_pc = run_probe(
             pretrained, train_loader, val_loader, n_classes, device,
-            n_epochs=args.probe_epochs, lr=args.probe_lr, label="Pretrained",
+            n_epochs=args.probe_epochs, lr=args.probe_lr, label="Frozen",
         )
-        results["pretrained"] = {"accuracy": pre_acc, "per_class": pre_pc}
+        results["pretrained_frozen"] = {"accuracy": pre_acc, "per_class": pre_pc}
+        del pretrained
+        torch.cuda.empty_cache()
 
-        improvement = pre_acc - random_acc
-        print(f"\n===== RESULTS =====")
-        print(f"  Chance level:  {1/n_classes:.4f}")
-        print(f"  Random Init:   {random_acc:.4f}")
-        print(f"  Pretrained:    {pre_acc:.4f}")
-        print(f"  Improvement:   {improvement:+.4f} ({improvement*100:+.1f}%)")
-        print(f"  Gate (>5%):    {'PASS' if improvement > 0.05 else 'FAIL'}")
-        results["improvement"] = improvement
+        # ---- Fine-tune from pretrained ----
+        print("\n--- Pretrained EEG-JEPA (fine-tune) ---")
+        pretrained_ft = load_pretrained()
+        ft_acc, ft_pc = run_finetune(
+            pretrained_ft, train_loader, val_loader, n_classes, device,
+            n_epochs=args.probe_epochs, lr=1e-4, label="Finetune-pre",
+        )
+        results["pretrained_finetune"] = {"accuracy": ft_acc, "per_class": ft_pc}
+        del pretrained_ft
+        torch.cuda.empty_cache()
+
+        # ---- Fine-tune from random init ----
+        print("\n--- Random Init (fine-tune) ---")
+        random_ft = EEGJEPA(n_channels=n_channels).to(device)
+        rft_acc, rft_pc = run_finetune(
+            random_ft, train_loader, val_loader, n_classes, device,
+            n_epochs=args.probe_epochs, lr=1e-4, label="Finetune-rand",
+        )
+        results["random_finetune"] = {"accuracy": rft_acc, "per_class": rft_pc}
+        del random_ft
+        torch.cuda.empty_cache()
+
+        # ---- Summary ----
+        print(f"\n{'='*50}")
+        print(f"  RESULTS SUMMARY")
+        print(f"{'='*50}")
+        print(f"  Chance level:           {1/n_classes:.4f}")
+        print(f"  Random frozen probe:    {random_acc:.4f}")
+        print(f"  Pretrained frozen probe:{pre_acc:.4f} ({pre_acc-random_acc:+.4f})")
+        print(f"  Random fine-tune:       {rft_acc:.4f}")
+        print(f"  Pretrained fine-tune:   {ft_acc:.4f} ({ft_acc-rft_acc:+.4f})")
+        print(f"{'='*50}")
+        print(f"  Pretraining value (frozen):   {pre_acc-random_acc:+.4f}")
+        print(f"  Pretraining value (finetune): {ft_acc-rft_acc:+.4f}")
+        results["improvement_frozen"] = pre_acc - random_acc
+        results["improvement_finetune"] = ft_acc - rft_acc
     else:
         print(f"\nNo checkpoint. Random acc: {random_acc:.4f} (chance={1/n_classes:.4f})")
         print("Run with --checkpoint to compare pretrained vs random.")
