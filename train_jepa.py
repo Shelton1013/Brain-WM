@@ -24,6 +24,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from eeg_jepa import EEGJEPA
 from dataset import PhysioNetMIDataset
+from dataset_multi import MultiDatasetEEG
 
 
 # ============================================================
@@ -156,6 +157,18 @@ def main():
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--n_subjects", type=int, default=109)
+    parser.add_argument("--multi_dataset", action="store_true",
+                        help="Use multi-dataset pretraining (PhysioNet + MOABB)")
+    parser.add_argument("--moabb_datasets", type=str, nargs="*",
+                        default=["Cho2017", "Lee2019_MI", "BNCI2014001",
+                                 "Shin2017A", "Weibo2014"],
+                        help="MOABB datasets to include")
+    parser.add_argument("--edf_dir", type=str, default=None,
+                        help="Path to directory of .edf files (e.g., TUH corpus)")
+    parser.add_argument("--edf_max_files", type=int, default=None)
+    parser.add_argument("--download_dir", type=str,
+                        default="/home/share/data_makchen/peng/datasets",
+                        help="Where MOABB auto-downloads data")
     parser.add_argument("--d_model", type=int, default=256)
     parser.add_argument("--encoder_layers", type=int, default=6)
     parser.add_argument("--mask_ratio", type=float, default=0.60)
@@ -170,12 +183,25 @@ def main():
 
     # Dataset
     pprint("Loading dataset...")
-    dataset = PhysioNetMIDataset(
-        subjects=list(range(1, args.n_subjects + 1)),
-        sample_rate=256,
-        trial_duration_s=4,
-        data_dir=args.data_dir,
-    )
+    if args.multi_dataset:
+        sources = [{"type": "physionet", "n_subjects": args.n_subjects}]
+        for name in (args.moabb_datasets or []):
+            sources.append({"type": "moabb", "name": name})
+        if args.edf_dir:
+            sources.append({"type": "edf_dir", "path": args.edf_dir,
+                            "max_files": args.edf_max_files})
+        dataset = MultiDatasetEEG(
+            sources=sources,
+            physionet_data_dir=args.data_dir,
+            download_dir=args.download_dir,
+        )
+    else:
+        dataset = PhysioNetMIDataset(
+            subjects=list(range(1, args.n_subjects + 1)),
+            sample_rate=256,
+            trial_duration_s=4,
+            data_dir=args.data_dir,
+        )
     n_channels = len(dataset.electrode_names)
     pprint(f"Channels: {n_channels}, Trials: {len(dataset)}")
 
