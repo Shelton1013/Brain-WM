@@ -626,6 +626,7 @@ class BrainWM(nn.Module):
         self.adv_alpha = 0.0        # GRL strength, ramped up during training
         self.adv_lambda = 0.1       # adversarial loss weight
         self.var_lambda = 5.0       # variance regularization (anti-collapse safety net)
+        self.nce_temperature = 0.07 # InfoNCE temperature
 
         self.prediction_horizons = config.prediction_horizons
         self.horizon_weights = config.horizon_weights
@@ -853,11 +854,11 @@ class BrainWM(nn.Module):
         return result
 
     def compute_loss(self, outputs: dict, subject_ids: torch.Tensor = None) -> dict:
-        """L2 prediction + region masking + variance reg + adversarial loss.
+        """Within-sequence InfoNCE + variance reg + region masking + adversarial.
 
-        Temporal masking creates an information bottleneck. Variance
-        regularization prevents the encoder from collapsing all states
-        to a constant (EEG's low SNR makes masking alone insufficient).
+        Raw-level temporal masking (encoder sees incomplete EEG) + InfoNCE
+        (must distinguish exact timestep) + content-only targets (no position
+        shortcut) = the combination that makes prediction genuinely hard.
         """
         predictions = outputs["predictions"]
         targets = outputs["targets"]
@@ -867,18 +868,27 @@ class BrainWM(nn.Module):
         pred_losses = {}
         total_loss = torch.tensor(0.0, device=targets.device)
 
-        # --- Prediction loss (L2) ---
+        # --- Prediction loss (within-sequence InfoNCE) ---
+        # Encoder saw masked EEG → representations at masked windows are degraded.
+        # InfoNCE forces model to identify the EXACT target timestep among all
+        # timesteps in the same trial. Can't be solved by L2 shortcut.
         for i, k in enumerate(self.prediction_horizons):
             pred = predictions[k]                    # [B, M, D]
             target = targets[:, k:, :].detach()      # [B, M, D]
-            loss_k = F.mse_loss(pred, target)
+            B_cur, M, D = pred.shape
+
+            pred_norm = F.normalize(pred, dim=-1)
+            target_norm = F.normalize(target, dim=-1)
+
+            # Per-sample: [B, M, M] — pred[t] vs all targets in same trial
+            logits = torch.bmm(pred_norm, target_norm.transpose(1, 2)) / self.nce_temperature
+            labels = torch.arange(M, device=logits.device).unsqueeze(0).expand(B_cur, -1)
+            loss_k = F.cross_entropy(logits.reshape(-1, M), labels.reshape(-1))
+
             pred_losses[f"pred_k{k}"] = loss_k
             total_loss = total_loss + self.horizon_weights[i] * loss_k
 
-        # --- Variance regularization (anti-collapse) ---
-        # EEG signals are low-SNR; masking alone can't prevent collapse.
-        # Per-dimension std must be >= 1 — if encoder collapses to constant,
-        # this pushes representations apart.
+        # --- Variance regularization (anti-collapse safety net) ---
         B, N, D = brain_states.shape
         states_flat = brain_states.reshape(-1, D)
         std_per_dim = states_flat.std(dim=0)
@@ -889,7 +899,7 @@ class BrainWM(nn.Module):
         region_mask_loss = torch.tensor(0.0, device=targets.device)
         if "region_mask_info" in outputs:
             info = outputs["region_mask_info"]
-            pred_r = info["predicted_regions"]      # [B, N, n_mask, d]
+            pred_r = info["predicted_regions"]
             masked_idx = info["masked_indices"]
 
             d = self.config.encoder_hidden_dim
