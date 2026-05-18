@@ -1,12 +1,12 @@
 """
-EEG-JEPA: Simplest possible JEPA baseline for EEG.
+EEG-JEPA: JEPA for EEG with channel-aware tokenization and VICReg.
 
-Direct adaptation of I-JEPA to 1D EEG time series.
-No Mamba, no custom encoder, no adversarial, no region masking.
-Just: tokenize → mask → ViT encode visible → ViT predict masked → L2 loss.
-
-If this works on PhysioNet MI → the JEPA paradigm is valid for EEG.
-If this fails → the problem is fundamental, not architectural.
+v2 changes from v1:
+  - Channel-aware tokenizer: per-channel temporal encoding + learnable
+    channel embedding + spatial attention aggregation. Preserves which
+    electrode sees what (critical for motor imagery: C3/C4 channels).
+  - VICReg (variance + covariance) prevents dimensional collapse.
+  - Block masking: contiguous 500ms-1s blocks instead of random positions.
 """
 
 import copy
@@ -17,7 +17,7 @@ import torch.nn.functional as F
 
 
 # ============================================================
-# 1. Transformer blocks
+# 1. Transformer block
 # ============================================================
 
 class TransformerBlock(nn.Module):
@@ -39,7 +39,81 @@ class TransformerBlock(nn.Module):
 
 
 # ============================================================
-# 2. EMA target encoder
+# 2. Channel-aware tokenizer
+# ============================================================
+
+class ChannelAwareTokenizer(nn.Module):
+    """Per-channel temporal encoding + spatial attention aggregation.
+
+    Unlike flat linear projection (which treats all channels as one blob),
+    this processes each channel independently, adds learnable electrode
+    identity, and uses cross-attention to aggregate channels into one
+    spatially-informed token per timestep.
+
+    This preserves the spatial structure critical for motor imagery:
+    the model can learn that C3/C4 channels matter most.
+    """
+
+    def __init__(self, n_channels: int, state_samples: int, d_model: int,
+                 d_channel: int = 32):
+        super().__init__()
+        self.state_samples = state_samples
+        self.n_channels = n_channels
+        self.d_channel = d_channel
+
+        # Per-channel temporal encoder (shared weights across channels)
+        self.temporal_encoder = nn.Sequential(
+            nn.Linear(state_samples, d_channel * 2),
+            nn.GELU(),
+            nn.Linear(d_channel * 2, d_channel),
+            nn.LayerNorm(d_channel),
+        )
+
+        # Learnable channel embedding (electrode spatial identity)
+        self.channel_embed = nn.Parameter(
+            torch.randn(n_channels, d_channel) * 0.02
+        )
+
+        # Spatial cross-attention: aggregate C channels → 1 token
+        self.spatial_query = nn.Parameter(torch.randn(1, 1, d_channel) * 0.02)
+        self.spatial_attn = nn.MultiheadAttention(
+            d_channel, num_heads=4, batch_first=True,
+        )
+        self.spatial_norm = nn.LayerNorm(d_channel)
+
+        # Project to d_model
+        self.out_proj = nn.Linear(d_channel, d_model)
+        self.out_norm = nn.LayerNorm(d_model)
+
+    def forward(self, eeg: torch.Tensor) -> torch.Tensor:
+        """[B, T, C] → [B, N, D] one spatially-aware token per timestep."""
+        B, T, C = eeg.shape
+        S = self.state_samples
+        N = T // S
+
+        # [B, T, C] → [B, N, S, C] → [B, N, C, S]
+        windows = eeg[:, :N*S, :].reshape(B, N, S, C).permute(0, 1, 3, 2)
+
+        # Per-channel temporal encoding: [B*N*C, S] → [B*N*C, d_ch]
+        flat = windows.reshape(B * N * C, S)
+        ch_features = self.temporal_encoder(flat)  # [B*N*C, d_ch]
+        ch_features = ch_features.reshape(B * N, C, self.d_channel)
+
+        # Add channel embedding: each electrode gets a unique identity
+        ch_features = ch_features + self.channel_embed.unsqueeze(0)  # [B*N, C, d_ch]
+
+        # Spatial cross-attention: query attends over all channels
+        query = self.spatial_query.expand(B * N, -1, -1)  # [B*N, 1, d_ch]
+        pooled, _ = self.spatial_attn(query, ch_features, ch_features)
+        pooled = self.spatial_norm(pooled.squeeze(1))  # [B*N, d_ch]
+
+        # Project to d_model
+        tokens = self.out_norm(self.out_proj(pooled.reshape(B, N, -1)))
+        return tokens  # [B, N, D]
+
+
+# ============================================================
+# 3. EMA
 # ============================================================
 
 class EMA:
@@ -59,55 +133,55 @@ class EMA:
 
 
 # ============================================================
-# 3. EEG-JEPA model
+# 4. EEG-JEPA model
 # ============================================================
 
 class EEGJEPA(nn.Module):
-    """JEPA for EEG with VICReg dimensional regularization.
+    """JEPA for EEG with channel-aware tokenization and VICReg.
 
-    Tokenization: each 100ms window × all channels → one token.
-    Masking: random 60% of timestep tokens.
+    Tokenization: per-channel temporal encoding + spatial cross-attention.
+    Masking: block masking (contiguous temporal blocks, like Laya).
     Encoder: standard ViT, only processes VISIBLE tokens.
     Predictor: lightweight ViT, predicts MASKED tokens from visible.
     Target: EMA encoder processes ALL tokens.
-    Loss: L2 (masked positions) + VICReg (variance + covariance on encoder output).
-
-    VICReg is needed for EEG (but not vision/fMRI) because EEG's low
-    information density causes the encoder to collapse into a tiny subspace.
+    Loss: L2 (masked positions) + VICReg (variance + covariance).
     """
 
     def __init__(
         self,
         n_channels: int = 64,
-        state_samples: int = 26,       # samples per 100ms window
+        state_samples: int = 26,
         d_model: int = 256,
+        d_channel: int = 32,           # per-channel feature dim
         encoder_layers: int = 6,
         encoder_heads: int = 8,
         predictor_layers: int = 3,
         predictor_dim: int = 128,
         predictor_heads: int = 4,
         mask_ratio: float = 0.60,
+        mask_block_size: int = 5,      # ~500ms contiguous blocks
         ema_decay: float = 0.996,
-        var_weight: float = 5.0,       # VICReg variance weight
-        cov_weight: float = 1.0,       # VICReg covariance weight
-        n_subjects: int = 109,         # for compatibility with dataloader
+        var_weight: float = 5.0,
+        cov_weight: float = 1.0,
+        n_subjects: int = 109,
     ):
         super().__init__()
         self.state_samples = state_samples
         self.d_model = d_model
         self.mask_ratio = mask_ratio
+        self.mask_block_size = mask_block_size
         self.var_weight = var_weight
         self.cov_weight = cov_weight
 
-        # --- Tokenizer: linear projection of raw EEG window ---
-        token_dim = state_samples * n_channels  # 26 * 64 = 1664
-        self.patch_proj = nn.Linear(token_dim, d_model)
-        self.patch_norm = nn.LayerNorm(d_model)
+        # --- Channel-aware tokenizer ---
+        self.tokenizer = ChannelAwareTokenizer(
+            n_channels, state_samples, d_model, d_channel,
+        )
 
-        # --- Positional embedding ---
+        # --- Temporal position embedding ---
         self.pos_embed = nn.Parameter(torch.randn(1, 256, d_model) * 0.02)
 
-        # --- Encoder: standard ViT (processes visible tokens only) ---
+        # --- Encoder: standard ViT ---
         self.encoder = nn.ModuleList([
             TransformerBlock(d_model, encoder_heads)
             for _ in range(encoder_layers)
@@ -115,7 +189,7 @@ class EEGJEPA(nn.Module):
         self.encoder_norm = nn.LayerNorm(d_model)
 
         # --- Predictor: lightweight ViT ---
-        self.pred_proj = nn.Linear(d_model, predictor_dim)  # narrow down
+        self.pred_proj = nn.Linear(d_model, predictor_dim)
         self.mask_token = nn.Parameter(torch.randn(1, 1, predictor_dim) * 0.02)
         self.pred_pos_embed = nn.Parameter(torch.randn(1, 256, predictor_dim) * 0.02)
         self.predictor = nn.ModuleList([
@@ -123,19 +197,19 @@ class EEGJEPA(nn.Module):
             for _ in range(predictor_layers)
         ])
         self.pred_norm = nn.LayerNorm(predictor_dim)
-        self.pred_out = nn.Linear(predictor_dim, d_model)  # back to d_model
+        self.pred_out = nn.Linear(predictor_dim, d_model)
 
-        # --- EMA (initialized lazily) ---
+        # --- EMA (lazy init) ---
         self._ema_decay = ema_decay
         self._ema_initialized = False
         self.ema = None
 
+    # ---- EMA management ----
+
     def _init_ema(self):
         if not self._ema_initialized:
-            # EMA of tokenizer + encoder
             target_modules = nn.ModuleDict({
-                "patch_proj": copy.deepcopy(self.patch_proj),
-                "patch_norm": copy.deepcopy(self.patch_norm),
+                "tokenizer": copy.deepcopy(self.tokenizer),
                 "encoder": nn.ModuleList([copy.deepcopy(b) for b in self.encoder]),
                 "encoder_norm": copy.deepcopy(self.encoder_norm),
             })
@@ -145,27 +219,22 @@ class EEGJEPA(nn.Module):
     def _update_ema(self):
         if self.ema is not None:
             online = nn.ModuleDict({
-                "patch_proj": self.patch_proj,
-                "patch_norm": self.patch_norm,
+                "tokenizer": self.tokenizer,
                 "encoder": nn.ModuleList(self.encoder),
                 "encoder_norm": self.encoder_norm,
             })
             self.ema.update(online)
 
+    # ---- Core methods ----
+
     def _tokenize(self, eeg: torch.Tensor) -> torch.Tensor:
-        """[B, T, C] → [B, N, D] tokens."""
-        B, T, C = eeg.shape
-        S = self.state_samples
-        N = T // S
-        # [B, T, C] → [B, N, S, C] → [B, N, S*C]
-        windows = eeg[:, :N*S, :].reshape(B, N, S, C).reshape(B, N, S * C)
-        tokens = self.patch_norm(self.patch_proj(windows))
-        # Add position
+        """[B, T, C] → [B, N, D] tokens with position embedding."""
+        tokens = self.tokenizer(eeg)  # [B, N, D]
+        N = tokens.shape[1]
         tokens = tokens + self.pos_embed[:, :N, :]
         return tokens
 
     def _encode(self, tokens: torch.Tensor) -> torch.Tensor:
-        """Run ViT encoder on tokens."""
         x = tokens
         for block in self.encoder:
             x = block(x)
@@ -175,27 +244,74 @@ class EEGJEPA(nn.Module):
     def _encode_target(self, eeg: torch.Tensor) -> torch.Tensor:
         """EMA target: tokenize + encode ALL positions."""
         self._init_ema()
-        B, T, C = eeg.shape
-        S = self.state_samples
-        N = T // S
-        windows = eeg[:, :N*S, :].reshape(B, N, S, C).reshape(B, N, S * C)
-
         tgt = self.ema.target
-        tokens = tgt["patch_norm"](tgt["patch_proj"](windows))
+        tokens = tgt["tokenizer"](eeg)
+        N = tokens.shape[1]
         tokens = tokens + self.pos_embed[:, :N, :].detach()
-
         x = tokens
         for block in tgt["encoder"]:
             x = block(x)
-        return tgt["encoder_norm"](x)  # [B, N, D]
+        return tgt["encoder_norm"](x)
+
+    def _generate_block_mask(self, B: int, N: int, device: torch.device):
+        """Generate block masking: contiguous temporal blocks.
+
+        Instead of random individual positions, masks contiguous blocks
+        of ~500ms (5 timesteps). Forces model to bridge temporal gaps
+        rather than interpolating from adjacent positions.
+        """
+        n_mask = int(N * self.mask_ratio)
+        n_vis = N - n_mask
+        block_size = self.mask_block_size
+
+        # Generate mask per sample
+        all_ids_vis = []
+        all_ids_mask = []
+
+        for b in range(B):
+            mask = torch.zeros(N, dtype=torch.bool, device=device)
+
+            # Randomly place blocks until we reach desired mask ratio
+            n_masked = 0
+            attempts = 0
+            while n_masked < n_mask and attempts < 100:
+                # Random block start
+                start = torch.randint(0, N, (1,)).item()
+                # Random block length (variable around block_size)
+                length = torch.randint(
+                    max(1, block_size - 2),
+                    block_size + 3,
+                    (1,),
+                ).item()
+                end = min(start + length, N)
+                mask[start:end] = True
+                n_masked = mask.sum().item()
+                attempts += 1
+
+            # Ensure exactly n_mask positions are masked
+            if n_masked > n_mask:
+                # Remove excess
+                masked_positions = mask.nonzero(as_tuple=True)[0]
+                excess = n_masked - n_mask
+                to_unmask = masked_positions[torch.randperm(len(masked_positions))[:excess]]
+                mask[to_unmask] = False
+            elif n_masked < n_mask:
+                # Add more
+                unmasked = (~mask).nonzero(as_tuple=True)[0]
+                deficit = n_mask - n_masked
+                to_mask = unmasked[torch.randperm(len(unmasked))[:deficit]]
+                mask[to_mask] = True
+
+            vis_idx = (~mask).nonzero(as_tuple=True)[0]
+            mask_idx = mask.nonzero(as_tuple=True)[0]
+            all_ids_vis.append(vis_idx)
+            all_ids_mask.append(mask_idx)
+
+        ids_vis = torch.stack(all_ids_vis)    # [B, n_vis]
+        ids_mask = torch.stack(all_ids_mask)  # [B, n_mask]
+        return ids_vis, ids_mask, n_vis, n_mask
 
     def forward(self, eeg: torch.Tensor, return_predictions: bool = True) -> dict:
-        """
-        Args:
-            eeg: [B, T, C] raw EEG
-        Returns:
-            dict with predictions, targets, mask info
-        """
         B, T, C = eeg.shape
         S = self.state_samples
         N = T // S
@@ -207,98 +323,75 @@ class EEGJEPA(nn.Module):
             encoded = self._encode(all_tokens)
             return {"brain_states": encoded}
 
-        # --- Generate random mask ---
-        n_mask = int(N * self.mask_ratio)
-        n_vis = N - n_mask
-
-        # Per-sample random permutation for masking
-        noise = torch.rand(B, N, device=eeg.device)
-        ids_shuffle = noise.argsort(dim=1)
-        ids_restore = ids_shuffle.argsort(dim=1)
-
-        # Visible and masked indices
-        ids_vis = ids_shuffle[:, :n_vis]    # [B, n_vis]
-        ids_mask = ids_shuffle[:, n_vis:]   # [B, n_mask]
+        # --- Block masking ---
+        ids_vis, ids_mask, n_vis, n_mask = self._generate_block_mask(
+            B, N, eeg.device,
+        )
 
         # --- Encoder: process ONLY visible tokens ---
         vis_tokens = torch.gather(
             all_tokens, 1,
-            ids_vis.unsqueeze(-1).expand(-1, -1, self.d_model)
-        )  # [B, n_vis, D]
+            ids_vis.unsqueeze(-1).expand(-1, -1, self.d_model),
+        )
+        vis_encoded = self._encode(vis_tokens)
 
-        vis_encoded = self._encode(vis_tokens)  # [B, n_vis, D]
+        # --- Predictor ---
+        vis_pred = self.pred_proj(vis_encoded)
+        pred_dim = self.pred_proj.out_features
 
-        # --- Predictor: visible context + mask tokens → predict masked ---
-        # Project visible to predictor dim
-        vis_pred = self.pred_proj(vis_encoded)  # [B, n_vis, pred_dim]
-
-        # Add position embedding for visible tokens
         vis_pos = torch.gather(
             self.pred_pos_embed[:, :N, :].expand(B, -1, -1), 1,
-            ids_vis.unsqueeze(-1).expand(-1, -1, self.pred_proj.out_features)
+            ids_vis.unsqueeze(-1).expand(-1, -1, pred_dim),
         )
         vis_pred = vis_pred + vis_pos
 
-        # Create mask tokens with position embedding for masked positions
-        mask_tokens = self.mask_token.expand(B, n_mask, -1)  # [B, n_mask, pred_dim]
+        mask_tokens = self.mask_token.expand(B, n_mask, -1)
         mask_pos = torch.gather(
             self.pred_pos_embed[:, :N, :].expand(B, -1, -1), 1,
-            ids_mask.unsqueeze(-1).expand(-1, -1, self.pred_proj.out_features)
+            ids_mask.unsqueeze(-1).expand(-1, -1, pred_dim),
         )
         mask_tokens = mask_tokens + mask_pos
 
-        # Concatenate: [visible, masked] → predictor
-        pred_input = torch.cat([vis_pred, mask_tokens], dim=1)  # [B, N, pred_dim]
+        pred_input = torch.cat([vis_pred, mask_tokens], dim=1)
         for block in self.predictor:
             pred_input = block(pred_input)
         pred_output = self.pred_norm(pred_input)
+        masked_pred = self.pred_out(pred_output[:, n_vis:, :])
 
-        # Extract predictions for masked positions only (last n_mask tokens)
-        masked_pred = self.pred_out(pred_output[:, n_vis:, :])  # [B, n_mask, D]
-
-        # --- EMA target: encode ALL positions (full context) ---
+        # --- EMA target ---
         with torch.no_grad():
-            target_encoded = self._encode_target(eeg)  # [B, N, D]
+            target_encoded = self._encode_target(eeg)
 
-        # Extract targets at masked positions
         masked_target = torch.gather(
             target_encoded, 1,
-            ids_mask.unsqueeze(-1).expand(-1, -1, self.d_model)
-        )  # [B, n_mask, D]
+            ids_mask.unsqueeze(-1).expand(-1, -1, self.d_model),
+        )
 
         return {
             "predictions": masked_pred,
             "targets": masked_target.detach(),
             "n_vis": n_vis,
             "n_mask": n_mask,
-            # For compatibility with train.py
             "brain_states": vis_encoded,
             "subj_logits": None,
         }
 
     def compute_loss(self, outputs: dict, subject_ids: torch.Tensor = None) -> dict:
-        """L2 prediction + VICReg variance/covariance on encoder output.
+        """L2 prediction + VICReg on encoder output."""
+        pred = outputs["predictions"]
+        target = outputs["targets"]
+        encoded = outputs["brain_states"]
 
-        EEG's low information density causes JEPA to collapse into a
-        low-dimensional subspace (4/256 dims). VICReg forces all dimensions
-        to be active and decorrelated — the key difference from vision JEPA.
-        """
-        pred = outputs["predictions"]    # [B, n_mask, D]
-        target = outputs["targets"]      # [B, n_mask, D]
-        encoded = outputs["brain_states"]  # [B, n_vis, D] encoder output
-
-        # --- Prediction loss (L2 on masked positions) ---
+        # --- Prediction loss ---
         pred_loss = F.mse_loss(pred, target)
 
-        # --- VICReg on encoder output (prevent dimensional collapse) ---
+        # --- VICReg (prevent dimensional collapse) ---
         B, N_vis, D = encoded.shape
-        x = encoded.reshape(-1, D)  # [B*N_vis, D]
+        x = encoded.reshape(-1, D)
 
-        # Variance: per-dim std must be >= 1
         std = x.std(dim=0)
         var_loss = F.relu(1.0 - std).mean()
 
-        # Covariance: off-diagonal of cov matrix → 0 (decorrelate dims)
         x_centered = x - x.mean(dim=0, keepdim=True)
         cov = (x_centered.T @ x_centered) / max(x.shape[0] - 1, 1)
         cov_loss = cov.fill_diagonal_(0).pow(2).sum() / D
@@ -317,11 +410,9 @@ class EEGJEPA(nn.Module):
         self._update_ema()
 
     def set_training_progress(self, progress: float):
-        """Update EMA decay schedule."""
         if self.ema is not None:
             decay = 0.996 + (0.9999 - 0.996) * progress
             self.ema.set_decay(decay)
 
     def initialize_electrodes(self, electrode_names: list[str]):
-        """Compatibility stub — JEPA baseline doesn't use electrode mapping."""
         pass
