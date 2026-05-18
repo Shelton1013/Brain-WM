@@ -111,6 +111,8 @@ def train_epoch(model, raw_model, loader, optimizer, scheduler, device,
                 f"  Epoch {epoch} [{batch_idx}/{len(loader)}] "
                 f"loss={losses['total']:.6f} "
                 f"pred={losses['pred']:.6f} "
+                f"var={losses.get('var', 0):.4f} "
+                f"cov={losses.get('cov', 0):.4f} "
                 f"lr={lr:.2e} ema={ema_d:.4f}"
             )
 

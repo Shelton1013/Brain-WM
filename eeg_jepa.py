@@ -63,14 +63,17 @@ class EMA:
 # ============================================================
 
 class EEGJEPA(nn.Module):
-    """Simplest possible JEPA for EEG.
+    """JEPA for EEG with VICReg dimensional regularization.
 
     Tokenization: each 100ms window × all channels → one token.
     Masking: random 60% of timestep tokens.
     Encoder: standard ViT, only processes VISIBLE tokens.
     Predictor: lightweight ViT, predicts MASKED tokens from visible.
     Target: EMA encoder processes ALL tokens.
-    Loss: L2 between predicted and EMA target at masked positions.
+    Loss: L2 (masked positions) + VICReg (variance + covariance on encoder output).
+
+    VICReg is needed for EEG (but not vision/fMRI) because EEG's low
+    information density causes the encoder to collapse into a tiny subspace.
     """
 
     def __init__(
@@ -85,12 +88,16 @@ class EEGJEPA(nn.Module):
         predictor_heads: int = 4,
         mask_ratio: float = 0.60,
         ema_decay: float = 0.996,
+        var_weight: float = 5.0,       # VICReg variance weight
+        cov_weight: float = 1.0,       # VICReg covariance weight
         n_subjects: int = 109,         # for compatibility with dataloader
     ):
         super().__init__()
         self.state_samples = state_samples
         self.d_model = d_model
         self.mask_ratio = mask_ratio
+        self.var_weight = var_weight
+        self.cov_weight = cov_weight
 
         # --- Tokenizer: linear projection of raw EEG window ---
         token_dim = state_samples * n_channels  # 26 * 64 = 1664
@@ -270,15 +277,39 @@ class EEGJEPA(nn.Module):
         }
 
     def compute_loss(self, outputs: dict, subject_ids: torch.Tensor = None) -> dict:
-        """Simple L2 loss on masked positions. That's it."""
+        """L2 prediction + VICReg variance/covariance on encoder output.
+
+        EEG's low information density causes JEPA to collapse into a
+        low-dimensional subspace (4/256 dims). VICReg forces all dimensions
+        to be active and decorrelated — the key difference from vision JEPA.
+        """
         pred = outputs["predictions"]    # [B, n_mask, D]
         target = outputs["targets"]      # [B, n_mask, D]
+        encoded = outputs["brain_states"]  # [B, n_vis, D] encoder output
 
+        # --- Prediction loss (L2 on masked positions) ---
         pred_loss = F.mse_loss(pred, target)
 
+        # --- VICReg on encoder output (prevent dimensional collapse) ---
+        B, N_vis, D = encoded.shape
+        x = encoded.reshape(-1, D)  # [B*N_vis, D]
+
+        # Variance: per-dim std must be >= 1
+        std = x.std(dim=0)
+        var_loss = F.relu(1.0 - std).mean()
+
+        # Covariance: off-diagonal of cov matrix → 0 (decorrelate dims)
+        x_centered = x - x.mean(dim=0, keepdim=True)
+        cov = (x_centered.T @ x_centered) / max(x.shape[0] - 1, 1)
+        cov_loss = cov.fill_diagonal_(0).pow(2).sum() / D
+
+        total = pred_loss + self.var_weight * var_loss + self.cov_weight * cov_loss
+
         return {
-            "total": pred_loss,
+            "total": total,
             "pred": pred_loss,
+            "var": var_loss,
+            "cov": cov_loss,
             "adv": torch.tensor(0.0, device=pred.device),
         }
 
