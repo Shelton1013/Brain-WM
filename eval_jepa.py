@@ -208,6 +208,26 @@ def main():
     n_classes = len(np.unique(train_dataset.labels))
     print(f"Channels: {n_channels}, Classes: {n_classes} (motor imagery only)")
 
+    # If checkpoint uses fewer channels (e.g., 19ch from multi-dataset),
+    # remap eval data to match
+    remap_channels = False
+    if args.checkpoint:
+        ckpt_tmp = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+        for key, val in ckpt_tmp["model_state_dict"].items():
+            if "channel_embed" in key:
+                ckpt_n_ch = val.shape[0]
+                if ckpt_n_ch != n_channels:
+                    from dataset_multi import pick_common_channels
+                    ch_indices, ch_names = pick_common_channels(train_dataset.electrode_names)
+                    if len(ch_indices) == ckpt_n_ch:
+                        print(f"Remapping eval data: {n_channels}ch → {ckpt_n_ch}ch")
+                        train_dataset.trials = train_dataset.trials[:, :, ch_indices].copy()
+                        val_dataset.trials = val_dataset.trials[:, :, ch_indices].copy()
+                        n_channels = ckpt_n_ch
+                        remap_channels = True
+                break
+        del ckpt_tmp
+
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
                               shuffle=True, num_workers=4, drop_last=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
@@ -217,7 +237,6 @@ def main():
 
     # ---- Random init baseline ----
     print("\n--- Random Init Baseline ---")
-    # Build model with same arch but no pretraining
     random_model = EEGJEPA(n_channels=n_channels).to(device)
     random_acc, random_pc = run_probe(
         random_model, train_loader, val_loader, n_classes, device,
@@ -234,9 +253,19 @@ def main():
         ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
         ckpt_args = ckpt.get("args", {})
 
+        # Detect n_channels from checkpoint (multi-dataset uses 19ch)
+        ckpt_n_channels = n_channels
+        for key, val in ckpt["model_state_dict"].items():
+            if "channel_embed" in key:
+                ckpt_n_channels = val.shape[0]
+                break
+        if ckpt_n_channels != n_channels:
+            print(f"  Checkpoint has {ckpt_n_channels}ch, eval data has {n_channels}ch"
+                  f" → mapping eval data to {ckpt_n_channels}ch")
+
         def load_pretrained():
             m = EEGJEPA(
-                n_channels=n_channels,
+                n_channels=ckpt_n_channels,
                 d_model=ckpt_args.get("d_model", 256),
                 encoder_layers=ckpt_args.get("encoder_layers", 6),
             ).to(device)

@@ -172,6 +172,24 @@ def main():
     print(f"  {len(val_ds.trials)} MI trials (4 classes)")
 
     n_channels = len(val_ds.electrode_names)
+
+    # Remap channels if checkpoint uses fewer (e.g., 19ch multi-dataset)
+    ckpt_n_channels = n_channels
+    if args.checkpoint:
+        ckpt_tmp = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+        for key, val in ckpt_tmp["model_state_dict"].items():
+            if "channel_embed" in key:
+                ckpt_n_channels = val.shape[0]
+                break
+        del ckpt_tmp
+        if ckpt_n_channels != n_channels:
+            from dataset_multi import pick_common_channels
+            ch_indices, _ = pick_common_channels(val_ds.electrode_names)
+            if len(ch_indices) == ckpt_n_channels:
+                print(f"  Remapping {n_channels}ch → {ckpt_n_channels}ch")
+                val_ds.trials = val_ds.trials[:, :, ch_indices].copy()
+                n_channels = ckpt_n_channels
+
     loader = DataLoader(val_ds, batch_size=64, shuffle=False, num_workers=4)
 
     # 1. Random init
@@ -187,7 +205,7 @@ def main():
         ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
         ckpt_args = ckpt.get("args", {})
         pretrained = EEGJEPA(
-            n_channels=n_channels,
+            n_channels=ckpt_n_channels,
             d_model=ckpt_args.get("d_model", 256),
             encoder_layers=ckpt_args.get("encoder_layers", 6),
         ).to(device)
