@@ -13,7 +13,6 @@ pip install \
     contourpy==1.3.1 \
     coverage==7.6.10 \
     cryptography==44.0.1 \
-    deepspeed==0.4.0 \
     dill==0.3.9 \
     diskcache==5.6.3 \
     docopt==0.6.2 \
