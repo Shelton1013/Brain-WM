@@ -35,7 +35,7 @@ BRAIN_WM_DIR = os.environ.get("BRAIN_WM_DIR", "/import/home/pxieaf/Brain-WM")
 sys.path.insert(0, BRAIN_WM_DIR)
 
 # Add EEG-Bench to path
-EEGBENCH_DIR = os.environ.get("EEGBENCH_DIR", "/home/share/data_makchen/peng/EEG-Bench")
+EEGBENCH_DIR = os.environ.get("EEGBENCH_DIR", "/home/share/data_makchen/peng/datasets/EEG-Bench")
 sys.path.insert(0, EEGBENCH_DIR)
 
 from eeg_jepa import EEGJEPA
@@ -47,42 +47,76 @@ from eeg_jepa import EEGJEPA
 
 def load_tasks():
     """Import EEG-Bench tasks without importing models."""
-    from eeg_bench.tasks.bci.lr import LeftRightTask
-    from eeg_bench.tasks.bci.rf import RightFeetTask
-    from eeg_bench.tasks.bci.four_class import FourClassTask
+    tasks = {}
 
-    tasks = {
-        "lr": ("LH vs RH MI", LeftRightTask),
-        "rf": ("RH vs Feet MI", RightFeetTask),
-        "4class": ("4-Class MI", FourClassTask),
-    }
+    # BCI tasks
+    try:
+        from eeg_bench.tasks.bci.left_hand_right_hand_mi_task import LeftHandRightHandMITask
+        tasks["lr"] = ("LH vs RH MI", LeftHandRightHandMITask)
+    except Exception as e:
+        print(f"  Skip lr: {e}")
+    try:
+        from eeg_bench.tasks.bci.right_hand_feet_mi_task import RightHandFeetMITask
+        tasks["rf"] = ("RH vs Feet MI", RightHandFeetMITask)
+    except Exception as e:
+        print(f"  Skip rf: {e}")
+    try:
+        from eeg_bench.tasks.bci.left_hand_right_hand_feet_tongue_mi_task import LeftHandRightHandFeetTongueMITask
+        tasks["4class"] = ("4-Class MI", LeftHandRightHandFeetTongueMITask)
+    except Exception as e:
+        print(f"  Skip 4class: {e}")
+    try:
+        from eeg_bench.tasks.bci.five_fingers_mi_task import FiveFingersMITask
+        tasks["5finger"] = ("5-Finger MI", FiveFingersMITask)
+    except Exception as e:
+        print(f"  Skip 5finger: {e}")
 
-    # Try to import clinical tasks too
+    # Clinical tasks
     try:
-        from eeg_bench.tasks.clinical.abnormal import AbnormalTask
-        tasks["abnormal"] = ("Abnormal EEG", AbnormalTask)
-    except Exception:
-        pass
+        from eeg_bench.tasks.clinical.abnormal_clinical_task import AbnormalClinicalTask
+        tasks["abnormal"] = ("Abnormal EEG", AbnormalClinicalTask)
+    except Exception as e:
+        print(f"  Skip abnormal: {e}")
     try:
-        from eeg_bench.tasks.clinical.epilepsy import EpilepsyTask
-        tasks["epilepsy"] = ("Epilepsy", EpilepsyTask)
-    except Exception:
-        pass
+        from eeg_bench.tasks.clinical.epilepsy_clinical_task import EpilepsyClinicalTask
+        tasks["epilepsy"] = ("Epilepsy", EpilepsyClinicalTask)
+    except Exception as e:
+        print(f"  Skip epilepsy: {e}")
     try:
-        from eeg_bench.tasks.clinical.artifact import ArtifactTask
-        tasks["artifact"] = ("Artifact", ArtifactTask)
-    except Exception:
-        pass
+        from eeg_bench.tasks.clinical.seizure_clinical_task import SeizureClinicalTask
+        tasks["seizure"] = ("Seizure", SeizureClinicalTask)
+    except Exception as e:
+        print(f"  Skip seizure: {e}")
     try:
-        from eeg_bench.tasks.clinical.seizure import SeizureTask
-        tasks["seizure"] = ("Seizure", SeizureTask)
-    except Exception:
-        pass
+        from eeg_bench.tasks.clinical.binary_artifact_clinical_task import BinaryArtifactClinicalTask
+        tasks["artifact"] = ("Artifact (Binary)", BinaryArtifactClinicalTask)
+    except Exception as e:
+        print(f"  Skip artifact: {e}")
     try:
-        from eeg_bench.tasks.clinical.sleep import SleepTask
-        tasks["sleep"] = ("Sleep Stages", SleepTask)
-    except Exception:
-        pass
+        from eeg_bench.tasks.clinical.sleep_stages_clinical_task import SleepStagesClinicalTask
+        tasks["sleep"] = ("Sleep Stages", SleepStagesClinicalTask)
+    except Exception as e:
+        print(f"  Skip sleep: {e}")
+    try:
+        from eeg_bench.tasks.clinical.mtbi_clinical_task import MtbiClinicalTask
+        tasks["mtbi"] = ("mTBI", MtbiClinicalTask)
+    except Exception as e:
+        print(f"  Skip mtbi: {e}")
+    try:
+        from eeg_bench.tasks.clinical.parkinsons_clinical_task import ParkinsonsClinicalTask
+        tasks["parkinsons"] = ("Parkinson's", ParkinsonsClinicalTask)
+    except Exception as e:
+        print(f"  Skip parkinsons: {e}")
+    try:
+        from eeg_bench.tasks.clinical.schizophrenia_clinical_task import SchizophreniaClinicalTask
+        tasks["schizophrenia"] = ("Schizophrenia", SchizophreniaClinicalTask)
+    except Exception as e:
+        print(f"  Skip schizophrenia: {e}")
+    try:
+        from eeg_bench.tasks.clinical.ocd_clinical_task import OcdClinicalTask
+        tasks["ocd"] = ("OCD", OcdClinicalTask)
+    except Exception as e:
+        print(f"  Skip ocd: {e}")
 
     return tasks
 
