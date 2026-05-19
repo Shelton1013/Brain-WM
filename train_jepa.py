@@ -107,7 +107,7 @@ def train_epoch(model, raw_model, loader, optimizer, scheduler, device,
 
         if batch_idx % 50 == 0:
             lr = optimizer.param_groups[0]["lr"]
-            ema_d = raw_model.ema.decay if raw_model.ema else 0
+            ema_d = raw_model.ema.decay if hasattr(raw_model, 'ema') and raw_model.ema else 0
             pprint(
                 f"  Epoch {epoch} [{batch_idx}/{len(loader)}] "
                 f"loss={losses['total']:.6f} "
