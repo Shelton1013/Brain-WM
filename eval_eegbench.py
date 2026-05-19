@@ -216,8 +216,7 @@ def evaluate_task(task_name, task_label, task_class, model, n_channels, device,
 
     # Get train/test split
     try:
-        # EEG-Bench uses Split enum
-        from eeg_bench.utils.enums import Split
+        from eeg_bench.enums.split import Split
         X_train, y_train, meta_train = task.get_data(Split.TRAIN)
         X_test, y_test, meta_test = task.get_data(Split.TEST)
     except Exception as e:
