@@ -75,8 +75,8 @@ CHANNEL_ALIASES = {
 
 def normalize_channel_name(name: str) -> str:
     """Map various channel naming conventions to standard 10-20."""
-    # Strip common suffixes
-    clean = name.strip()
+    # Strip common suffixes and trailing dots (PhysioNet uses "C3..", "Fp1." etc.)
+    clean = name.strip().rstrip(".")
     for suffix in ["-REF", "-LE", "-AR", "-AVG"]:
         if clean.upper().endswith(suffix):
             clean = clean[:-len(suffix)].strip()
