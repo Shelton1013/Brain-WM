@@ -162,7 +162,11 @@ def main():
     parser.add_argument("--moabb_datasets", type=str, nargs="*",
                         default=["Cho2017", "Lee2019_MI", "BNCI2014001",
                                  "Shin2017A", "Weibo2014"],
-                        help="MOABB datasets to include")
+                        help="MOABB datasets to include. Use 'all' to auto-discover.")
+    parser.add_argument("--moabb_min_channels", type=int, default=19,
+                        help="Minimum channels for MOABB auto-discovery")
+    parser.add_argument("--moabb_min_subjects", type=int, default=10,
+                        help="Minimum subjects for MOABB auto-discovery")
     parser.add_argument("--edf_dir", type=str, default=None,
                         help="Path to directory of .edf files (e.g., TUH corpus)")
     parser.add_argument("--edf_max_files", type=int, default=None)
@@ -185,7 +189,34 @@ def main():
     pprint("Loading dataset...")
     if args.multi_dataset:
         sources = [{"type": "physionet", "n_subjects": args.n_subjects}]
-        for name in (args.moabb_datasets or []):
+
+        moabb_names = args.moabb_datasets or []
+        if moabb_names == ["all"]:
+            # Auto-discover all MOABB datasets with enough channels/subjects
+            pprint(f"Auto-discovering MOABB datasets (≥{args.moabb_min_channels}ch, "
+                   f"≥{args.moabb_min_subjects} subjects)...")
+            try:
+                import moabb.datasets as md
+                for attr_name in sorted(dir(md)):
+                    cls = getattr(md, attr_name)
+                    if not (isinstance(cls, type) and hasattr(cls, "subject_list")):
+                        continue
+                    try:
+                        ds_instance = cls()
+                        n_subj = len(ds_instance.subject_list)
+                        n_ch = getattr(ds_instance, "n_channels", 0) or 0
+                        if n_subj >= args.moabb_min_subjects:
+                            moabb_names.append(attr_name)
+                            pprint(f"  Found: {attr_name} ({n_subj} subjects)")
+                    except Exception:
+                        pass
+                # Remove PhysionetMI (we load it separately with full 64ch→19ch mapping)
+                moabb_names = [n for n in moabb_names if n != "PhysionetMI"]
+            except ImportError:
+                pprint("  moabb not installed, skipping auto-discovery")
+                moabb_names = []
+
+        for name in moabb_names:
             sources.append({"type": "moabb", "name": name})
         if args.edf_dir:
             sources.append({"type": "edf_dir", "path": args.edf_dir,
