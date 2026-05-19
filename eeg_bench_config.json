@@ -1,0 +1,22 @@
+{
+    "data": "/home/share/data_makchen/peng/datasets/eeg_bench/data/",
+    "cache": "/home/share/data_makchen/peng/datasets/eeg_bench/cache/",
+    "log": "/home/share/data_makchen/peng/datasets/eeg_bench/logs/",
+    "tmp": "/home/share/data_makchen/peng/datasets/eeg_bench/tmp/",
+    "chkpt": "/home/share/data_makchen/peng/models/eeg_bench/checkpoints/",
+    "results": "/home/share/data_makchen/peng/models/eeg_bench/results/",
+    "cavanagh2018a": null,
+    "cavanagh2018b": null,
+    "albrecht2019": null,
+    "singh2018": null,
+    "brown2020": null,
+    "gruendler2009": null,
+    "cavanagh2019": null,
+    "singh2020": null,
+    "singh2021": null,
+    "tuab": null,
+    "tuep": null,
+    "tuar": null,
+    "chb_mit": null,
+    "sleep_telemetry": null
+}
