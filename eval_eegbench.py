@@ -51,18 +51,18 @@ def load_tasks():
 
     # BCI tasks
     try:
-        from eeg_bench.tasks.bci.left_hand_right_hand_mi_task import LeftHandRightHandMITask
-        tasks["lr"] = ("LH vs RH MI", LeftHandRightHandMITask)
+        from eeg_bench.tasks.bci.left_hand_right_hand_mi_task import LeftHandvRightHandMITask
+        tasks["lr"] = ("LH vs RH MI", LeftHandvRightHandMITask)
     except Exception as e:
         print(f"  Skip lr: {e}")
     try:
-        from eeg_bench.tasks.bci.right_hand_feet_mi_task import RightHandFeetMITask
-        tasks["rf"] = ("RH vs Feet MI", RightHandFeetMITask)
+        from eeg_bench.tasks.bci.right_hand_feet_mi_task import RightHandvFeetMITask
+        tasks["rf"] = ("RH vs Feet MI", RightHandvFeetMITask)
     except Exception as e:
         print(f"  Skip rf: {e}")
     try:
-        from eeg_bench.tasks.bci.left_hand_right_hand_feet_tongue_mi_task import LeftHandRightHandFeetTongueMITask
-        tasks["4class"] = ("4-Class MI", LeftHandRightHandFeetTongueMITask)
+        from eeg_bench.tasks.bci.left_hand_right_hand_feet_tongue_mi_task import LeftHandvRightHandvFeetvTongueMITask
+        tasks["4class"] = ("4-Class MI", LeftHandvRightHandvFeetvTongueMITask)
     except Exception as e:
         print(f"  Skip 4class: {e}")
     try:
@@ -88,8 +88,8 @@ def load_tasks():
     except Exception as e:
         print(f"  Skip seizure: {e}")
     try:
-        from eeg_bench.tasks.clinical.binary_artifact_clinical_task import BinaryArtifactClinicalTask
-        tasks["artifact"] = ("Artifact (Binary)", BinaryArtifactClinicalTask)
+        from eeg_bench.tasks.clinical.binary_artifact_clinical_task import ArtifactBinaryClinicalTask
+        tasks["artifact"] = ("Artifact (Binary)", ArtifactBinaryClinicalTask)
     except Exception as e:
         print(f"  Skip artifact: {e}")
     try:
@@ -98,8 +98,8 @@ def load_tasks():
     except Exception as e:
         print(f"  Skip sleep: {e}")
     try:
-        from eeg_bench.tasks.clinical.mtbi_clinical_task import MtbiClinicalTask
-        tasks["mtbi"] = ("mTBI", MtbiClinicalTask)
+        from eeg_bench.tasks.clinical.mtbi_clinical_task import MTBIClinicalTask
+        tasks["mtbi"] = ("mTBI", MTBIClinicalTask)
     except Exception as e:
         print(f"  Skip mtbi: {e}")
     try:
@@ -113,8 +113,8 @@ def load_tasks():
     except Exception as e:
         print(f"  Skip schizophrenia: {e}")
     try:
-        from eeg_bench.tasks.clinical.ocd_clinical_task import OcdClinicalTask
-        tasks["ocd"] = ("OCD", OcdClinicalTask)
+        from eeg_bench.tasks.clinical.ocd_clinical_task import OCDClinicalTask
+        tasks["ocd"] = ("OCD", OCDClinicalTask)
     except Exception as e:
         print(f"  Skip ocd: {e}")
 
