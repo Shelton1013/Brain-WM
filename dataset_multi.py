@@ -220,6 +220,106 @@ class MOABBDataset(Dataset):
         return torch.from_numpy(self.trials[idx]), self.subject_ids[idx]
 
 
+class HBNDataset(Dataset):
+    """Load HBN EEG data from downloaded .set (EEGLAB) files.
+
+    HBN uses 128-channel EGI system at 500Hz. We map to common 19ch subset.
+    Each .set file is one recording session (resting state, movie watching, etc.).
+    """
+
+    def __init__(
+        self,
+        data_dir: str,
+        sample_rate: int = 256,
+        trial_duration_s: int = 4,
+        use_ea: bool = True,
+        max_subjects: int = None,
+        min_channels: int = 19,
+    ):
+        if not MNE_AVAILABLE:
+            raise ImportError("mne required: pip install mne")
+
+        self.trial_samples = sample_rate * trial_duration_s
+        self.trials = []
+        self.subject_ids = []
+        self.electrode_names = None
+
+        # Find all .set files, grouped by subject
+        from collections import defaultdict
+        subject_files = defaultdict(list)
+        for f in sorted(Path(data_dir).rglob("*.set")):
+            # Extract subject ID from path (e.g., sub-NDARAB514MAJ)
+            parts = f.parts
+            sub_id = None
+            for part in parts:
+                if part.startswith("sub-"):
+                    sub_id = part
+                    break
+            if sub_id:
+                subject_files[sub_id].append(f)
+
+        subjects = sorted(subject_files.keys())
+        if max_subjects:
+            subjects = subjects[:max_subjects]
+
+        print(f"  Loading HBN: {data_dir} ({len(subjects)} subjects)...")
+
+        for subj_idx, sub_id in enumerate(subjects):
+            try:
+                subj_recordings = []
+                for set_file in subject_files[sub_id]:
+                    try:
+                        raw = mne.io.read_raw_eeglab(str(set_file), preload=True, verbose=False)
+                        if raw.info["sfreq"] != sample_rate:
+                            raw.resample(sample_rate, verbose=False)
+                        raw.filter(0.1, 75.0, verbose=False)
+
+                        ch_indices, ch_names = pick_common_channels(raw.ch_names)
+                        if len(ch_indices) < min_channels:
+                            continue
+                        if self.electrode_names is None:
+                            self.electrode_names = ch_names
+
+                        eeg = raw.get_data()[ch_indices].T.astype(np.float32)
+                        subj_recordings.append(eeg)
+                    except Exception:
+                        continue
+
+                if not subj_recordings:
+                    continue
+
+                subj_data = np.concatenate(subj_recordings, axis=0)
+                if use_ea:
+                    subj_data = euclidean_alignment(subj_data)
+
+                n_trials = len(subj_data) // self.trial_samples
+                for t in range(n_trials):
+                    start = t * self.trial_samples
+                    trial = subj_data[start:start + self.trial_samples]
+                    mean = trial.mean(axis=0, keepdims=True)
+                    std = trial.std(axis=0, keepdims=True) + 1e-8
+                    self.trials.append(((trial - mean) / std))
+                    self.subject_ids.append(subj_idx)
+
+            except Exception as e:
+                if subj_idx < 3:
+                    print(f"    Skipping {sub_id}: {e}")
+
+            if (subj_idx + 1) % 50 == 0:
+                print(f"    ... {subj_idx+1}/{len(subjects)} subjects, "
+                      f"{len(self.trials)} trials")
+
+        self.n_subjects = len(set(self.subject_ids))
+        print(f"    → {len(self.trials)} trials, {self.n_subjects} subjects, "
+              f"{len(self.electrode_names or [])} channels")
+
+    def __len__(self):
+        return len(self.trials)
+
+    def __getitem__(self, idx):
+        return torch.from_numpy(self.trials[idx]), self.subject_ids[idx]
+
+
 class EDFDirectoryDataset(Dataset):
     """Load EEG from a directory of .edf files (e.g., TUH EEG Corpus).
 
@@ -366,6 +466,18 @@ class MultiDatasetEEG(Dataset):
                     sample_rate=sample_rate,
                     trial_duration_s=trial_duration_s,
                     data_dir=src.get("data_dir", download_dir),
+                )
+                for i in range(len(ds.subject_ids)):
+                    ds.subject_ids[i] += total_subjects
+                total_subjects += ds.n_subjects
+                datasets.append(ds)
+
+            elif src_type == "hbn":
+                ds = HBNDataset(
+                    data_dir=src["path"],
+                    sample_rate=sample_rate,
+                    trial_duration_s=trial_duration_s,
+                    max_subjects=src.get("max_subjects", None),
                 )
                 for i in range(len(ds.subject_ids)):
                     ds.subject_ids[i] += total_subjects

@@ -167,6 +167,9 @@ def main():
                         help="Minimum channels for MOABB auto-discovery")
     parser.add_argument("--moabb_min_subjects", type=int, default=10,
                         help="Minimum subjects for MOABB auto-discovery")
+    parser.add_argument("--hbn_dir", type=str, default=None,
+                        help="Path to HBN EEG data (.set files)")
+    parser.add_argument("--hbn_max_subjects", type=int, default=None)
     parser.add_argument("--edf_dir", type=str, default=None,
                         help="Path to directory of .edf files (e.g., TUH corpus)")
     parser.add_argument("--edf_max_files", type=int, default=None)
@@ -218,6 +221,9 @@ def main():
 
         for name in moabb_names:
             sources.append({"type": "moabb", "name": name})
+        if args.hbn_dir:
+            sources.append({"type": "hbn", "path": args.hbn_dir,
+                            "max_subjects": args.hbn_max_subjects})
         if args.edf_dir:
             sources.append({"type": "edf_dir", "path": args.edf_dir,
                             "max_files": args.edf_max_files})
