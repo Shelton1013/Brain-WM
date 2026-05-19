@@ -181,148 +181,190 @@ def main():
     print(f"Val subjects: {n_train_subj+1}-{args.n_subjects} ({len(val_subjects)})")
 
     print("Loading train set...")
-    train_dataset = PhysioNetMI_Labeled(
+    train_dataset_full = PhysioNetMI_Labeled(
         train_subjects, data_dir=args.data_dir, use_ea=True,
     )
     print("Loading val set...")
-    val_dataset = PhysioNetMI_Labeled(
+    val_dataset_full = PhysioNetMI_Labeled(
         val_subjects, data_dir=args.data_dir, use_ea=True,
     )
-    n_channels = len(train_dataset.electrode_names)
+    n_channels = len(train_dataset_full.electrode_names)
+    electrode_names = train_dataset_full.electrode_names
 
-    # Remove rest class (label=0) — it dominates and makes accuracy misleading
-    # Only evaluate on motor imagery: left(1), right(2), both_fists(3), both_feet(4)
-    def filter_rest(dataset):
-        mask = dataset.labels != 0
-        dataset.trials = dataset.trials[mask]
-        dataset.labels = dataset.labels[mask]
-        # Remap: 1->0, 2->1, 3->2, 4->3
-        dataset.labels = dataset.labels - 1
-        unique, counts = np.unique(dataset.labels, return_counts=True)
-        print(f"  After removing rest: {len(dataset.trials)} trials, "
-              f"classes: {dict(zip(unique, counts))}")
-
-    filter_rest(train_dataset)
-    filter_rest(val_dataset)
-
-    n_classes = len(np.unique(train_dataset.labels))
-    print(f"Channels: {n_channels}, Classes: {n_classes} (motor imagery only)")
-
-    # If checkpoint uses fewer channels (e.g., 19ch from multi-dataset),
-    # remap eval data to match
-    remap_channels = False
+    # Detect checkpoint n_channels for channel remapping
+    ckpt_n_channels = n_channels
     if args.checkpoint:
         ckpt_tmp = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
         for key, val in ckpt_tmp["model_state_dict"].items():
             if "channel_embed" in key:
-                ckpt_n_ch = val.shape[0]
-                if ckpt_n_ch != n_channels:
-                    from dataset_multi import pick_common_channels
-                    ch_indices, ch_names = pick_common_channels(train_dataset.electrode_names)
-                    if len(ch_indices) == ckpt_n_ch:
-                        print(f"Remapping eval data: {n_channels}ch → {ckpt_n_ch}ch")
-                        train_dataset.trials = train_dataset.trials[:, :, ch_indices].copy()
-                        val_dataset.trials = val_dataset.trials[:, :, ch_indices].copy()
-                        n_channels = ckpt_n_ch
-                        remap_channels = True
+                ckpt_n_channels = val.shape[0]
                 break
         del ckpt_tmp
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
-                              shuffle=True, num_workers=4, drop_last=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
-                            shuffle=False, num_workers=4)
+    ch_indices = None
+    if ckpt_n_channels != n_channels:
+        from dataset_multi import pick_common_channels
+        ch_indices, _ = pick_common_channels(electrode_names)
+        if len(ch_indices) == ckpt_n_channels:
+            print(f"Remapping eval data: {n_channels}ch → {ckpt_n_channels}ch")
+            n_channels = ckpt_n_channels
 
-    results = {}
+    # ---- Define MI sub-tasks (matching Laya Table 1) ----
+    # Original labels: 0=rest, 1=left_fist, 2=right_fist, 3=both_fists, 4=both_feet
+    MI_TASKS = {
+        "LH_vs_RH":    {"keep": [1, 2], "remap": {1: 0, 2: 1}, "chance": 0.5},
+        "RH_vs_Feet":  {"keep": [2, 4], "remap": {2: 0, 4: 1}, "chance": 0.5},
+        "4_Class_MI":  {"keep": [1, 2, 3, 4], "remap": {1: 0, 2: 1, 3: 2, 4: 3}, "chance": 0.25},
+    }
 
-    # ---- Random init baseline ----
-    print("\n--- Random Init Baseline ---")
-    random_model = EEGJEPA(n_channels=n_channels).to(device)
-    random_acc, random_pc = run_probe(
-        random_model, train_loader, val_loader, n_classes, device,
-        n_epochs=args.probe_epochs, lr=args.probe_lr, label="Random",
-    )
-    results["random_init"] = {"accuracy": random_acc, "per_class": random_pc}
-    print(f"  Random Init Best Acc: {random_acc:.4f} (chance={1/n_classes:.4f})")
-    del random_model
-    torch.cuda.empty_cache()
+    def make_task_datasets(train_full, val_full, keep_labels, remap):
+        """Filter and remap labels for a specific MI sub-task."""
+        import copy
+        def filter_ds(ds):
+            mask = np.isin(ds.labels, keep_labels)
+            trials = ds.trials[mask].copy()
+            labels = ds.labels[mask].copy()
+            # Remap
+            new_labels = np.zeros_like(labels)
+            for old, new in remap.items():
+                new_labels[labels == old] = new
+            # Channel remap if needed
+            if ch_indices is not None:
+                trials = trials[:, :, ch_indices].copy()
+            return trials, new_labels
+        tr_trials, tr_labels = filter_ds(train_full)
+        va_trials, va_labels = filter_ds(val_full)
+        return tr_trials, tr_labels, va_trials, va_labels
 
-    # ---- Pretrained (frozen probe) ----
+    # ---- Load checkpoint once ----
+    ckpt = None
+    ckpt_args = {}
     if args.checkpoint:
-        print("\n--- Pretrained EEG-JEPA (frozen probe) ---")
         ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
         ckpt_args = ckpt.get("args", {})
+        print(f"Loaded checkpoint: epoch {ckpt.get('epoch', '?')}, "
+              f"val_loss={ckpt.get('val_loss', '?'):.6f}")
 
-        # Detect n_channels from checkpoint (multi-dataset uses 19ch)
-        ckpt_n_channels = n_channels
-        for key, val in ckpt["model_state_dict"].items():
-            if "channel_embed" in key:
-                ckpt_n_channels = val.shape[0]
-                break
-        if ckpt_n_channels != n_channels:
-            print(f"  Checkpoint has {ckpt_n_channels}ch, eval data has {n_channels}ch"
-                  f" → mapping eval data to {ckpt_n_channels}ch")
+    def load_pretrained():
+        m = EEGJEPA(
+            n_channels=ckpt_n_channels,
+            d_model=ckpt_args.get("d_model", 256),
+            encoder_layers=ckpt_args.get("encoder_layers", 6),
+        ).to(device)
+        m.load_state_dict(ckpt["model_state_dict"])
+        return m
 
-        def load_pretrained():
-            m = EEGJEPA(
-                n_channels=ckpt_n_channels,
-                d_model=ckpt_args.get("d_model", 256),
-                encoder_layers=ckpt_args.get("encoder_layers", 6),
-            ).to(device)
-            m.load_state_dict(ckpt["model_state_dict"])
-            return m
+    # ---- Run all MI sub-tasks ----
+    all_results = {}
 
-        pretrained = load_pretrained()
-        print(f"  Loaded checkpoint: epoch {ckpt.get('epoch', '?')}, "
-              f"val_loss={ckpt.get('val_loss', '?')}")
+    for task_name, task_cfg in MI_TASKS.items():
+        print(f"\n{'='*60}")
+        print(f"  Task: {task_name} (chance={task_cfg['chance']})")
+        print(f"{'='*60}")
 
-        pre_acc, pre_pc = run_probe(
-            pretrained, train_loader, val_loader, n_classes, device,
-            n_epochs=args.probe_epochs, lr=args.probe_lr, label="Frozen",
+        tr_trials, tr_labels, va_trials, va_labels = make_task_datasets(
+            train_dataset_full, val_dataset_full,
+            task_cfg["keep"], task_cfg["remap"],
         )
-        results["pretrained_frozen"] = {"accuracy": pre_acc, "per_class": pre_pc}
-        del pretrained
-        torch.cuda.empty_cache()
+        n_classes = len(task_cfg["remap"])
+        unique, counts = np.unique(tr_labels, return_counts=True)
+        print(f"  Train: {len(tr_labels)} trials, classes: {dict(zip(unique, counts))}")
+        unique, counts = np.unique(va_labels, return_counts=True)
+        print(f"  Val:   {len(va_labels)} trials, classes: {dict(zip(unique, counts))}")
 
-        # ---- Fine-tune from pretrained ----
-        print("\n--- Pretrained EEG-JEPA (fine-tune) ---")
-        pretrained_ft = load_pretrained()
-        ft_acc, ft_pc = run_finetune(
-            pretrained_ft, train_loader, val_loader, n_classes, device,
-            n_epochs=args.probe_epochs, lr=1e-4, label="Finetune-pre",
-        )
-        results["pretrained_finetune"] = {"accuracy": ft_acc, "per_class": ft_pc}
-        del pretrained_ft
-        torch.cuda.empty_cache()
+        # Wrap as simple dataset
+        class SimpleDS:
+            def __init__(self, trials, labels):
+                self.trials = trials
+                self.labels = labels
+            def __len__(self):
+                return len(self.labels)
+            def __getitem__(self, idx):
+                return torch.from_numpy(self.trials[idx]), self.labels[idx]
 
-        # ---- Fine-tune from random init ----
-        print("\n--- Random Init (fine-tune) ---")
-        random_ft = EEGJEPA(n_channels=n_channels).to(device)
-        rft_acc, rft_pc = run_finetune(
-            random_ft, train_loader, val_loader, n_classes, device,
-            n_epochs=args.probe_epochs, lr=1e-4, label="Finetune-rand",
-        )
-        results["random_finetune"] = {"accuracy": rft_acc, "per_class": rft_pc}
-        del random_ft
-        torch.cuda.empty_cache()
+        train_loader = DataLoader(SimpleDS(tr_trials, tr_labels),
+                                  batch_size=args.batch_size, shuffle=True,
+                                  num_workers=4, drop_last=True)
+        val_loader = DataLoader(SimpleDS(va_trials, va_labels),
+                                batch_size=args.batch_size, shuffle=False,
+                                num_workers=4)
 
-        # ---- Summary ----
-        print(f"\n{'='*50}")
-        print(f"  RESULTS SUMMARY")
-        print(f"{'='*50}")
-        print(f"  Chance level:           {1/n_classes:.4f}")
-        print(f"  Random frozen probe:    {random_acc:.4f}")
-        print(f"  Pretrained frozen probe:{pre_acc:.4f} ({pre_acc-random_acc:+.4f})")
-        print(f"  Random fine-tune:       {rft_acc:.4f}")
-        print(f"  Pretrained fine-tune:   {ft_acc:.4f} ({ft_acc-rft_acc:+.4f})")
-        print(f"{'='*50}")
-        print(f"  Pretraining value (frozen):   {pre_acc-random_acc:+.4f}")
-        print(f"  Pretraining value (finetune): {ft_acc-rft_acc:+.4f}")
-        results["improvement_frozen"] = pre_acc - random_acc
-        results["improvement_finetune"] = ft_acc - rft_acc
-    else:
-        print(f"\nNo checkpoint. Random acc: {random_acc:.4f} (chance={1/n_classes:.4f})")
-        print("Run with --checkpoint to compare pretrained vs random.")
+        task_results = {}
+
+        # Random frozen probe
+        print(f"\n  --- Random frozen probe ---")
+        random_model = EEGJEPA(n_channels=n_channels).to(device)
+        r_acc, _ = run_probe(random_model, train_loader, val_loader, n_classes,
+                             device, n_epochs=args.probe_epochs, lr=args.probe_lr,
+                             label=f"{task_name}/Random")
+        task_results["random_frozen"] = r_acc
+        del random_model; torch.cuda.empty_cache()
+
+        if ckpt is not None:
+            # Pretrained frozen probe
+            print(f"\n  --- Pretrained frozen probe ---")
+            pre_model = load_pretrained()
+            p_acc, _ = run_probe(pre_model, train_loader, val_loader, n_classes,
+                                 device, n_epochs=args.probe_epochs, lr=args.probe_lr,
+                                 label=f"{task_name}/Frozen")
+            task_results["pretrained_frozen"] = p_acc
+            del pre_model; torch.cuda.empty_cache()
+
+            # Pretrained fine-tune
+            print(f"\n  --- Pretrained fine-tune ---")
+            pre_ft = load_pretrained()
+            pft_acc, _ = run_finetune(pre_ft, train_loader, val_loader, n_classes,
+                                      device, n_epochs=args.probe_epochs, lr=1e-4,
+                                      label=f"{task_name}/FT-pre")
+            task_results["pretrained_finetune"] = pft_acc
+            del pre_ft; torch.cuda.empty_cache()
+
+            # Random fine-tune
+            print(f"\n  --- Random fine-tune ---")
+            rand_ft = EEGJEPA(n_channels=n_channels).to(device)
+            rft_acc, _ = run_finetune(rand_ft, train_loader, val_loader, n_classes,
+                                      device, n_epochs=args.probe_epochs, lr=1e-4,
+                                      label=f"{task_name}/FT-rand")
+            task_results["random_finetune"] = rft_acc
+            del rand_ft; torch.cuda.empty_cache()
+
+        all_results[task_name] = task_results
+
+    # ---- Final Summary Table ----
+    print(f"\n{'='*70}")
+    print(f"  FULL RESULTS (balanced accuracy)")
+    print(f"{'='*70}")
+    print(f"  {'Task':<16} {'Chance':>7} {'Rand-F':>7} {'Pre-F':>7} {'Rand-FT':>8} {'Pre-FT':>8}")
+    print(f"  {'-'*16} {'-'*7} {'-'*7} {'-'*7} {'-'*8} {'-'*8}")
+
+    for task_name, task_cfg in MI_TASKS.items():
+        r = all_results[task_name]
+        chance = task_cfg["chance"]
+        rf = r.get("random_frozen", 0)
+        pf = r.get("pretrained_frozen", 0)
+        rft = r.get("random_finetune", 0)
+        pft = r.get("pretrained_finetune", 0)
+        print(f"  {task_name:<16} {chance:>7.3f} {rf:>7.3f} {pf:>7.3f} {rft:>8.3f} {pft:>8.3f}")
+
+    # Mean across tasks
+    if ckpt is not None:
+        tasks = list(all_results.keys())
+        mean_rf = np.mean([all_results[t]["random_frozen"] for t in tasks])
+        mean_pf = np.mean([all_results[t].get("pretrained_frozen", 0) for t in tasks])
+        mean_rft = np.mean([all_results[t].get("random_finetune", 0) for t in tasks])
+        mean_pft = np.mean([all_results[t].get("pretrained_finetune", 0) for t in tasks])
+        print(f"  {'-'*16} {'-'*7} {'-'*7} {'-'*7} {'-'*8} {'-'*8}")
+        print(f"  {'Mean':<16} {'':>7} {mean_rf:>7.3f} {mean_pf:>7.3f} {mean_rft:>8.3f} {mean_pft:>8.3f}")
+        print(f"\n  Pretraining value (frozen):   {mean_pf-mean_rf:+.4f}")
+        print(f"  Pretraining value (finetune): {mean_pft-mean_rft:+.4f}")
+    print(f"{'='*70}")
+
+    # Save
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with open(output_dir / "mi_probe_results.json", "w") as f:
+        json.dump(all_results, f, indent=2)
+    print(f"\nSaved → {output_dir / 'mi_probe_results.json'}")
 
     # Save
     output_dir = Path(args.output_dir)
