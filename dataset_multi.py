@@ -352,7 +352,7 @@ class MultiDatasetEEG(Dataset):
                     ch_indices, ch_names = pick_common_channels(ds.electrode_names)
                     if ch_indices:
                         print(f"  Mapping PhysioNet {len(ds.electrode_names)}ch → {len(ch_indices)}ch")
-                        ds.trials = [t[:, ch_indices] for t in ds.trials]
+                        ds.trials = [t[:, ch_indices].copy() for t in ds.trials]
                         ds.electrode_names = ch_names
                 # Remap subject IDs to global
                 for i in range(len(ds.subject_ids)):
