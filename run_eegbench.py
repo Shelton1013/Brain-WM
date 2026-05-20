@@ -49,6 +49,35 @@ from eeg_jepa import EEGJEPA
 
 
 # ============================================================
+# Baseline model loaders (LaBraM etc. via EEG-Bench)
+# ============================================================
+
+def load_labram_model():
+    """Try to import LaBraM from EEG-Bench. Returns class or None."""
+    try:
+        from eeg_bench.models.bci.labram_model import LaBraMModel
+        return LaBraMModel
+    except Exception as e:
+        print(f"  LaBraM not available: {e}")
+        return None
+
+def load_csp_models():
+    """Try to import CSP+LDA/SVM from EEG-Bench."""
+    models = {}
+    try:
+        from eeg_bench.models.bci.csp_lda_model import CSPLDAModel
+        models["csp_lda"] = CSPLDAModel
+    except Exception:
+        pass
+    try:
+        from eeg_bench.models.bci.csp_svm_model import CSPSVMModel
+        models["csp_svm"] = CSPSVMModel
+    except Exception:
+        pass
+    return models
+
+
+# ============================================================
 # Task registry
 # ============================================================
 
@@ -307,25 +336,55 @@ def evaluate(task_key, task_label, task_class, model, n_channels, device,
     results["random_frozen"] = {"mean": np.mean(accs_r), "std": np.std(accs_r)}
     print(f"    Random frozen: {np.mean(accs_r):.3f} +/- {np.std(accs_r):.3f}")
 
-    # --- CSP+LDA/SVM baselines (optional) ---
+    # --- Baselines (LaBraM, CSP+LDA/SVM) ---
     if run_baselines:
-        try:
-            from eeg_bench.models.bci.csp_lda import CSPLDA
-            print(f"  Running CSP+LDA baseline...")
-            csp_lda = CSPLDA()
-            csp_lda.fit(X_train, y_train, meta_train)
-            preds = csp_lda.predict(X_test, meta_test)
-            y_te_orig = np.concatenate(y_test) if isinstance(y_test, list) else y_test
-            if y_te_orig.dtype.kind in ('U', 'S', 'O'):
-                y_te_orig = LabelEncoder().fit_transform(y_te_orig)
-                preds_encoded = LabelEncoder().fit_transform(preds)
-            else:
-                preds_encoded = preds
-            acc_lda = balanced_accuracy_score(y_te_orig, preds_encoded)
-            results["csp_lda"] = {"mean": acc_lda}
-            print(f"    CSP+LDA: {acc_lda:.3f}")
-        except Exception as e:
-            print(f"    CSP+LDA failed: {e}")
+        # LaBraM (fine-tune, EEG-Bench native implementation)
+        LaBraMModel = load_labram_model()
+        if LaBraMModel is not None:
+            try:
+                print(f"  Running LaBraM (fine-tune)...")
+                labram = LaBraMModel()
+                labram.fit(X_train, y_train, meta_train)
+                preds = labram.predict(X_test, meta_test)
+                y_te_orig = np.concatenate(y_test) if isinstance(y_test, list) else y_test
+                if y_te_orig.dtype.kind in ('U', 'S', 'O'):
+                    le_labram = LabelEncoder()
+                    le_labram.fit(np.concatenate([y_te_orig, preds]))
+                    y_te_enc = le_labram.transform(y_te_orig)
+                    preds_enc = le_labram.transform(preds)
+                else:
+                    y_te_enc = y_te_orig
+                    preds_enc = preds
+                acc_labram = balanced_accuracy_score(y_te_enc, preds_enc)
+                results["labram"] = {"mean": acc_labram}
+                print(f"    LaBraM: {acc_labram:.3f}")
+                del labram
+                torch.cuda.empty_cache()
+            except Exception as e:
+                print(f"    LaBraM failed: {e}")
+
+        # CSP+LDA
+        csp_models = load_csp_models()
+        for name, CspModel in csp_models.items():
+            try:
+                print(f"  Running {name}...")
+                csp = CspModel()
+                csp.fit(X_train, y_train, meta_train)
+                preds = csp.predict(X_test, meta_test)
+                y_te_orig = np.concatenate(y_test) if isinstance(y_test, list) else y_test
+                if y_te_orig.dtype.kind in ('U', 'S', 'O'):
+                    le_csp = LabelEncoder()
+                    le_csp.fit(np.concatenate([y_te_orig, preds]))
+                    y_te_enc = le_csp.transform(y_te_orig)
+                    preds_enc = le_csp.transform(preds)
+                else:
+                    y_te_enc = y_te_orig
+                    preds_enc = preds
+                acc = balanced_accuracy_score(y_te_enc, preds_enc)
+                results[name] = {"mean": acc}
+                print(f"    {name}: {acc:.3f}")
+            except Exception as e:
+                print(f"    {name} failed: {e}")
 
     delta = results["jepa_frozen"]["mean"] - results["random_frozen"]["mean"]
     print(f"  Pretraining value: {delta:+.3f}")
@@ -395,22 +454,59 @@ def main():
     def print_table(keys, title):
         if not keys:
             return
-        print(f"\n{'='*70}")
+        # Detect which baselines were run
+        has_labram = any("labram" in all_results.get(k, {}) for k in keys)
+        has_csp = any("csp_lda" in all_results.get(k, {}) for k in keys)
+
+        print(f"\n{'='*85}")
         print(f"  {title}")
-        print(f"{'='*70}")
-        print(f"  {'Task':<20} {'Chance':>7} {'Random':>12} {'JEPA':>12} {'Delta':>8}")
-        print(f"  {'-'*20} {'-'*7} {'-'*12} {'-'*12} {'-'*8}")
+        print(f"{'='*85}")
+        header = f"  {'Task':<20} {'Chance':>7} {'Random':>8} {'JEPA':>8}"
+        if has_labram:
+            header += f" {'LaBraM':>8}"
+        if has_csp:
+            header += f" {'CSP-LDA':>8}"
+        header += f" {'Delta':>8}"
+        print(header)
+        print(f"  {'-'*20} {'-'*7} {'-'*8} {'-'*8}", end="")
+        if has_labram:
+            print(f" {'-'*8}", end="")
+        if has_csp:
+            print(f" {'-'*8}", end="")
+        print(f" {'-'*8}")
+
         for k in keys:
             r = all_results[k]
             label = TASK_REGISTRY[k][0]
-            rand_str = f"{r['random_frozen']['mean']:.3f}±{r['random_frozen']['std']:.3f}"
-            jepa_str = f"{r['jepa_frozen']['mean']:.3f}±{r['jepa_frozen']['std']:.3f}"
-            print(f"  {label:<20} {r['chance']:>7.3f} {rand_str:>12} {jepa_str:>12} {r['delta']:>+8.3f}")
+            rand_v = r['random_frozen']['mean']
+            jepa_v = r['jepa_frozen']['mean']
+            line = f"  {label:<20} {r['chance']:>7.3f} {rand_v:>8.3f} {jepa_v:>8.3f}"
+            if has_labram:
+                labram_v = r.get('labram', {}).get('mean', 0)
+                line += f" {labram_v:>8.3f}" if labram_v else f" {'N/A':>8}"
+            if has_csp:
+                csp_v = r.get('csp_lda', {}).get('mean', 0)
+                line += f" {csp_v:>8.3f}" if csp_v else f" {'N/A':>8}"
+            line += f" {r['delta']:>+8.3f}"
+            print(line)
+
         means_r = np.mean([all_results[k]["random_frozen"]["mean"] for k in keys])
         means_j = np.mean([all_results[k]["jepa_frozen"]["mean"] for k in keys])
-        print(f"  {'-'*20} {'-'*7} {'-'*12} {'-'*12} {'-'*8}")
-        print(f"  {'Mean':<20} {'':>7} {means_r:>12.3f} {means_j:>12.3f} {means_j-means_r:>+8.3f}")
-        print(f"{'='*70}")
+        print(f"  {'-'*20} {'-'*7} {'-'*8} {'-'*8}", end="")
+        if has_labram:
+            labram_means = [all_results[k].get("labram", {}).get("mean", 0) for k in keys]
+            print(f" {np.mean(labram_means):>8.3f}", end="")
+        if has_csp:
+            csp_means = [all_results[k].get("csp_lda", {}).get("mean", 0) for k in keys]
+            print(f" {np.mean(csp_means):>8.3f}", end="")
+        print(f" {means_j-means_r:>+8.3f}")
+        print(f"  {'Mean':<20} {'':>7} {means_r:>8.3f} {means_j:>8.3f}", end="")
+        if has_labram:
+            print(f" {np.mean(labram_means):>8.3f}", end="")
+        if has_csp:
+            print(f" {np.mean(csp_means):>8.3f}", end="")
+        print(f" {means_j-means_r:>+8.3f}")
+        print(f"{'='*85}")
 
     print_table(bci_keys, "BCI Tasks (Motor Imagery) — compare with Laya Table 1")
     print_table(clinical_keys, "Clinical Tasks — compare with Laya Table 2")
