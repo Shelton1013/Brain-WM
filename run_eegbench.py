@@ -174,6 +174,7 @@ def load_task_data(task):
             if train_subj:
                 ds = ds_cls(target_classes=task.classes, subjects=train_subj)
                 x, y, m = ds.get_data()
+                m['task_name'] = task.name
                 X_train.append(x)
                 y_train.append(y)
                 meta_train.append(m)
@@ -181,6 +182,7 @@ def load_task_data(task):
             if test_subj:
                 ds = ds_cls(target_classes=task.classes, subjects=test_subj)
                 x, y, m = ds.get_data()
+                m['task_name'] = task.name
                 X_test.append(x)
                 y_test.append(y)
                 meta_test.append(m)
