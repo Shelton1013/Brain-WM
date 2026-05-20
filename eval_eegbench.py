@@ -229,26 +229,29 @@ def evaluate_task(task_name, task_label, task_class, model, n_channels, device,
             X_train, y_train, meta_train = [], [], []
             X_test, y_test, meta_test = [], [], []
 
-            for ds_cls, split_info in task.subjects_split.items():
+            for ds_cls in task.datasets:
+                split_info = task.subjects_split[ds_cls]
                 try:
                     train_subjects = split_info.get(Split.TRAIN, [])
                     test_subjects = split_info.get(Split.TEST, [])
 
                     if train_subjects:
-                        ds = ds_cls(subjects=train_subjects, target_classes=task.target_classes)
-                        X_train.append(ds.X)
-                        y_train.append(ds.y)
-                        meta_train.append(ds.meta)
+                        ds = ds_cls(target_classes=task.classes, subjects=train_subjects)
+                        x, y, m = ds.get_data()
+                        X_train.append(x)
+                        y_train.append(y)
+                        meta_train.append(m)
 
                     if test_subjects:
-                        ds = ds_cls(subjects=test_subjects, target_classes=task.target_classes)
-                        X_test.append(ds.X)
-                        y_test.append(ds.y)
-                        meta_test.append(ds.meta)
+                        ds = ds_cls(target_classes=task.classes, subjects=test_subjects)
+                        x, y, m = ds.get_data()
+                        X_test.append(x)
+                        y_test.append(y)
+                        meta_test.append(m)
 
-                    print(f"    ✓ {ds_cls.__name__}")
+                    print(f"    OK {ds_cls.__name__}")
                 except Exception as ds_e:
-                    print(f"    ✗ {ds_cls.__name__}: {ds_e}")
+                    print(f"    SKIP {ds_cls.__name__}: {ds_e}")
 
             if not X_train or not X_test:
                 print(f"  Not enough data after skipping failures")

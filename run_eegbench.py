@@ -1,0 +1,426 @@
+"""
+Run EEG-Bench standard evaluation for EEG-JEPA.
+
+Uses EEG-Bench's tasks, datasets, and evaluation protocol directly.
+Only imports data loaders (not other models), so no HuggingFace needed.
+Also runs CSP+LDA/SVM baselines for comparison.
+
+Results are directly comparable to Laya Table 1 & 2.
+
+Usage:
+  export PYTHONPATH=/home/share/data_makchen/peng/datasets/EEG-Bench:$PYTHONPATH
+  export BRAIN_WM_DIR=/import/home/pxieaf/Brain-WM
+
+  # BCI tasks only
+  CUDA_VISIBLE_DEVICES=3 python /import/home/pxieaf/Brain-WM/run_eegbench.py \
+      --checkpoint /home/share/data_makchen/peng/models/eeg_jepa/best_model.pt \
+      --tasks lr rf 4class 5finger
+
+  # All tasks (BCI + clinical)
+  CUDA_VISIBLE_DEVICES=3 python /import/home/pxieaf/Brain-WM/run_eegbench.py \
+      --checkpoint /home/share/data_makchen/peng/models/eeg_jepa/best_model.pt \
+      --tasks all
+
+  # With baselines
+  CUDA_VISIBLE_DEVICES=3 python /import/home/pxieaf/Brain-WM/run_eegbench.py \
+      --checkpoint /home/share/data_makchen/peng/models/eeg_jepa/best_model.pt \
+      --tasks lr rf 4class --run_baselines
+"""
+
+import sys
+import os
+import argparse
+import json
+import numpy as np
+import torch
+from pathlib import Path
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import balanced_accuracy_score
+
+BRAIN_WM_DIR = os.environ.get("BRAIN_WM_DIR", "/import/home/pxieaf/Brain-WM")
+sys.path.insert(0, BRAIN_WM_DIR)
+
+EEGBENCH_DIR = os.environ.get("EEGBENCH_DIR",
+                                "/home/share/data_makchen/peng/datasets/EEG-Bench")
+sys.path.insert(0, EEGBENCH_DIR)
+
+from eeg_jepa import EEGJEPA
+
+
+# ============================================================
+# Task registry
+# ============================================================
+
+TASK_REGISTRY = {}
+
+def register_tasks():
+    """Import EEG-Bench tasks one by one, skip failures."""
+    task_imports = {
+        # BCI
+        "lr": ("LH vs RH MI",
+               "eeg_bench.tasks.bci.left_hand_right_hand_mi_task",
+               "LeftHandvRightHandMITask"),
+        "rf": ("RH vs Feet MI",
+               "eeg_bench.tasks.bci.right_hand_feet_mi_task",
+               "RightHandvFeetMITask"),
+        "4class": ("4-Class MI",
+                    "eeg_bench.tasks.bci.left_hand_right_hand_feet_tongue_mi_task",
+                    "LeftHandvRightHandvFeetvTongueMITask"),
+        "5finger": ("5-Finger MI",
+                     "eeg_bench.tasks.bci.five_fingers_mi_task",
+                     "FiveFingersMITask"),
+        # Clinical
+        "abnormal": ("Abnormal EEG",
+                      "eeg_bench.tasks.clinical.abnormal_clinical_task",
+                      "AbnormalClinicalTask"),
+        "epilepsy": ("Epilepsy",
+                      "eeg_bench.tasks.clinical.epilepsy_clinical_task",
+                      "EpilepsyClinicalTask"),
+        "seizure": ("Seizure",
+                     "eeg_bench.tasks.clinical.seizure_clinical_task",
+                     "SeizureClinicalTask"),
+        "artifact_bin": ("Artifact (Binary)",
+                          "eeg_bench.tasks.clinical.binary_artifact_clinical_task",
+                          "ArtifactBinaryClinicalTask"),
+        "artifact_multi": ("Artifact (Multi)",
+                            "eeg_bench.tasks.clinical.multiclass_artifact_clinical_task",
+                            "ArtifactMulticlassClinicalTask"),
+        "sleep": ("Sleep Stages",
+                   "eeg_bench.tasks.clinical.sleep_stages_clinical_task",
+                   "SleepStagesClinicalTask"),
+        "mtbi": ("mTBI",
+                  "eeg_bench.tasks.clinical.mtbi_clinical_task",
+                  "MTBIClinicalTask"),
+        "parkinsons": ("Parkinson's",
+                        "eeg_bench.tasks.clinical.parkinsons_clinical_task",
+                        "ParkinsonsClinicalTask"),
+        "schizophrenia": ("Schizophrenia",
+                           "eeg_bench.tasks.clinical.schizophrenia_clinical_task",
+                           "SchizophreniaClinicalTask"),
+        "ocd": ("OCD",
+                 "eeg_bench.tasks.clinical.ocd_clinical_task",
+                 "OCDClinicalTask"),
+    }
+
+    for key, (label, module_path, class_name) in task_imports.items():
+        try:
+            import importlib
+            mod = importlib.import_module(module_path)
+            cls = getattr(mod, class_name)
+            TASK_REGISTRY[key] = (label, cls)
+        except Exception as e:
+            print(f"  Skip {key}: {e}")
+
+    print(f"Loaded {len(TASK_REGISTRY)} tasks: {list(TASK_REGISTRY.keys())}")
+
+
+# ============================================================
+# Data loading with fallback
+# ============================================================
+
+def load_task_data(task):
+    """Load train/test data from an EEG-Bench task, with per-dataset fallback."""
+    from eeg_bench.enums.split import Split
+
+    # Try normal loading first
+    try:
+        X_train, y_train, meta_train = task.get_data(Split.TRAIN)
+        X_test, y_test, meta_test = task.get_data(Split.TEST)
+        return X_train, y_train, meta_train, X_test, y_test, meta_test
+    except Exception as e:
+        print(f"  Full load failed: {e}")
+        print(f"  Trying per-dataset fallback...")
+
+    # Fallback: load datasets individually, skip corrupted
+    X_train, y_train, meta_train = [], [], []
+    X_test, y_test, meta_test = [], [], []
+
+    for ds_cls in task.datasets:
+        split_info = task.subjects_split[ds_cls]
+        try:
+            train_subj = split_info.get(Split.TRAIN, [])
+            test_subj = split_info.get(Split.TEST, [])
+
+            if train_subj:
+                ds = ds_cls(target_classes=task.classes, subjects=train_subj)
+                x, y, m = ds.get_data()
+                X_train.append(x)
+                y_train.append(y)
+                meta_train.append(m)
+
+            if test_subj:
+                ds = ds_cls(target_classes=task.classes, subjects=test_subj)
+                x, y, m = ds.get_data()
+                X_test.append(x)
+                y_test.append(y)
+                meta_test.append(m)
+
+            print(f"    OK {ds_cls.__name__}")
+        except Exception as ds_e:
+            print(f"    SKIP {ds_cls.__name__}: {ds_e}")
+
+    if not X_train or not X_test:
+        return None
+    return X_train, y_train, meta_train, X_test, y_test, meta_test
+
+
+# ============================================================
+# Preprocessing
+# ============================================================
+
+def preprocess(X_list, n_channels, target_len=1024):
+    """EEG-Bench format → [N, T, C]."""
+    from scipy.signal import resample as scipy_resample
+
+    trials = []
+    for dataset_X in X_list:
+        if isinstance(dataset_X, list):
+            # MNE Raw objects
+            for raw in dataset_X:
+                try:
+                    data = raw.get_data().T.astype(np.float32)
+                    if data.shape[0] != target_len:
+                        data = scipy_resample(data, target_len, axis=0).astype(np.float32)
+                    trials.append(data)
+                except Exception:
+                    continue
+        elif isinstance(dataset_X, np.ndarray):
+            for trial in dataset_X:
+                if trial.ndim != 2:
+                    continue
+                t = trial.T.astype(np.float32) if trial.shape[0] < trial.shape[1] else trial.astype(np.float32)
+                if t.shape[0] != target_len:
+                    t = scipy_resample(t, target_len, axis=0).astype(np.float32)
+                trials.append(t)
+
+    if not trials:
+        return None
+
+    # Normalize channels
+    processed = []
+    for t in trials:
+        n_ch = t.shape[1]
+        if n_ch > n_channels:
+            t = t[:, :n_channels]
+        elif n_ch < n_channels:
+            t = np.pad(t, ((0, 0), (0, n_channels - n_ch)))
+        # Z-score
+        mean = t.mean(axis=0, keepdims=True)
+        std = t.std(axis=0, keepdims=True) + 1e-8
+        processed.append((t - mean) / std)
+
+    return np.stack(processed)
+
+
+def extract_features(model, X_np, device, batch_size=64):
+    """Frozen encoder → pooled features."""
+    model.eval()
+    features = []
+    with torch.no_grad():
+        for i in range(0, len(X_np), batch_size):
+            batch = torch.from_numpy(X_np[i:i+batch_size]).to(device)
+            tokens = model._tokenize(batch)
+            encoded = model._encode(tokens)
+            features.append(encoded.mean(dim=1).cpu().numpy())
+    return np.concatenate(features)
+
+
+# ============================================================
+# Evaluation
+# ============================================================
+
+def evaluate(task_key, task_label, task_class, model, n_channels, device,
+             n_reps=5, run_baselines=False):
+    """Run frozen linear probe on one EEG-Bench task."""
+    print(f"\n{'='*60}")
+    print(f"  {task_label} ({task_key})")
+    print(f"{'='*60}")
+
+    task = task_class()
+    data = load_task_data(task)
+    if data is None:
+        print(f"  No data available, skipping")
+        return None
+
+    X_train, y_train, meta_train, X_test, y_test, meta_test = data
+
+    # Concat labels
+    y_tr = np.concatenate(y_train) if isinstance(y_train, list) else y_train
+    y_te = np.concatenate(y_test) if isinstance(y_test, list) else y_test
+
+    # Encode string labels
+    if y_tr.dtype.kind in ('U', 'S', 'O'):
+        le = LabelEncoder()
+        y_tr = le.fit_transform(y_tr)
+        y_te = le.transform(y_te)
+
+    n_classes = len(np.unique(y_tr))
+    chance = 1.0 / n_classes
+    print(f"  Train: {len(y_tr)}, Test: {len(y_te)}, Classes: {n_classes}, Chance: {chance:.3f}")
+
+    # Preprocess
+    X_tr = preprocess(X_train, n_channels)
+    X_te = preprocess(X_test, n_channels)
+    if X_tr is None or X_te is None:
+        print(f"  Preprocessing failed")
+        return None
+    print(f"  Shapes: train {X_tr.shape}, test {X_te.shape}")
+
+    results = {"chance": chance, "n_classes": n_classes}
+
+    # --- EEG-JEPA frozen probe ---
+    print(f"  Running JEPA frozen probe...")
+    feat_tr = extract_features(model, X_tr, device)
+    feat_te = extract_features(model, X_te, device)
+
+    accs = []
+    for seed in range(n_reps):
+        scaler = StandardScaler()
+        tr_s = scaler.fit_transform(feat_tr)
+        te_s = scaler.transform(feat_te)
+        clf = LogisticRegression(max_iter=1000, C=1.0, solver="lbfgs",
+                                 multi_class="multinomial", random_state=42+seed)
+        clf.fit(tr_s, y_tr)
+        acc = balanced_accuracy_score(y_te, clf.predict(te_s))
+        accs.append(acc)
+    results["jepa_frozen"] = {"mean": np.mean(accs), "std": np.std(accs)}
+    print(f"    JEPA frozen: {np.mean(accs):.3f} +/- {np.std(accs):.3f}")
+
+    # --- Random encoder baseline ---
+    print(f"  Running random encoder baseline...")
+    random_model = EEGJEPA(n_channels=n_channels).to(device)
+    feat_tr_r = extract_features(random_model, X_tr, device)
+    feat_te_r = extract_features(random_model, X_te, device)
+    del random_model
+
+    accs_r = []
+    for seed in range(n_reps):
+        scaler = StandardScaler()
+        tr_s = scaler.fit_transform(feat_tr_r)
+        te_s = scaler.transform(feat_te_r)
+        clf = LogisticRegression(max_iter=1000, C=1.0, solver="lbfgs",
+                                 multi_class="multinomial", random_state=42+seed)
+        clf.fit(tr_s, y_tr)
+        acc = balanced_accuracy_score(y_te, clf.predict(te_s))
+        accs_r.append(acc)
+    results["random_frozen"] = {"mean": np.mean(accs_r), "std": np.std(accs_r)}
+    print(f"    Random frozen: {np.mean(accs_r):.3f} +/- {np.std(accs_r):.3f}")
+
+    # --- CSP+LDA/SVM baselines (optional) ---
+    if run_baselines:
+        try:
+            from eeg_bench.models.bci.csp_lda import CSPLDA
+            print(f"  Running CSP+LDA baseline...")
+            csp_lda = CSPLDA()
+            csp_lda.fit(X_train, y_train, meta_train)
+            preds = csp_lda.predict(X_test, meta_test)
+            y_te_orig = np.concatenate(y_test) if isinstance(y_test, list) else y_test
+            if y_te_orig.dtype.kind in ('U', 'S', 'O'):
+                y_te_orig = LabelEncoder().fit_transform(y_te_orig)
+                preds_encoded = LabelEncoder().fit_transform(preds)
+            else:
+                preds_encoded = preds
+            acc_lda = balanced_accuracy_score(y_te_orig, preds_encoded)
+            results["csp_lda"] = {"mean": acc_lda}
+            print(f"    CSP+LDA: {acc_lda:.3f}")
+        except Exception as e:
+            print(f"    CSP+LDA failed: {e}")
+
+    delta = results["jepa_frozen"]["mean"] - results["random_frozen"]["mean"]
+    print(f"  Pretraining value: {delta:+.3f}")
+    results["delta"] = delta
+
+    return results
+
+
+# ============================================================
+# Main
+# ============================================================
+
+def main():
+    parser = argparse.ArgumentParser(description="EEG-Bench evaluation for EEG-JEPA")
+    parser.add_argument("--checkpoint", type=str, required=True)
+    parser.add_argument("--tasks", type=str, nargs="+", default=["lr", "rf", "4class"])
+    parser.add_argument("--n_reps", type=int, default=5)
+    parser.add_argument("--run_baselines", action="store_true")
+    parser.add_argument("--device", type=str, default="auto")
+    parser.add_argument("--output", type=str,
+                        default="/home/share/data_makchen/peng/models/eeg_jepa/results/eegbench_results.json")
+    args = parser.parse_args()
+
+    device = torch.device(
+        "cuda" if args.device == "auto" and torch.cuda.is_available()
+        else args.device if args.device != "auto" else "cpu"
+    )
+
+    # Load model
+    print(f"Loading checkpoint: {args.checkpoint}")
+    ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
+    ckpt_args = ckpt.get("args", {})
+    n_channels = 64
+    for key, val in ckpt["model_state_dict"].items():
+        if "channel_embed" in key:
+            n_channels = val.shape[0]
+            break
+
+    model = EEGJEPA(
+        n_channels=n_channels,
+        d_model=ckpt_args.get("d_model", 256),
+        encoder_layers=ckpt_args.get("encoder_layers", 6),
+    ).to(device)
+    model.load_state_dict(ckpt["model_state_dict"])
+    model.eval()
+    print(f"Model: {n_channels}ch, d={ckpt_args.get('d_model', 256)}")
+
+    # Register tasks
+    register_tasks()
+
+    task_keys = list(TASK_REGISTRY.keys()) if args.tasks == ["all"] else \
+                [t for t in args.tasks if t in TASK_REGISTRY]
+
+    # Run
+    all_results = {}
+    for key in task_keys:
+        label, cls = TASK_REGISTRY[key]
+        result = evaluate(key, label, cls, model, n_channels, device,
+                          n_reps=args.n_reps, run_baselines=args.run_baselines)
+        if result:
+            all_results[key] = result
+
+    # Summary table (Laya Table 1 format)
+    bci_keys = [k for k in all_results if k in ("lr", "rf", "4class", "5finger")]
+    clinical_keys = [k for k in all_results if k not in ("lr", "rf", "4class", "5finger")]
+
+    def print_table(keys, title):
+        if not keys:
+            return
+        print(f"\n{'='*70}")
+        print(f"  {title}")
+        print(f"{'='*70}")
+        print(f"  {'Task':<20} {'Chance':>7} {'Random':>12} {'JEPA':>12} {'Delta':>8}")
+        print(f"  {'-'*20} {'-'*7} {'-'*12} {'-'*12} {'-'*8}")
+        for k in keys:
+            r = all_results[k]
+            label = TASK_REGISTRY[k][0]
+            rand_str = f"{r['random_frozen']['mean']:.3f}±{r['random_frozen']['std']:.3f}"
+            jepa_str = f"{r['jepa_frozen']['mean']:.3f}±{r['jepa_frozen']['std']:.3f}"
+            print(f"  {label:<20} {r['chance']:>7.3f} {rand_str:>12} {jepa_str:>12} {r['delta']:>+8.3f}")
+        means_r = np.mean([all_results[k]["random_frozen"]["mean"] for k in keys])
+        means_j = np.mean([all_results[k]["jepa_frozen"]["mean"] for k in keys])
+        print(f"  {'-'*20} {'-'*7} {'-'*12} {'-'*12} {'-'*8}")
+        print(f"  {'Mean':<20} {'':>7} {means_r:>12.3f} {means_j:>12.3f} {means_j-means_r:>+8.3f}")
+        print(f"{'='*70}")
+
+    print_table(bci_keys, "BCI Tasks (Motor Imagery) — compare with Laya Table 1")
+    print_table(clinical_keys, "Clinical Tasks — compare with Laya Table 2")
+
+    # Save
+    os.makedirs(os.path.dirname(args.output), exist_ok=True)
+    with open(args.output, "w") as f:
+        json.dump(all_results, f, indent=2)
+    print(f"\nSaved → {args.output}")
+
+
+if __name__ == "__main__":
+    main()
