@@ -369,9 +369,9 @@ def main():
     # Save
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    with open(output_dir / "linear_probe_results.json", "w") as f:
-        json.dump(results, f, indent=2)
-    print(f"\nSaved → {output_dir / 'linear_probe_results.json'}")
+    with open(output_dir / "mi_probe_results.json", "w") as f:
+        json.dump(all_results, f, indent=2)
+    print(f"\nSaved → {output_dir / 'mi_probe_results.json'}")
 
 
 if __name__ == "__main__":

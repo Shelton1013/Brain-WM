@@ -220,8 +220,43 @@ def evaluate_task(task_name, task_label, task_class, model, n_channels, device,
         X_train, y_train, meta_train = task.get_data(Split.TRAIN)
         X_test, y_test, meta_test = task.get_data(Split.TEST)
     except Exception as e:
-        print(f"  Failed to load data: {e}")
-        return None
+        print(f"  Standard loading failed: {e}")
+        print(f"  Trying to load datasets individually (skip corrupted)...")
+
+        # Fallback: load each dataset separately, skip failures
+        from eeg_bench.enums.split import Split
+        try:
+            X_train, y_train, meta_train = [], [], []
+            X_test, y_test, meta_test = [], [], []
+
+            for ds_cls, split_info in task.subjects_split.items():
+                try:
+                    train_subjects = split_info.get(Split.TRAIN, [])
+                    test_subjects = split_info.get(Split.TEST, [])
+
+                    if train_subjects:
+                        ds = ds_cls(subjects=train_subjects, target_classes=task.target_classes)
+                        X_train.append(ds.X)
+                        y_train.append(ds.y)
+                        meta_train.append(ds.meta)
+
+                    if test_subjects:
+                        ds = ds_cls(subjects=test_subjects, target_classes=task.target_classes)
+                        X_test.append(ds.X)
+                        y_test.append(ds.y)
+                        meta_test.append(ds.meta)
+
+                    print(f"    ✓ {ds_cls.__name__}")
+                except Exception as ds_e:
+                    print(f"    ✗ {ds_cls.__name__}: {ds_e}")
+
+            if not X_train or not X_test:
+                print(f"  Not enough data after skipping failures")
+                return None
+
+        except Exception as e2:
+            print(f"  Fallback also failed: {e2}")
+            return None
 
     # Concatenate labels
     y_train_cat = np.concatenate(y_train) if isinstance(y_train, list) else y_train
