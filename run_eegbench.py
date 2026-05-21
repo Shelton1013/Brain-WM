@@ -318,8 +318,8 @@ def evaluate(task_key, task_label, task_class, model, n_channels, device,
     results["jepa_frozen"] = {"mean": np.mean(accs), "std": np.std(accs)}
     print(f"    JEPA frozen: {np.mean(accs):.3f} +/- {np.std(accs):.3f}")
 
-    # --- Random encoder baseline ---
-    print(f"  Running random encoder baseline...")
+    # --- Random encoder frozen baseline ---
+    print(f"  Running random encoder frozen probe...")
     random_model = EEGJEPA(n_channels=n_channels).to(device)
     feat_tr_r = extract_features(random_model, X_tr, device)
     feat_te_r = extract_features(random_model, X_te, device)
@@ -337,6 +337,111 @@ def evaluate(task_key, task_label, task_class, model, n_channels, device,
         accs_r.append(acc)
     results["random_frozen"] = {"mean": np.mean(accs_r), "std": np.std(accs_r)}
     print(f"    Random frozen: {np.mean(accs_r):.3f} +/- {np.std(accs_r):.3f}")
+
+    # --- JEPA fine-tune ---
+    print(f"  Running JEPA fine-tune...")
+    try:
+        import copy
+        ft_model = copy.deepcopy(model)
+        ft_head = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(ft_model.d_model),
+            torch.nn.Linear(ft_model.d_model, n_classes),
+        ).to(device)
+
+        ft_optimizer = torch.optim.AdamW([
+            {"params": ft_model.parameters(), "lr": 1e-4},
+            {"params": ft_head.parameters(), "lr": 1e-3},
+        ], weight_decay=0.01)
+        ft_criterion = torch.nn.CrossEntropyLoss()
+
+        X_tr_tensor = torch.from_numpy(X_tr)
+        y_tr_tensor = torch.from_numpy(y_tr).long()
+        ft_dataset = torch.utils.data.TensorDataset(X_tr_tensor, y_tr_tensor)
+        ft_loader = DataLoader(ft_dataset, batch_size=32, shuffle=True, drop_last=True)
+
+        ft_model.train()
+        ft_head.train()
+        for ep in range(50):
+            for bx, by in ft_loader:
+                bx, by = bx.to(device), by.to(device)
+                tokens = ft_model._tokenize(bx)
+                encoded = ft_model._encode(tokens)
+                pooled = encoded.mean(dim=1)
+                logits = ft_head(pooled)
+                loss = ft_criterion(logits, by)
+                ft_optimizer.zero_grad()
+                loss.backward()
+                ft_optimizer.step()
+
+        # Evaluate
+        ft_model.eval()
+        ft_head.eval()
+        X_te_tensor = torch.from_numpy(X_te).to(device)
+        all_preds = []
+        with torch.no_grad():
+            for i in range(0, len(X_te_tensor), 64):
+                batch = X_te_tensor[i:i+64]
+                tokens = ft_model._tokenize(batch)
+                encoded = ft_model._encode(tokens)
+                pooled = encoded.mean(dim=1)
+                logits = ft_head(pooled)
+                all_preds.append(logits.argmax(-1).cpu().numpy())
+        preds = np.concatenate(all_preds)
+        jepa_ft_acc = balanced_accuracy_score(y_te, preds)
+        results["jepa_finetune"] = {"mean": jepa_ft_acc}
+        print(f"    JEPA fine-tune: {jepa_ft_acc:.3f}")
+        del ft_model, ft_head
+        torch.cuda.empty_cache()
+    except Exception as e:
+        print(f"    JEPA fine-tune failed: {e}")
+
+    # --- Random fine-tune ---
+    print(f"  Running random fine-tune...")
+    try:
+        rand_ft_model = EEGJEPA(n_channels=n_channels).to(device)
+        rand_ft_head = torch.nn.Sequential(
+            torch.nn.BatchNorm1d(rand_ft_model.d_model),
+            torch.nn.Linear(rand_ft_model.d_model, n_classes),
+        ).to(device)
+
+        rand_ft_optimizer = torch.optim.AdamW([
+            {"params": rand_ft_model.parameters(), "lr": 1e-4},
+            {"params": rand_ft_head.parameters(), "lr": 1e-3},
+        ], weight_decay=0.01)
+
+        rand_ft_model.train()
+        rand_ft_head.train()
+        for ep in range(50):
+            for bx, by in ft_loader:
+                bx, by = bx.to(device), by.to(device)
+                tokens = rand_ft_model._tokenize(bx)
+                encoded = rand_ft_model._encode(tokens)
+                pooled = encoded.mean(dim=1)
+                logits = rand_ft_head(pooled)
+                loss = ft_criterion(logits, by)
+                rand_ft_optimizer.zero_grad()
+                loss.backward()
+                rand_ft_optimizer.step()
+
+        rand_ft_model.eval()
+        rand_ft_head.eval()
+        all_preds = []
+        with torch.no_grad():
+            for i in range(0, len(X_te_tensor), 64):
+                batch = X_te_tensor[i:i+64]
+                tokens = rand_ft_model._tokenize(batch)
+                encoded = rand_ft_model._encode(tokens)
+                pooled = encoded.mean(dim=1)
+                logits = rand_ft_head(pooled)
+                all_preds.append(logits.argmax(-1).cpu().numpy())
+        preds = np.concatenate(all_preds)
+        rand_ft_acc = balanced_accuracy_score(y_te, preds)
+        results["random_finetune"] = {"mean": rand_ft_acc}
+        print(f"    Random fine-tune: {rand_ft_acc:.3f}")
+        del rand_ft_model, rand_ft_head
+        torch.cuda.empty_cache()
+    except Exception as e:
+        print(f"    Random fine-tune failed: {e}")
 
     # --- Baselines (LaBraM, CSP+LDA/SVM) ---
     if run_baselines:
@@ -456,59 +561,80 @@ def main():
     def print_table(keys, title):
         if not keys:
             return
-        # Detect which baselines were run
         has_labram = any("labram" in all_results.get(k, {}) for k in keys)
         has_csp = any("csp_lda" in all_results.get(k, {}) for k in keys)
+        has_jft = any("jepa_finetune" in all_results.get(k, {}) for k in keys)
+        has_rft = any("random_finetune" in all_results.get(k, {}) for k in keys)
 
-        print(f"\n{'='*85}")
+        print(f"\n{'='*100}")
         print(f"  {title}")
-        print(f"{'='*85}")
-        header = f"  {'Task':<20} {'Chance':>7} {'Random':>8} {'JEPA':>8}"
-        if has_labram:
-            header += f" {'LaBraM':>8}"
+        print(f"{'='*100}")
+
+        # Frozen probe table
+        print(f"\n  --- Frozen Linear Probe ---")
+        header = f"  {'Task':<20} {'Chance':>7} {'Rand-F':>8} {'JEPA-F':>8}"
         if has_csp:
             header += f" {'CSP-LDA':>8}"
-        header += f" {'Delta':>8}"
         print(header)
-        print(f"  {'-'*20} {'-'*7} {'-'*8} {'-'*8}", end="")
-        if has_labram:
-            print(f" {'-'*8}", end="")
+        sep = f"  {'-'*20} {'-'*7} {'-'*8} {'-'*8}"
         if has_csp:
-            print(f" {'-'*8}", end="")
-        print(f" {'-'*8}")
+            sep += f" {'-'*8}"
+        print(sep)
 
         for k in keys:
             r = all_results[k]
             label = TASK_REGISTRY[k][0]
-            rand_v = r['random_frozen']['mean']
-            jepa_v = r['jepa_frozen']['mean']
-            line = f"  {label:<20} {r['chance']:>7.3f} {rand_v:>8.3f} {jepa_v:>8.3f}"
-            if has_labram:
-                labram_v = r.get('labram', {}).get('mean', 0)
-                line += f" {labram_v:>8.3f}" if labram_v else f" {'N/A':>8}"
+            line = f"  {label:<20} {r['chance']:>7.3f} {r['random_frozen']['mean']:>8.3f} {r['jepa_frozen']['mean']:>8.3f}"
             if has_csp:
                 csp_v = r.get('csp_lda', {}).get('mean', 0)
-                line += f" {csp_v:>8.3f}" if csp_v else f" {'N/A':>8}"
-            line += f" {r['delta']:>+8.3f}"
+                line += f" {csp_v:>8.3f}"
             print(line)
 
-        means_r = np.mean([all_results[k]["random_frozen"]["mean"] for k in keys])
-        means_j = np.mean([all_results[k]["jepa_frozen"]["mean"] for k in keys])
-        print(f"  {'-'*20} {'-'*7} {'-'*8} {'-'*8}", end="")
-        if has_labram:
-            labram_means = [all_results[k].get("labram", {}).get("mean", 0) for k in keys]
-            print(f" {np.mean(labram_means):>8.3f}", end="")
+        means_rf = np.mean([all_results[k]["random_frozen"]["mean"] for k in keys])
+        means_jf = np.mean([all_results[k]["jepa_frozen"]["mean"] for k in keys])
+        print(sep)
+        line = f"  {'Mean':<20} {'':>7} {means_rf:>8.3f} {means_jf:>8.3f}"
         if has_csp:
-            csp_means = [all_results[k].get("csp_lda", {}).get("mean", 0) for k in keys]
-            print(f" {np.mean(csp_means):>8.3f}", end="")
-        print(f" {means_j-means_r:>+8.3f}")
-        print(f"  {'Mean':<20} {'':>7} {means_r:>8.3f} {means_j:>8.3f}", end="")
-        if has_labram:
-            print(f" {np.mean(labram_means):>8.3f}", end="")
-        if has_csp:
-            print(f" {np.mean(csp_means):>8.3f}", end="")
-        print(f" {means_j-means_r:>+8.3f}")
-        print(f"{'='*85}")
+            line += f" {np.mean([all_results[k].get('csp_lda', {}).get('mean', 0) for k in keys]):>8.3f}"
+        print(line)
+
+        # Fine-tune table
+        if has_jft or has_labram:
+            print(f"\n  --- Fine-tune (50 epochs) ---")
+            header = f"  {'Task':<20} {'Chance':>7} {'Rand-FT':>8} {'JEPA-FT':>8}"
+            if has_labram:
+                header += f" {'LaBraM':>8}"
+            print(header)
+            sep = f"  {'-'*20} {'-'*7} {'-'*8} {'-'*8}"
+            if has_labram:
+                sep += f" {'-'*8}"
+            print(sep)
+
+            for k in keys:
+                r = all_results[k]
+                label = TASK_REGISTRY[k][0]
+                rft = r.get('random_finetune', {}).get('mean', 0)
+                jft = r.get('jepa_finetune', {}).get('mean', 0)
+                line = f"  {label:<20} {r['chance']:>7.3f} {rft:>8.3f} {jft:>8.3f}"
+                if has_labram:
+                    labram_v = r.get('labram', {}).get('mean', 0)
+                    line += f" {labram_v:>8.3f}"
+                print(line)
+
+            means_rft = np.mean([all_results[k].get("random_finetune", {}).get("mean", 0) for k in keys])
+            means_jft = np.mean([all_results[k].get("jepa_finetune", {}).get("mean", 0) for k in keys])
+            print(sep)
+            line = f"  {'Mean':<20} {'':>7} {means_rft:>8.3f} {means_jft:>8.3f}"
+            if has_labram:
+                line += f" {np.mean([all_results[k].get('labram', {}).get('mean', 0) for k in keys]):>8.3f}"
+            print(line)
+
+        # Summary
+        print(f"\n  --- Pretraining Value ---")
+        print(f"  Frozen:    JEPA vs Random = {means_jf - means_rf:+.3f}")
+        if has_jft:
+            print(f"  Fine-tune: JEPA vs Random = {means_jft - means_rft:+.3f}")
+        print(f"{'='*100}")
 
     print_table(bci_keys, "BCI Tasks (Motor Imagery) — compare with Laya Table 1")
     print_table(clinical_keys, "Clinical Tasks — compare with Laya Table 2")
