@@ -23,6 +23,7 @@ from torch.utils.data import DataLoader, random_split
 from torch.utils.data.distributed import DistributedSampler
 
 from eeg_jepa import EEGJEPA
+from eeg_mae import EEGMAE
 from dataset import PhysioNetMIDataset
 from dataset_multi import MultiDatasetEEG
 
@@ -154,6 +155,8 @@ def main():
                         default="/home/share/data_makchen/peng/datasets/physionet")
     parser.add_argument("--output_dir", type=str,
                         default="/home/share/data_makchen/peng/models/eeg_jepa")
+    parser.add_argument("--model", type=str, default="jepa", choices=["jepa", "mae"],
+                        help="Pretraining model: jepa (latent prediction) or mae (reconstruction)")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=3e-4)
@@ -265,20 +268,26 @@ def main():
     )
 
     # Model
-    pprint(f"Building EEG-JEPA (d={args.d_model}, layers={args.encoder_layers}, "
+    model_cls = EEGMAE if args.model == "mae" else EEGJEPA
+    model_name = "EEG-MAE" if args.model == "mae" else "EEG-JEPA"
+    pprint(f"Building {model_name} (d={args.d_model}, layers={args.encoder_layers}, "
            f"mask={args.mask_ratio:.0%})...")
-    model = EEGJEPA(
+
+    model_kwargs = dict(
         n_channels=n_channels,
         state_samples=26,
         d_model=args.d_model,
         encoder_layers=args.encoder_layers,
         encoder_heads=8,
-        predictor_layers=3,
-        predictor_dim=128,
-        predictor_heads=4,
         mask_ratio=args.mask_ratio,
         n_subjects=args.n_subjects,
-    ).to(device)
+    )
+    if args.model == "mae":
+        model_kwargs.update(decoder_layers=3, decoder_dim=128, decoder_heads=4)
+    else:
+        model_kwargs.update(predictor_layers=3, predictor_dim=128, predictor_heads=4)
+
+    model = model_cls(**model_kwargs).to(device)
 
     raw_model = model
     if distributed:

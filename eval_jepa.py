@@ -24,6 +24,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from eeg_jepa import EEGJEPA
+from eeg_mae import EEGMAE
 from evaluate import PhysioNetMI_Labeled  # reuse labeled dataset
 
 
@@ -246,11 +247,17 @@ def main():
               f"val_loss={ckpt.get('val_loss', '?'):.6f}")
 
     def load_pretrained():
-        m = EEGJEPA(
+        # Auto-detect model type from checkpoint
+        model_type = ckpt_args.get("model", "jepa")
+        is_mae = model_type == "mae" or "reconstruction_head" in str(ckpt["model_state_dict"].keys())
+        model_cls = EEGMAE if is_mae else EEGJEPA
+
+        model_kwargs = dict(
             n_channels=ckpt_n_channels,
             d_model=ckpt_args.get("d_model", 256),
             encoder_layers=ckpt_args.get("encoder_layers", 6),
-        ).to(device)
+        )
+        m = model_cls(**model_kwargs).to(device)
         m.load_state_dict(ckpt["model_state_dict"])
         return m
 
