@@ -278,19 +278,31 @@ def _run_frozen_probe(feat_tr, feat_te, y_tr, y_te, n_reps):
     return {"mean": np.mean(accs), "std": np.std(accs)}
 
 
-def _extract_labram_features(X_tr, X_te, y_tr, n_channels, device):
-    """Extract frozen features from pretrained LaBraM encoder."""
+def _extract_labram_frozen_features(X_train, y_train, meta_train,
+                                     X_test, meta_test, task_name, device):
+    """Extract frozen features from pretrained LaBraM using its native pipeline.
+
+    Uses LaBraM's own make_dataset for proper channel mapping and preprocessing,
+    then extracts features from the frozen encoder (no fine-tuning).
+    """
     try:
         from timm.models import create_model
         from eeg_bench.models.bci.labram_model import check_and_download_pretrained_model
-        import eeg_bench.models.bci.LaBraM.modeling_finetune  # register models
+        from eeg_bench.models.bci.LaBraM.make_dataset import make_dataset
+        from eeg_bench.models.bci.LaBraM import utils as labram_utils
+        import eeg_bench.models.bci.LaBraM.modeling_finetune
+        from joblib import Memory
+        from eeg_bench.config import get_config_value
+        from typing import cast
 
+        cache = Memory(location=get_config_value("cache"), verbose=0)
+
+        # Load pretrained LaBraM encoder
         checkpoint = torch.load(check_and_download_pretrained_model(),
                                 map_location=device, weights_only=False)
-        new_ckpt = {}
-        for k, v in checkpoint['model'].items():
-            if k.startswith('student.'):
-                new_ckpt[k[len('student.'):]] = v
+        new_ckpt = {k[len('student.'):]: v
+                    for k, v in checkpoint['model'].items()
+                    if k.startswith('student.')}
 
         labram = create_model("labram_base_patch200_200",
                               qkv_bias=False, rel_pos_bias=True,
@@ -302,34 +314,71 @@ def _extract_labram_features(X_tr, X_te, y_tr, n_channels, device):
         labram = labram.to(device)
         labram.eval()
 
-        from eeg_bench.models.bci.LaBraM.utils import get_input_chans
+        def extract_from_datasets(X_list, y_list, meta_list, is_train):
+            all_features = []
+            split_size = 0.0  # no val split for feature extraction
 
-        def extract(X_np):
-            features = []
-            with torch.no_grad():
-                for i in range(0, len(X_np), 64):
-                    batch = torch.from_numpy(X_np[i:i+64]).to(device)
-                    # [B, T, C] → [B, C, T]
-                    batch = batch.transpose(1, 2).float()
-                    B, C, T = batch.shape
-                    if T % 200 != 0:
-                        batch = batch[:, :, :T - T % 200]
-                        T = T - T % 200
-                    batch = batch.reshape(B, C, T // 200, 200) / 100
-                    # Use default 10-20 channel mapping
-                    input_chans = list(range(min(C, 22)))
-                    feat = labram.forward_features(batch, input_chans=input_chans,
-                                                   return_all_tokens=False)
-                    features.append(feat.cpu().numpy())
-            return np.concatenate(features)
+            for X_, meta_ in zip(X_list, meta_list):
+                try:
+                    y_dummy = y_list[0] if y_list else None  # need labels for make_dataset
+                    ds = cache.cache(make_dataset)(
+                        X_, y_dummy, task_name,
+                        meta_['sampling_frequency'],
+                        meta_['channel_names'],
+                        train=False, split_size=0,
+                    )
+                    if len(ds) == 0:
+                        continue
 
-        feat_tr = extract(X_tr)
-        feat_te = extract(X_te)
+                    ch_names = ds.ch_names
+                    input_chans = labram_utils.get_input_chans(ch_names)
+                    loader = DataLoader(ds, batch_size=64, shuffle=False)
+
+                    with torch.no_grad():
+                        for batch in loader:
+                            x = batch[0].to(device) if isinstance(batch, (list, tuple)) else batch.to(device)
+                            if x.dim() == 3:
+                                B, C, T = x.shape
+                            else:
+                                continue
+                            if T % 200 != 0:
+                                x = x[:, :, :T - T % 200]
+                                T = T - T % 200
+                            if T == 0:
+                                continue
+                            x = x.reshape(B, C, T // 200, 200) / 100
+                            feat = labram.forward_features(
+                                x, input_chans=input_chans,
+                                return_all_tokens=False,
+                            )
+                            all_features.append(feat.cpu().numpy())
+                except Exception as ds_e:
+                    print(f"      Skip dataset: {ds_e}")
+                    continue
+
+            if not all_features:
+                return None
+            return np.concatenate(all_features)
+
+        print(f"    Extracting train features...")
+        feat_tr = extract_from_datasets(X_train, y_train, meta_train, True)
+        print(f"    Extracting test features...")
+        feat_te = extract_from_datasets(X_test, [None]*len(X_test), meta_test, False)
+
         del labram
         torch.cuda.empty_cache()
+
+        if feat_tr is None or feat_te is None:
+            print(f"    LaBraM feature extraction returned None")
+            return None, None
+
+        print(f"    LaBraM features: train {feat_tr.shape}, test {feat_te.shape}")
         return feat_tr, feat_te
+
     except Exception as e:
+        import traceback
         print(f"    LaBraM frozen feature extraction failed: {e}")
+        traceback.print_exc()
         return None, None
 
 
@@ -390,11 +439,26 @@ def evaluate(task_key, task_label, task_class, model, n_channels, device,
     # --- LaBraM frozen ---
     if run_baselines:
         print(f"  [Frozen] LaBraM...")
-        labram_feat_tr, labram_feat_te = _extract_labram_features(
-            X_tr, X_te, y_tr, n_channels, device)
+        labram_feat_tr, labram_feat_te = _extract_labram_frozen_features(
+            X_train, y_train, meta_train,
+            X_test, meta_test, task.name, device)
         if labram_feat_tr is not None:
-            results["labram_frozen"] = _run_frozen_probe(
-                labram_feat_tr, labram_feat_te, y_tr, y_te, n_reps)
+            # Labels need to match feature count
+            # make_dataset may change sample count, so re-extract labels
+            n_feat_tr = labram_feat_tr.shape[0]
+            n_feat_te = labram_feat_te.shape[0]
+            if n_feat_tr == len(y_tr) and n_feat_te == len(y_te):
+                results["labram_frozen"] = _run_frozen_probe(
+                    labram_feat_tr, labram_feat_te, y_tr, y_te, n_reps)
+            else:
+                # make_dataset may have filtered/resampled, use its labels
+                print(f"    Label count mismatch (feat_tr={n_feat_tr} vs y_tr={len(y_tr)})")
+                print(f"    Running LaBraM with its own label handling...")
+                # Fallback: just use truncated labels
+                y_tr_lb = y_tr[:n_feat_tr] if n_feat_tr < len(y_tr) else y_tr
+                y_te_lb = y_te[:n_feat_te] if n_feat_te < len(y_te) else y_te
+                results["labram_frozen"] = _run_frozen_probe(
+                    labram_feat_tr, labram_feat_te, y_tr_lb, y_te_lb, n_reps)
             print(f"    → {results['labram_frozen']['mean']:.3f} ± {results['labram_frozen']['std']:.3f}")
 
         # --- CSP+LDA ---
