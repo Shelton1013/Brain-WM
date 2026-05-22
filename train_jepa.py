@@ -114,7 +114,8 @@ def train_epoch(model, raw_model, loader, optimizer, scheduler, device,
                 f"pred={losses['pred']:.6f} "
                 f"var={losses.get('var', 0):.4f} "
                 f"cov={losses.get('cov', 0):.4f} "
-                f"lr={lr:.2e} ema={ema_d:.4f}"
+                f"qs={losses.get('qspec', 0):.4f} "
+                f"lr={lr:.2e}"
             )
 
     return total_loss / max(n, 1), global_step

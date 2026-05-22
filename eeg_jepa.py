@@ -49,16 +49,28 @@ class TransformerBlock(nn.Module):
 # 2. Channel-aware tokenizer
 # ============================================================
 
-class ChannelAwareTokenizer(nn.Module):
-    """Per-channel temporal encoding + spatial attention aggregation."""
+class DynamicChannelMixer(nn.Module):
+    """Dynamic Channel Mixer with multi-query cross-attention (Laya-style).
+
+    Unlike single-query aggregation (which compresses all spatial info into
+    one vector), this uses N_q learned queries that each attend to different
+    channel combinations. Query Specialization Loss ensures the queries
+    don't collapse to identical patterns.
+
+    This preserves fine-grained spatial information critical for MI:
+    e.g., one query focuses on C3/C4 (motor cortex), another on Fz/Cz
+    (midline), another on temporal channels, etc.
+    """
 
     def __init__(self, n_channels: int, state_samples: int, d_model: int,
-                 d_channel: int = 32):
+                 d_channel: int = 32, n_queries: int = 16):
         super().__init__()
         self.state_samples = state_samples
         self.n_channels = n_channels
         self.d_channel = d_channel
+        self.n_queries = n_queries
 
+        # Per-channel temporal encoder (shared across channels)
         self.temporal_encoder = nn.Sequential(
             nn.Linear(state_samples, d_channel * 2),
             nn.GELU(),
@@ -66,35 +78,79 @@ class ChannelAwareTokenizer(nn.Module):
             nn.LayerNorm(d_channel),
         )
 
+        # Learnable channel embedding (electrode spatial identity)
         self.channel_embed = nn.Parameter(
             torch.randn(n_channels, d_channel) * 0.02
         )
 
-        self.spatial_query = nn.Parameter(torch.randn(1, 1, d_channel) * 0.02)
+        # Multi-query cross-attention: N_q queries attend over channels
+        self.spatial_queries = nn.Parameter(
+            torch.randn(n_queries, d_channel) * 0.02
+        )
         self.spatial_attn = nn.MultiheadAttention(
             d_channel, num_heads=4, batch_first=True,
         )
         self.spatial_norm = nn.LayerNorm(d_channel)
 
-        self.out_proj = nn.Linear(d_channel, d_model)
+        # Project concatenated query outputs to d_model
+        self.out_proj = nn.Linear(n_queries * d_channel, d_model)
         self.out_norm = nn.LayerNorm(d_model)
 
+        # Store attention weights for query specialization loss
+        self._last_attn_weights = None
+
     def forward(self, eeg: torch.Tensor) -> torch.Tensor:
+        """[B, T, C] → [B, N, D] with multi-query spatial aggregation."""
         B, T, C = eeg.shape
         S = self.state_samples
         N = T // S
 
+        # Per-channel temporal encoding: [B*N*C, S] → [B*N, C, d_ch]
         windows = eeg[:, :N*S, :].reshape(B, N, S, C).permute(0, 1, 3, 2)
         flat = windows.reshape(B * N * C, S)
         ch_features = self.temporal_encoder(flat).reshape(B * N, C, self.d_channel)
+
+        # Add channel embedding
         ch_features = ch_features + self.channel_embed.unsqueeze(0)
 
-        query = self.spatial_query.expand(B * N, -1, -1)
-        pooled, _ = self.spatial_attn(query, ch_features, ch_features)
-        pooled = self.spatial_norm(pooled.squeeze(1))
+        # Multi-query cross-attention: [B*N, N_q, d_ch]
+        queries = self.spatial_queries.unsqueeze(0).expand(B * N, -1, -1)
+        pooled, attn_weights = self.spatial_attn(
+            queries, ch_features, ch_features,
+        )  # pooled: [B*N, N_q, d_ch], attn_weights: [B*N, N_q, C]
+        pooled = self.spatial_norm(pooled)
 
-        tokens = self.out_norm(self.out_proj(pooled.reshape(B, N, -1)))
-        return tokens
+        # Store attention weights for query specialization loss
+        self._last_attn_weights = attn_weights
+
+        # Concat all queries: [B*N, N_q * d_ch] → project to d_model
+        pooled_flat = pooled.reshape(B * N, -1)  # [B*N, N_q * d_ch]
+        tokens = self.out_norm(self.out_proj(pooled_flat).reshape(B, N, -1))
+        return tokens  # [B, N, D]
+
+    def get_query_specialization_loss(self) -> torch.Tensor:
+        """Penalize pairwise similarity between query affinity vectors.
+
+        Each query's affinity vector W_i is its average attention weight
+        over channels. If two queries attend to the same channels,
+        their affinity vectors will be similar → penalize this.
+
+        Returns scalar loss (0 if no attention weights cached).
+        """
+        if self._last_attn_weights is None:
+            return torch.tensor(0.0)
+
+        # attn_weights: [B*N, N_q, C]
+        # Average over batch*time to get per-query channel affinity
+        W = self._last_attn_weights.mean(dim=0)  # [N_q, C]
+        W = F.normalize(W, dim=-1)  # normalize each query's affinity
+
+        # Pairwise similarity matrix
+        similarity = W @ W.T  # [N_q, N_q]
+
+        # Penalize off-diagonal entries (queries should be different)
+        loss = similarity.fill_diagonal_(0).pow(2).sum() / self.n_queries
+        return loss
 
 
 # ============================================================
@@ -115,6 +171,7 @@ class EEGJEPA(nn.Module):
         state_samples: int = 26,
         d_model: int = 256,
         d_channel: int = 32,
+        n_queries: int = 16,           # Dynamic Channel Mixer queries
         encoder_layers: int = 6,
         encoder_heads: int = 8,
         predictor_layers: int = 3,
@@ -122,7 +179,8 @@ class EEGJEPA(nn.Module):
         predictor_heads: int = 4,
         mask_ratio: float = 0.60,
         mask_block_size: int = 5,
-        sigreg_weight: float = 0.05,   # Laya uses 0.05
+        sigreg_weight: float = 0.05,
+        query_spec_weight: float = 0.1,  # Query Specialization Loss weight
         n_subjects: int = 109,
     ):
         super().__init__()
@@ -131,10 +189,11 @@ class EEGJEPA(nn.Module):
         self.mask_ratio = mask_ratio
         self.mask_block_size = mask_block_size
         self.sigreg_weight = sigreg_weight
+        self.query_spec_weight = query_spec_weight
 
-        # --- Channel-aware tokenizer ---
-        self.tokenizer = ChannelAwareTokenizer(
-            n_channels, state_samples, d_model, d_channel,
+        # --- Dynamic Channel Mixer (Laya-style multi-query) ---
+        self.tokenizer = DynamicChannelMixer(
+            n_channels, state_samples, d_model, d_channel, n_queries,
         )
 
         # --- Temporal position embedding ---
@@ -307,13 +366,20 @@ class EEGJEPA(nn.Module):
         cov_loss = cov.fill_diagonal_(0).pow(2).sum() / D
 
         sigreg_loss = var_loss + cov_loss
-        total = pred_loss + self.sigreg_weight * sigreg_loss
+
+        # --- Query Specialization Loss (force diverse channel queries) ---
+        query_loss = self.tokenizer.get_query_specialization_loss()
+
+        total = (pred_loss
+                 + self.sigreg_weight * sigreg_loss
+                 + self.query_spec_weight * query_loss)
 
         return {
             "total": total,
             "pred": pred_loss,
             "var": var_loss,
             "cov": cov_loss,
+            "qspec": query_loss,
             "adv": torch.tensor(0.0, device=pred.device),
         }
 
