@@ -486,33 +486,107 @@ def evaluate(task_key, task_label, task_class, model, n_channels, device,
     # ========== FINE-TUNE (optional) ==========
     if run_finetune:
         import copy
-        ft_criterion = torch.nn.CrossEntropyLoss()
+        import math
+
         X_tr_tensor = torch.from_numpy(X_tr)
         y_tr_tensor = torch.from_numpy(y_tr).long()
-        ft_loader = DataLoader(
-            TensorDataset(X_tr_tensor, y_tr_tensor),
-            batch_size=32, shuffle=True, drop_last=True,
-        )
         X_te_tensor = torch.from_numpy(X_te).to(device)
 
+        # Train/val split (85/15) for early stopping
+        n_total = len(X_tr_tensor)
+        n_val_ft = max(1, int(n_total * 0.15))
+        n_train_ft = n_total - n_val_ft
+        perm = torch.randperm(n_total)
+        train_idx, val_idx = perm[:n_train_ft], perm[n_train_ft:]
+
+        ft_train_loader = DataLoader(
+            TensorDataset(X_tr_tensor[train_idx], y_tr_tensor[train_idx]),
+            batch_size=32, shuffle=True, drop_last=True,
+        )
+        ft_val_loader = DataLoader(
+            TensorDataset(X_tr_tensor[val_idx], y_tr_tensor[val_idx]),
+            batch_size=64, shuffle=False,
+        )
+
+        # Class weights for imbalanced data
+        class_counts = torch.bincount(y_tr_tensor[train_idx])
+        class_weights = (1.0 / class_counts.float().clamp(min=1))
+        class_weights = (class_weights / class_weights.sum() * n_classes).to(device)
+
         def _run_finetune(ft_model, label):
+            max_epochs = 50
             ft_head = torch.nn.Sequential(
                 torch.nn.BatchNorm1d(ft_model.d_model),
                 torch.nn.Linear(ft_model.d_model, n_classes),
             ).to(device)
+
+            # OneCycleLR (like LaBraM)
+            steps_per_epoch = len(ft_train_loader)
             optimizer = torch.optim.AdamW([
-                {"params": ft_model.parameters(), "lr": 1e-4},
-                {"params": ft_head.parameters(), "lr": 1e-3},
+                {"params": ft_model.parameters(), "lr": 1e-6},
+                {"params": ft_head.parameters(), "lr": 1e-6},
             ], weight_decay=0.01)
-            ft_model.train(); ft_head.train()
-            for ep in range(50):
-                for bx, by in ft_loader:
+            scheduler = torch.optim.lr_scheduler.OneCycleLR(
+                optimizer, max_lr=[4e-4, 4e-3],
+                steps_per_epoch=steps_per_epoch,
+                epochs=max_epochs, pct_start=0.2,
+            )
+
+            criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+
+            best_val_acc = 0.0
+            best_state = None
+            patience = 10
+            no_improve = 0
+
+            for ep in range(max_epochs):
+                # Train
+                ft_model.train(); ft_head.train()
+                for bx, by in ft_train_loader:
                     bx, by = bx.to(device), by.to(device)
                     logits = ft_head(ft_model._encode(ft_model._tokenize(bx)).mean(1))
+                    loss = criterion(logits, by)
                     optimizer.zero_grad()
-                    ft_criterion(logits, by).backward()
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(
+                        list(ft_model.parameters()) + list(ft_head.parameters()), 3.0)
                     optimizer.step()
+                    scheduler.step()
+
+                # Validate
+                ft_model.eval(); ft_head.eval()
+                val_preds, val_labels = [], []
+                with torch.no_grad():
+                    for bx, by in ft_val_loader:
+                        bx = bx.to(device)
+                        logits = ft_head(ft_model._encode(ft_model._tokenize(bx)).mean(1))
+                        val_preds.append(logits.argmax(-1).cpu())
+                        val_labels.append(by)
+                val_acc = balanced_accuracy_score(
+                    torch.cat(val_labels).numpy(),
+                    torch.cat(val_preds).numpy(),
+                )
+
+                if val_acc > best_val_acc:
+                    best_val_acc = val_acc
+                    best_state = {
+                        "model": {k: v.cpu().clone() for k, v in ft_model.state_dict().items()},
+                        "head": {k: v.cpu().clone() for k, v in ft_head.state_dict().items()},
+                    }
+                    no_improve = 0
+                else:
+                    no_improve += 1
+                    if no_improve >= patience:
+                        break
+
+            # Load best model and evaluate on test set
+            if best_state is not None:
+                ft_model.load_state_dict(best_state["model"])
+                ft_head.load_state_dict(best_state["head"])
+            ft_model = ft_model.to(device)
+            ft_head = ft_head.to(device)
             ft_model.eval(); ft_head.eval()
+
             preds = []
             with torch.no_grad():
                 for i in range(0, len(X_te_tensor), 64):
@@ -520,8 +594,8 @@ def evaluate(task_key, task_label, task_class, model, n_channels, device,
                     logits = ft_head(ft_model._encode(ft_model._tokenize(batch)).mean(1))
                     preds.append(logits.argmax(-1).cpu().numpy())
             acc = balanced_accuracy_score(y_te, np.concatenate(preds))
-            print(f"    → {acc:.3f}")
-            del ft_model, ft_head; torch.cuda.empty_cache()
+            print(f"    → {acc:.3f} (best_val={best_val_acc:.3f})")
+            del ft_model, ft_head, best_state; torch.cuda.empty_cache()
             return acc
 
         print(f"  [Fine-tune] JEPA...")
