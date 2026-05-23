@@ -24,6 +24,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from eeg_jepa import EEGJEPA
 from eeg_mae import EEGMAE
+from eeg_lejepa import EEGLeJEPA
 from dataset import PhysioNetMIDataset
 from dataset_multi import MultiDatasetEEG
 
@@ -155,8 +156,9 @@ def main():
                         default="/home/share/data_makchen/peng/datasets/physionet")
     parser.add_argument("--output_dir", type=str,
                         default="/home/share/data_makchen/peng/models/eeg_jepa")
-    parser.add_argument("--model", type=str, default="jepa", choices=["jepa", "mae"],
-                        help="Pretraining model: jepa (latent prediction) or mae (reconstruction)")
+    parser.add_argument("--model", type=str, default="jepa",
+                        choices=["jepa", "mae", "lejepa"],
+                        help="Pretraining model: jepa (Laya-style), mae (reconstruction), lejepa (true LeJEPA, no predictor)")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=3e-4)
@@ -268,8 +270,10 @@ def main():
     )
 
     # Model
-    model_cls = EEGMAE if args.model == "mae" else EEGJEPA
-    model_name = "EEG-MAE" if args.model == "mae" else "EEG-JEPA"
+    model_map = {"jepa": EEGJEPA, "mae": EEGMAE, "lejepa": EEGLeJEPA}
+    name_map = {"jepa": "EEG-JEPA (Laya-style)", "mae": "EEG-MAE", "lejepa": "EEG-LeJEPA (true)"}
+    model_cls = model_map[args.model]
+    model_name = name_map[args.model]
     pprint(f"Building {model_name} (d={args.d_model}, layers={args.encoder_layers}, "
            f"mask={args.mask_ratio:.0%})...")
 
@@ -284,8 +288,9 @@ def main():
     )
     if args.model == "mae":
         model_kwargs.update(decoder_layers=3, decoder_dim=128, decoder_heads=4)
-    else:
+    elif args.model == "jepa":
         model_kwargs.update(predictor_layers=3, predictor_dim=128, predictor_heads=4)
+    # lejepa: no extra kwargs needed (no predictor)
 
     model = model_cls(**model_kwargs).to(device)
 
