@@ -48,6 +48,8 @@ EEGBENCH_DIR = os.environ.get("EEGBENCH_DIR",
 sys.path.insert(0, EEGBENCH_DIR)
 
 from eeg_jepa import EEGJEPA
+from eeg_mae import EEGMAE
+from eeg_lejepa import EEGLeJEPA
 
 
 # ============================================================
@@ -383,7 +385,7 @@ def _extract_labram_frozen_features(X_train, y_train, meta_train,
 
 
 def evaluate(task_key, task_label, task_class, model, n_channels, device,
-             n_reps=5, run_baselines=False, run_finetune=False):
+             n_reps=5, run_baselines=False, run_finetune=False, model_cls=None):
     """Run evaluation on one EEG-Bench task."""
     print(f"\n{'='*60}")
     print(f"  {task_label} ({task_key})")
@@ -429,7 +431,7 @@ def evaluate(task_key, task_label, task_class, model, n_channels, device,
 
     # --- Random frozen ---
     print(f"  [Frozen] Random...")
-    random_model = EEGJEPA(n_channels=n_channels).to(device)
+    random_model = model_cls(n_channels=n_channels).to(device)
     feat_tr_r = extract_features(random_model, X_tr, device)
     feat_te_r = extract_features(random_model, X_te, device)
     del random_model
@@ -603,7 +605,7 @@ def evaluate(task_key, task_label, task_class, model, n_channels, device,
 
         print(f"  [Fine-tune] Random...")
         results["random_finetune"] = {"mean": _run_finetune(
-            EEGJEPA(n_channels=n_channels).to(device), "Random")}
+            model_cls(n_channels=n_channels).to(device), "Random")}
 
         if run_baselines:
             LaBraMModel = load_labram_model()
@@ -665,14 +667,28 @@ def main():
             n_channels = val.shape[0]
             break
 
-    model = EEGJEPA(
+    # Auto-detect model type
+    model_type = ckpt_args.get("model", "jepa")
+    keys_str = str(ckpt["model_state_dict"].keys())
+    if model_type == "mae" or "reconstruction_head" in keys_str:
+        model_cls = EEGMAE
+        model_type_name = "EEG-MAE"
+    elif model_type == "lejepa" or ("pred_head" in keys_str and "predictor" not in keys_str):
+        model_cls = EEGLeJEPA
+        model_type_name = "EEG-LeJEPA"
+    else:
+        model_cls = EEGJEPA
+        model_type_name = "EEG-JEPA"
+
+    model_kwargs = dict(
         n_channels=n_channels,
         d_model=ckpt_args.get("d_model", 256),
         encoder_layers=ckpt_args.get("encoder_layers", 6),
-    ).to(device)
+    )
+    model = model_cls(**model_kwargs).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
-    print(f"Model: {n_channels}ch, d={ckpt_args.get('d_model', 256)}")
+    print(f"Model: {model_type_name}, {n_channels}ch, d={ckpt_args.get('d_model', 256)}")
 
     # Register tasks
     register_tasks()
@@ -686,7 +702,7 @@ def main():
         label, cls = TASK_REGISTRY[key]
         result = evaluate(key, label, cls, model, n_channels, device,
                           n_reps=args.n_reps, run_baselines=args.run_baselines,
-                          run_finetune=args.finetune)
+                          run_finetune=args.finetune, model_cls=model_cls)
         if result:
             all_results[key] = result
 
