@@ -184,6 +184,8 @@ def main():
                         help="Where MOABB auto-downloads data")
     parser.add_argument("--d_model", type=int, default=256)
     parser.add_argument("--encoder_layers", type=int, default=6)
+    parser.add_argument("--n_queries", type=int, default=16,
+                        help="Number of channel mixer queries (1=simple, 16=DCM)")
     parser.add_argument("--mask_ratio", type=float, default=0.60)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
@@ -281,6 +283,7 @@ def main():
         n_channels=n_channels,
         state_samples=26,
         d_model=args.d_model,
+        n_queries=args.n_queries,
         encoder_layers=args.encoder_layers,
         encoder_heads=8,
         mask_ratio=args.mask_ratio,
