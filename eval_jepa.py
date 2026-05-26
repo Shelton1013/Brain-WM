@@ -26,6 +26,9 @@ from torch.utils.data import DataLoader
 from eeg_jepa import EEGJEPA
 from eeg_mae import EEGMAE
 from eeg_lejepa import EEGLeJEPA
+from eeg_lejepa_spectral import EEGLeJEPASpectral
+from eeg_lejepa_region import EEGLeJEPARegion
+from eeg_lejepa_full import EEGLeJEPAFull
 from evaluate import PhysioNetMI_Labeled  # reuse labeled dataset
 
 
@@ -251,9 +254,25 @@ def main():
         # Auto-detect model type from checkpoint
         model_type = ckpt_args.get("model", "jepa")
         keys_str = str(ckpt["model_state_dict"].keys())
-        if model_type == "mae" or "reconstruction_head" in keys_str:
+        model_type_map = {
+            "mae": EEGMAE,
+            "lejepa": EEGLeJEPA,
+            "lejepa_spectral": EEGLeJEPASpectral,
+            "lejepa_region": EEGLeJEPARegion,
+            "lejepa_full": EEGLeJEPAFull,
+            "jepa": EEGJEPA,
+        }
+        if model_type in model_type_map:
+            model_cls = model_type_map[model_type]
+        elif "reconstruction_head" in keys_str:
             model_cls = EEGMAE
-        elif model_type == "lejepa" or ("pred_head" in keys_str and "predictor" not in keys_str):
+        elif "freq_predictor" in keys_str:
+            model_cls = EEGLeJEPAFull
+        elif "filter_bank" in keys_str or "band_encoder" in keys_str:
+            model_cls = EEGLeJEPASpectral
+        elif "region_masker" in keys_str:
+            model_cls = EEGLeJEPARegion
+        elif "pred_head" in keys_str and "predictor" not in keys_str:
             model_cls = EEGLeJEPA
         else:
             model_cls = EEGJEPA

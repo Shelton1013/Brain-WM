@@ -25,6 +25,9 @@ from torch.utils.data.distributed import DistributedSampler
 from eeg_jepa import EEGJEPA
 from eeg_mae import EEGMAE
 from eeg_lejepa import EEGLeJEPA
+from eeg_lejepa_spectral import EEGLeJEPASpectral
+from eeg_lejepa_region import EEGLeJEPARegion
+from eeg_lejepa_full import EEGLeJEPAFull
 from dataset import PhysioNetMIDataset
 from dataset_multi import MultiDatasetEEG
 
@@ -157,8 +160,8 @@ def main():
     parser.add_argument("--output_dir", type=str,
                         default="/home/share/data_makchen/peng/models/eeg_jepa")
     parser.add_argument("--model", type=str, default="jepa",
-                        choices=["jepa", "mae", "lejepa"],
-                        help="Pretraining model: jepa (Laya-style), mae (reconstruction), lejepa (true LeJEPA, no predictor)")
+                        choices=["jepa", "mae", "lejepa", "lejepa_spectral", "lejepa_region", "lejepa_full"],
+                        help="jepa/mae/lejepa/lejepa_spectral/lejepa_region/lejepa_full (tri-dimensional)")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=3e-4)
@@ -272,8 +275,16 @@ def main():
     )
 
     # Model
-    model_map = {"jepa": EEGJEPA, "mae": EEGMAE, "lejepa": EEGLeJEPA}
-    name_map = {"jepa": "EEG-JEPA (Laya-style)", "mae": "EEG-MAE", "lejepa": "EEG-LeJEPA (true)"}
+    model_map = {
+        "jepa": EEGJEPA, "mae": EEGMAE, "lejepa": EEGLeJEPA,
+        "lejepa_spectral": EEGLeJEPASpectral, "lejepa_region": EEGLeJEPARegion,
+        "lejepa_full": EEGLeJEPAFull,
+    }
+    name_map = {
+        "jepa": "EEG-JEPA (Laya-style)", "mae": "EEG-MAE",
+        "lejepa": "EEG-LeJEPA", "lejepa_spectral": "EEG-LeJEPA+Spectral",
+        "lejepa_region": "EEG-LeJEPA+Region", "lejepa_full": "EEG-LeJEPA+Full",
+    }
     model_cls = model_map[args.model]
     model_name = name_map[args.model]
     pprint(f"Building {model_name} (d={args.d_model}, layers={args.encoder_layers}, "
