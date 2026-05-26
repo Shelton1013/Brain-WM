@@ -282,6 +282,9 @@ def main():
             d_model=ckpt_args.get("d_model", 256),
             encoder_layers=ckpt_args.get("encoder_layers", 6),
         )
+        # Pass n_queries if checkpoint was trained with non-default value
+        if "n_queries" in ckpt_args:
+            model_kwargs["n_queries"] = ckpt_args["n_queries"]
         m = model_cls(**model_kwargs).to(device)
         m.load_state_dict(ckpt["model_state_dict"])
         return m
