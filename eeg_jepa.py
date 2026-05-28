@@ -22,6 +22,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from regularizers import distribution_reg
+
 
 # ============================================================
 # 1. Transformer block
@@ -182,6 +184,7 @@ class EEGJEPA(nn.Module):
         sigreg_weight: float = 0.05,
         query_spec_weight: float = 0.1,  # Query Specialization Loss weight
         n_subjects: int = 109,
+        reg_type: str = "sigreg",        # "sigreg" (CF test) | "vicreg" (var+cov)
     ):
         super().__init__()
         self.state_samples = state_samples
@@ -190,6 +193,7 @@ class EEGJEPA(nn.Module):
         self.mask_block_size = mask_block_size
         self.sigreg_weight = sigreg_weight
         self.query_spec_weight = query_spec_weight
+        self.reg_type = reg_type
 
         # --- Dynamic Channel Mixer (Laya-style multi-query) ---
         self.tokenizer = DynamicChannelMixer(
@@ -339,11 +343,12 @@ class EEGJEPA(nn.Module):
         }
 
     def compute_loss(self, outputs: dict, subject_ids: torch.Tensor = None) -> dict:
-        """L2 prediction + SIGReg on encoder output.
+        """L2 prediction + distribution regularization on encoder output.
 
-        SIGReg encourages representations to be approximately isotropic
-        Gaussian: all dimensions active, uncorrelated, unit variance.
-        Essential for EEG where low information density causes collapse.
+        The regularizer (true SIGReg, or VICReg ablation) encourages
+        representations to be approximately isotropic Gaussian: all
+        dimensions active, uncorrelated, unit variance. Essential for EEG
+        where low information density causes collapse.
         """
         pred = outputs["predictions"]       # [B, n_mask, D]
         target = outputs["targets"]         # [B, n_mask, D] (already stop-grad)
@@ -352,33 +357,21 @@ class EEGJEPA(nn.Module):
         # --- Prediction loss (L2) ---
         pred_loss = F.mse_loss(pred, target)
 
-        # --- SIGReg: push representations toward isotropic Gaussian ---
-        B, N, D = all_enc.shape
-        x = all_enc.reshape(-1, D)  # [B*N, D]
-
-        # Variance term: per-dim std → 1
-        std = x.std(dim=0)
-        var_loss = F.relu(1.0 - std).mean()
-
-        # Covariance term: off-diagonal → 0 (decorrelation)
-        x_centered = x - x.mean(dim=0, keepdim=True)
-        cov = (x_centered.T @ x_centered) / max(x.shape[0] - 1, 1)
-        cov_loss = cov.fill_diagonal_(0).pow(2).sum() / D
-
-        sigreg_loss = var_loss + cov_loss
+        # --- Distribution regularization (true SIGReg, or VICReg ablation) ---
+        x = all_enc.reshape(-1, all_enc.shape[-1])  # [B*N, D]
+        reg, reg_info = distribution_reg(x, self.reg_type)
 
         # --- Query Specialization Loss (force diverse channel queries) ---
         query_loss = self.tokenizer.get_query_specialization_loss()
 
         total = (pred_loss
-                 + self.sigreg_weight * sigreg_loss
+                 + self.sigreg_weight * reg
                  + self.query_spec_weight * query_loss)
 
         return {
             "total": total,
             "pred": pred_loss,
-            "var": var_loss,
-            "cov": cov_loss,
+            **reg_info,
             "qspec": query_loss,
             "adv": torch.tensor(0.0, device=pred.device),
         }

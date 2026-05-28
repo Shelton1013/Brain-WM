@@ -15,6 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from eeg_jepa import TransformerBlock, DynamicChannelMixer
+from regularizers import distribution_reg
 
 
 # ============================================================
@@ -190,6 +191,7 @@ class EEGLeJEPASpectral(nn.Module):
         sigreg_lambda: float = 0.05,
         query_spec_weight: float = 0.1,
         n_subjects: int = 109,
+        reg_type: str = "sigreg",        # "sigreg" (true LeJEPA) | "vicreg" (ablation)
     ):
         super().__init__()
         self.state_samples = state_samples
@@ -198,6 +200,7 @@ class EEGLeJEPASpectral(nn.Module):
         self.mask_block_size = mask_block_size
         self.sigreg_lambda = sigreg_lambda
         self.query_spec_weight = query_spec_weight
+        self.reg_type = reg_type
 
         # Spectral tokenizer (frequency-aware)
         self.tokenizer = SpectralChannelMixer(
@@ -287,21 +290,18 @@ class EEGLeJEPASpectral(nn.Module):
 
         pred_loss = F.mse_loss(pred, target)
 
-        B, N, D = all_enc.shape
-        x = all_enc.reshape(-1, D)
-        var_loss = F.relu(1.0 - x.std(dim=0)).mean()
-        x_c = x - x.mean(dim=0, keepdim=True)
-        cov = (x_c.T @ x_c) / max(x.shape[0]-1, 1)
-        cov_loss = cov.fill_diagonal_(0).pow(2).sum() / D
+        # Distribution regularization (true SIGReg, or VICReg ablation)
+        x = all_enc.reshape(-1, all_enc.shape[-1])
+        reg, reg_info = distribution_reg(x, self.reg_type)
 
         query_loss = self.tokenizer.get_query_specialization_loss()
 
         total = ((1 - self.sigreg_lambda) * pred_loss
-                 + self.sigreg_lambda * (var_loss + cov_loss)
+                 + self.sigreg_lambda * reg
                  + self.query_spec_weight * query_loss)
 
-        return {"total": total, "pred": pred_loss, "var": var_loss,
-                "cov": cov_loss, "qspec": query_loss,
+        return {"total": total, "pred": pred_loss, **reg_info,
+                "qspec": query_loss,
                 "adv": torch.tensor(0.0, device=pred.device)}
 
     def update_ema(self): pass

@@ -19,6 +19,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from eeg_jepa import TransformerBlock, DynamicChannelMixer
+from regularizers import distribution_reg
 
 
 class EEGMAE(nn.Module):
@@ -47,6 +48,7 @@ class EEGMAE(nn.Module):
         sigreg_weight: float = 0.05,
         query_spec_weight: float = 0.1,
         n_subjects: int = 109,
+        reg_type: str = "sigreg",        # "sigreg" (CF test) | "vicreg" (var+cov)
     ):
         super().__init__()
         self.state_samples = state_samples
@@ -56,6 +58,7 @@ class EEGMAE(nn.Module):
         self.mask_block_size = mask_block_size
         self.sigreg_weight = sigreg_weight
         self.query_spec_weight = query_spec_weight
+        self.reg_type = reg_type
 
         # Raw patch dimension (for reconstruction target)
         self.patch_dim = state_samples * n_channels  # 26 * 64 = 1664
@@ -225,7 +228,7 @@ class EEGMAE(nn.Module):
         }
 
     def compute_loss(self, outputs: dict, subject_ids: torch.Tensor = None) -> dict:
-        """MSE reconstruction loss + SIGReg."""
+        """MSE reconstruction loss + distribution regularization."""
         pred = outputs["predictions"]       # [B, n_mask, S*C]
         target = outputs["targets"]         # [B, n_mask, S*C]
         encoded = outputs["all_encoded"]    # [B, n_vis, D]
@@ -233,30 +236,21 @@ class EEGMAE(nn.Module):
         # --- Reconstruction loss (MSE on raw EEG patches) ---
         pred_loss = F.mse_loss(pred, target)
 
-        # --- SIGReg (same as JEPA) ---
-        B, N_vis, D = encoded.shape
-        x = encoded.reshape(-1, D)
-
-        std = x.std(dim=0)
-        var_loss = F.relu(1.0 - std).mean()
-
-        x_centered = x - x.mean(dim=0, keepdim=True)
-        cov = (x_centered.T @ x_centered) / max(x.shape[0] - 1, 1)
-        cov_loss = cov.fill_diagonal_(0).pow(2).sum() / D
+        # --- Distribution regularization (true SIGReg, or VICReg ablation) ---
+        x = encoded.reshape(-1, encoded.shape[-1])
+        reg, reg_info = distribution_reg(x, self.reg_type)
 
         # Query specialization loss
         query_loss = self.tokenizer.get_query_specialization_loss()
 
-        sigreg_loss = var_loss + cov_loss
         total = (pred_loss
-                 + self.sigreg_weight * sigreg_loss
+                 + self.sigreg_weight * reg
                  + self.query_spec_weight * query_loss)
 
         return {
             "total": total,
             "pred": pred_loss,
-            "var": var_loss,
-            "cov": cov_loss,
+            **reg_info,
             "qspec": query_loss,
             "adv": torch.tensor(0.0, device=pred.device),
         }

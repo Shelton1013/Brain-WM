@@ -117,6 +117,7 @@ def train_epoch(model, raw_model, loader, optimizer, scheduler, device,
                 f"  Epoch {epoch} [{batch_idx}/{len(loader)}] "
                 f"loss={losses['total']:.6f} "
                 f"pred={losses['pred']:.6f} "
+                f"sig={losses.get('sigreg', 0):.4f} "
                 f"var={losses.get('var', 0):.4f} "
                 f"cov={losses.get('cov', 0):.4f} "
                 f"qs={losses.get('qspec', 0):.4f} "
@@ -190,6 +191,10 @@ def main():
     parser.add_argument("--n_queries", type=int, default=16,
                         help="Number of channel mixer queries (1=simple, 16=DCM)")
     parser.add_argument("--mask_ratio", type=float, default=0.60)
+    parser.add_argument("--reg_type", type=str, default="sigreg",
+                        choices=["sigreg", "vicreg"],
+                        help="Anti-collapse regularizer: sigreg (true LeJEPA, "
+                             "characteristic-function test) or vicreg (var+cov ablation)")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -288,7 +293,7 @@ def main():
     model_cls = model_map[args.model]
     model_name = name_map[args.model]
     pprint(f"Building {model_name} (d={args.d_model}, layers={args.encoder_layers}, "
-           f"mask={args.mask_ratio:.0%})...")
+           f"mask={args.mask_ratio:.0%}, reg={args.reg_type})...")
 
     model_kwargs = dict(
         n_channels=n_channels,
@@ -299,6 +304,7 @@ def main():
         encoder_heads=8,
         mask_ratio=args.mask_ratio,
         n_subjects=args.n_subjects,
+        reg_type=args.reg_type,
     )
     if args.model == "mae":
         model_kwargs.update(decoder_layers=3, decoder_dim=128, decoder_heads=4)
