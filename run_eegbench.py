@@ -50,6 +50,9 @@ sys.path.insert(0, EEGBENCH_DIR)
 from eeg_jepa import EEGJEPA
 from eeg_mae import EEGMAE
 from eeg_lejepa import EEGLeJEPA
+from eeg_lejepa_spectral import EEGLeJEPASpectral
+from eeg_lejepa_region import EEGLeJEPARegion
+from eeg_lejepa_full import EEGLeJEPAFull
 
 
 # ============================================================
@@ -670,21 +673,38 @@ def main():
     # Auto-detect model type
     model_type = ckpt_args.get("model", "jepa")
     keys_str = str(ckpt["model_state_dict"].keys())
-    if model_type == "mae" or "reconstruction_head" in keys_str:
-        model_cls = EEGMAE
-        model_type_name = "EEG-MAE"
-    elif model_type == "lejepa" or ("pred_head" in keys_str and "predictor" not in keys_str):
-        model_cls = EEGLeJEPA
-        model_type_name = "EEG-LeJEPA"
+
+    type_map = {
+        "mae": (EEGMAE, "EEG-MAE"),
+        "lejepa_full": (EEGLeJEPAFull, "EEG-LeJEPA+Full"),
+        "lejepa_spectral": (EEGLeJEPASpectral, "EEG-LeJEPA+Spectral"),
+        "lejepa_region": (EEGLeJEPARegion, "EEG-LeJEPA+Region"),
+        "lejepa": (EEGLeJEPA, "EEG-LeJEPA"),
+        "jepa": (EEGJEPA, "EEG-JEPA"),
+    }
+
+    if model_type in type_map:
+        model_cls, model_type_name = type_map[model_type]
+    elif "reconstruction_head" in keys_str:
+        model_cls, model_type_name = EEGMAE, "EEG-MAE"
+    elif "freq_predictor" in keys_str:
+        model_cls, model_type_name = EEGLeJEPAFull, "EEG-LeJEPA+Full"
+    elif "filter_bank" in keys_str and "region_masker" not in keys_str:
+        model_cls, model_type_name = EEGLeJEPASpectral, "EEG-LeJEPA+Spectral"
+    elif "region_masker" in keys_str and "filter_bank" not in keys_str:
+        model_cls, model_type_name = EEGLeJEPARegion, "EEG-LeJEPA+Region"
+    elif "pred_head" in keys_str and "predictor" not in keys_str:
+        model_cls, model_type_name = EEGLeJEPA, "EEG-LeJEPA"
     else:
-        model_cls = EEGJEPA
-        model_type_name = "EEG-JEPA"
+        model_cls, model_type_name = EEGJEPA, "EEG-JEPA"
 
     model_kwargs = dict(
         n_channels=n_channels,
         d_model=ckpt_args.get("d_model", 256),
         encoder_layers=ckpt_args.get("encoder_layers", 6),
     )
+    if "n_queries" in ckpt_args:
+        model_kwargs["n_queries"] = ckpt_args["n_queries"]
     model = model_cls(**model_kwargs).to(device)
     model.load_state_dict(ckpt["model_state_dict"])
     model.eval()
