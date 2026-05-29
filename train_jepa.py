@@ -28,6 +28,7 @@ from eeg_lejepa import EEGLeJEPA
 from eeg_lejepa_spectral import EEGLeJEPASpectral
 from eeg_lejepa_region import EEGLeJEPARegion
 from eeg_lejepa_full import EEGLeJEPAFull
+from eeg_lejepa_crossfreq import EEGLeJEPACrossFreq
 from dataset import PhysioNetMIDataset
 from dataset_multi import MultiDatasetEEG
 
@@ -120,6 +121,7 @@ def train_epoch(model, raw_model, loader, optimizer, scheduler, device,
                 f"sig={losses.get('sigreg', 0):.4f} "
                 f"var={losses.get('var', 0):.4f} "
                 f"cov={losses.get('cov', 0):.4f} "
+                f"freq={losses.get('freq', 0):.4f} "
                 f"qs={losses.get('qspec', 0):.4f} "
                 f"lr={lr:.2e}"
             )
@@ -161,8 +163,10 @@ def main():
     parser.add_argument("--output_dir", type=str,
                         default="/home/share/data_makchen/peng/models/eeg_jepa")
     parser.add_argument("--model", type=str, default="jepa",
-                        choices=["jepa", "mae", "lejepa", "lejepa_spectral", "lejepa_region", "lejepa_full"],
-                        help="jepa/mae/lejepa/lejepa_spectral/lejepa_region/lejepa_full (tri-dimensional)")
+                        choices=["jepa", "mae", "lejepa", "lejepa_spectral",
+                                 "lejepa_region", "lejepa_crossfreq", "lejepa_full"],
+                        help="jepa/mae/lejepa/lejepa_spectral/lejepa_region/"
+                             "lejepa_crossfreq (cross-freq only)/lejepa_full (tri-dimensional)")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=3e-4)
@@ -195,6 +199,9 @@ def main():
                         choices=["sigreg", "vicreg"],
                         help="Anti-collapse regularizer: sigreg (true LeJEPA, "
                              "characteristic-function test) or vicreg (var+cov ablation)")
+    parser.add_argument("--freq_mask_weight", type=float, default=1.0,
+                        help="Weight of the cross-frequency loss (lejepa_crossfreq/"
+                             "lejepa_full). Set 0.0 for the matched no-CF control.")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -283,12 +290,13 @@ def main():
     model_map = {
         "jepa": EEGJEPA, "mae": EEGMAE, "lejepa": EEGLeJEPA,
         "lejepa_spectral": EEGLeJEPASpectral, "lejepa_region": EEGLeJEPARegion,
-        "lejepa_full": EEGLeJEPAFull,
+        "lejepa_crossfreq": EEGLeJEPACrossFreq, "lejepa_full": EEGLeJEPAFull,
     }
     name_map = {
         "jepa": "EEG-JEPA (Laya-style)", "mae": "EEG-MAE",
         "lejepa": "EEG-LeJEPA", "lejepa_spectral": "EEG-LeJEPA+Spectral",
-        "lejepa_region": "EEG-LeJEPA+Region", "lejepa_full": "EEG-LeJEPA+Full",
+        "lejepa_region": "EEG-LeJEPA+Region",
+        "lejepa_crossfreq": "EEG-LeJEPA+CrossFreq", "lejepa_full": "EEG-LeJEPA+Full",
     }
     model_cls = model_map[args.model]
     model_name = name_map[args.model]
@@ -310,6 +318,8 @@ def main():
         model_kwargs.update(decoder_layers=3, decoder_dim=128, decoder_heads=4)
     elif args.model == "jepa":
         model_kwargs.update(predictor_layers=3, predictor_dim=128, predictor_heads=4)
+    elif args.model in ("lejepa_crossfreq", "lejepa_full"):
+        model_kwargs.update(freq_mask_weight=args.freq_mask_weight)
     # lejepa: no extra kwargs needed (no predictor)
 
     model = model_cls(**model_kwargs).to(device)

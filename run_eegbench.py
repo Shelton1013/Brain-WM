@@ -53,6 +53,7 @@ from eeg_lejepa import EEGLeJEPA
 from eeg_lejepa_spectral import EEGLeJEPASpectral
 from eeg_lejepa_region import EEGLeJEPARegion
 from eeg_lejepa_full import EEGLeJEPAFull
+from eeg_lejepa_crossfreq import EEGLeJEPACrossFreq
 
 
 # ============================================================
@@ -677,6 +678,7 @@ def main():
     type_map = {
         "mae": (EEGMAE, "EEG-MAE"),
         "lejepa_full": (EEGLeJEPAFull, "EEG-LeJEPA+Full"),
+        "lejepa_crossfreq": (EEGLeJEPACrossFreq, "EEG-LeJEPA+CrossFreq"),
         "lejepa_spectral": (EEGLeJEPASpectral, "EEG-LeJEPA+Spectral"),
         "lejepa_region": (EEGLeJEPARegion, "EEG-LeJEPA+Region"),
         "lejepa": (EEGLeJEPA, "EEG-LeJEPA"),
@@ -687,8 +689,10 @@ def main():
         model_cls, model_type_name = type_map[model_type]
     elif "reconstruction_head" in keys_str:
         model_cls, model_type_name = EEGMAE, "EEG-MAE"
-    elif "freq_predictor" in keys_str:
+    elif "freq_predictor" in keys_str and "region_masker" in keys_str:
         model_cls, model_type_name = EEGLeJEPAFull, "EEG-LeJEPA+Full"
+    elif "freq_predictor" in keys_str:
+        model_cls, model_type_name = EEGLeJEPACrossFreq, "EEG-LeJEPA+CrossFreq"
     elif "filter_bank" in keys_str and "region_masker" not in keys_str:
         model_cls, model_type_name = EEGLeJEPASpectral, "EEG-LeJEPA+Spectral"
     elif "region_masker" in keys_str and "filter_bank" not in keys_str:

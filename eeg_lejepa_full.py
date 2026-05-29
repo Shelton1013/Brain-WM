@@ -217,10 +217,12 @@ class CrossFrequencyPredictor(nn.Module):
         # Predict each masked band
         predicted = self.predictor(context)  # [B, N, d]
 
-        # Target: original masked band representations
+        # Target: original masked band representations.
+        # No StopGrad — LeJEPA-consistent; SIGReg on the encoded path guards
+        # against collapse rather than detaching the target.
         total_loss = torch.tensor(0.0, device=band_tokens.device)
         for band_idx in masked_bands:
-            target = band_tokens[:, :, band_idx, :].detach()  # [B, N, d]
+            target = band_tokens[:, :, band_idx, :]  # [B, N, d]
             total_loss = total_loss + F.mse_loss(predicted, target)
 
         return total_loss / n_mask, n_mask
@@ -289,7 +291,7 @@ class RegionMasker(nn.Module):
             loss = torch.tensor(0.0, device=tokens.device)
             for r in masked_idx:
                 s, e = r.item() * d, min((r.item() + 1) * d, D)
-                target = tokens[:, :, s:e].detach()
+                target = tokens[:, :, s:e]  # no StopGrad — LeJEPA-consistent
                 pred_slice = predicted[:, :, :e-s]
                 loss = loss + F.mse_loss(pred_slice, target)
             loss = loss / n_mask

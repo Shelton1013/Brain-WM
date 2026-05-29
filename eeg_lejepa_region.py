@@ -129,7 +129,8 @@ class RegionMasker(nn.Module):
             pred = mask_info["predicted_regions"]
             # Align dimensions
             d = min(pred.shape[-1], orig.shape[-1])
-            total_loss = total_loss + F.mse_loss(pred[..., :d], orig[..., :d].detach())
+            # No StopGrad on the target — LeJEPA-consistent; SIGReg prevents collapse.
+            total_loss = total_loss + F.mse_loss(pred[..., :d], orig[..., :d])
 
         return total_loss / max(len(mask_info["original_regions"]), 1)
 

@@ -29,6 +29,7 @@ from eeg_lejepa import EEGLeJEPA
 from eeg_lejepa_spectral import EEGLeJEPASpectral
 from eeg_lejepa_region import EEGLeJEPARegion
 from eeg_lejepa_full import EEGLeJEPAFull
+from eeg_lejepa_crossfreq import EEGLeJEPACrossFreq
 from evaluate import PhysioNetMI_Labeled  # reuse labeled dataset
 
 
@@ -259,6 +260,7 @@ def main():
             "lejepa": EEGLeJEPA,
             "lejepa_spectral": EEGLeJEPASpectral,
             "lejepa_region": EEGLeJEPARegion,
+            "lejepa_crossfreq": EEGLeJEPACrossFreq,
             "lejepa_full": EEGLeJEPAFull,
             "jepa": EEGJEPA,
         }
@@ -266,8 +268,10 @@ def main():
             model_cls = model_type_map[model_type]
         elif "reconstruction_head" in keys_str:
             model_cls = EEGMAE
-        elif "freq_predictor" in keys_str:
+        elif "freq_predictor" in keys_str and "region_masker" in keys_str:
             model_cls = EEGLeJEPAFull
+        elif "freq_predictor" in keys_str:
+            model_cls = EEGLeJEPACrossFreq
         elif "filter_bank" in keys_str or "band_encoder" in keys_str:
             model_cls = EEGLeJEPASpectral
         elif "region_masker" in keys_str:
