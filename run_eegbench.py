@@ -389,7 +389,8 @@ def _extract_labram_frozen_features(X_train, y_train, meta_train,
 
 
 def evaluate(task_key, task_label, task_class, model, n_channels, device,
-             n_reps=5, run_baselines=False, run_finetune=False, model_cls=None):
+             n_reps=5, run_baselines=False, run_finetune=False, model_cls=None,
+             skip_labram_finetune=False):
     """Run evaluation on one EEG-Bench task."""
     print(f"\n{'='*60}")
     print(f"  {task_label} ({task_key})")
@@ -611,7 +612,7 @@ def evaluate(task_key, task_label, task_class, model, n_channels, device,
         results["random_finetune"] = {"mean": _run_finetune(
             model_cls(n_channels=n_channels).to(device), "Random")}
 
-        if run_baselines:
+        if run_baselines and not skip_labram_finetune:
             LaBraMModel = load_labram_model()
             if LaBraMModel is not None:
                 try:
@@ -651,6 +652,9 @@ def main():
                         help="Include LaBraM and CSP-LDA baselines")
     parser.add_argument("--finetune", action="store_true",
                         help="Also run fine-tune evaluation (slow)")
+    parser.add_argument("--skip_labram_finetune", action="store_true",
+                        help="Skip LaBraM fine-tune (keep LaBraM frozen probe and CSP-LDA); "
+                             "useful when you already know LaBraM-FT numbers and want faster iteration")
     parser.add_argument("--device", type=str, default="auto")
     parser.add_argument("--output", type=str,
                         default="/home/share/data_makchen/peng/models/eeg_jepa/results/eegbench_results.json")
@@ -726,7 +730,8 @@ def main():
         label, cls = TASK_REGISTRY[key]
         result = evaluate(key, label, cls, model, n_channels, device,
                           n_reps=args.n_reps, run_baselines=args.run_baselines,
-                          run_finetune=args.finetune, model_cls=model_cls)
+                          run_finetune=args.finetune, model_cls=model_cls,
+                          skip_labram_finetune=args.skip_labram_finetune)
         if result:
             all_results[key] = result
 
