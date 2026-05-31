@@ -202,6 +202,9 @@ def main():
     parser.add_argument("--freq_mask_weight", type=float, default=1.0,
                         help="Weight of the cross-frequency loss (lejepa_crossfreq/"
                              "lejepa_full). Set 0.0 for the matched no-CF control.")
+    parser.add_argument("--sigreg_lambda", type=float, default=0.05,
+                        help="Weight of the SIGReg/VICReg term inside total loss "
+                             "(lejepa-family models). Default 0.05.")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -320,7 +323,9 @@ def main():
         model_kwargs.update(predictor_layers=3, predictor_dim=128, predictor_heads=4)
     elif args.model in ("lejepa_crossfreq", "lejepa_full"):
         model_kwargs.update(freq_mask_weight=args.freq_mask_weight)
-    # lejepa: no extra kwargs needed (no predictor)
+    # All lejepa-family models accept sigreg_lambda (jepa/mae use sigreg_weight)
+    if args.model.startswith("lejepa"):
+        model_kwargs.update(sigreg_lambda=args.sigreg_lambda)
 
     model = model_cls(**model_kwargs).to(device)
 
