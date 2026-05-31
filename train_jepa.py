@@ -185,8 +185,24 @@ def main():
                         help="Path to HBN EEG data (.set files)")
     parser.add_argument("--hbn_max_subjects", type=int, default=None)
     parser.add_argument("--edf_dir", type=str, default=None,
-                        help="Path to directory of .edf files (e.g., TUH corpus)")
+                        help="Generic .edf directory (legacy: 1 file = 1 'subject')")
     parser.add_argument("--edf_max_files", type=int, default=None)
+    # Datasets with proper per-subject grouping (see dataset_multi.py docstring)
+    parser.add_argument("--tueg_dir", type=str, default=None,
+                        help="TUH EEG Corpus root (subject grouped by filename prefix)")
+    parser.add_argument("--tueg_max_files", type=int, default=None)
+    parser.add_argument("--chb_mit_dir", type=str, default=None,
+                        help="CHB-MIT root (subject = chbXX)")
+    parser.add_argument("--chb_mit_max_files", type=int, default=None)
+    parser.add_argument("--siena_dir", type=str, default=None,
+                        help="Siena Scalp EEG root (subject = PNXX)")
+    parser.add_argument("--siena_max_files", type=int, default=None)
+    parser.add_argument("--hmc_dir", type=str, default=None,
+                        help="HMC sleep PSG root (1 file = 1 subject, min_channels=4)")
+    parser.add_argument("--hmc_max_files", type=int, default=None)
+    parser.add_argument("--cap_dir", type=str, default=None,
+                        help="CAP sleep root (1 file = 1 subject, min_channels=4)")
+    parser.add_argument("--cap_max_files", type=int, default=None)
     parser.add_argument("--download_dir", type=str,
                         default="/home/share/data_makchen/peng/datasets",
                         help="Where MOABB auto-downloads data")
@@ -253,6 +269,16 @@ def main():
         if args.edf_dir:
             sources.append({"type": "edf_dir", "path": args.edf_dir,
                             "max_files": args.edf_max_files})
+        for src_type, dir_arg, max_arg in (
+            ("tueg",    args.tueg_dir,    args.tueg_max_files),
+            ("chb_mit", args.chb_mit_dir, args.chb_mit_max_files),
+            ("siena",   args.siena_dir,   args.siena_max_files),
+            ("hmc",     args.hmc_dir,     args.hmc_max_files),
+            ("cap",     args.cap_dir,     args.cap_max_files),
+        ):
+            if dir_arg:
+                sources.append({"type": src_type, "path": dir_arg,
+                                "max_files": max_arg})
         dataset = MultiDatasetEEG(
             sources=sources,
             physionet_data_dir=args.data_dir,

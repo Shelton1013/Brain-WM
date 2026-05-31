@@ -2,10 +2,29 @@
 Multi-dataset EEG loader for large-scale JEPA pretraining.
 
 Supports:
-  1. PhysioNet MI (109 subjects, ~100h) — already have this
-  2. MOABB datasets via moabb library (multiple MI/P300/SSVEP datasets)
-  3. TUH EEG Corpus (TUEG) — requires separate download + access request
-  4. Custom .edf/.npy directories
+  1. PhysioNet MI                                    type='physionet'
+  2. MOABB datasets, auto-download                   type='moabb', name=<ClassName>
+       Common adds: Cho2017, Lee2019_MI, BNCI2014001 (BCIC-IV-2a),
+       BNCI2014004 (BCIC-IV-2b), Schirrmeister2017 (HGD), Weibo2014, Shin2017A
+  3. Healthy Brain Network (.set), grouped by sub-*   type='hbn'
+  4. TUH EEG Corpus (TUEG / TUAB / TUEV / TUSZ)       type='tueg'
+       Subject grouped by filename prefix before '_' (00000003_s002_t000.edf → 00000003)
+  5. CHB-MIT pediatric scalp EEG (PhysioNet)          type='chb_mit'
+       Subject grouped by chbXX prefix (chb01_03.edf → chb01)
+  6. Siena Scalp EEG (PhysioNet)                      type='siena'
+       Subject grouped by PNXX prefix (PN00-1.edf → PN00)
+  7. HMC Sleep PSG (PhysioNet)                        type='hmc'
+       One file per subject; min_channels relaxed to 4 (PSG has few EEG chans)
+  8. CAP Sleep Database (PhysioNet)                   type='cap'
+       One file per subject; min_channels relaxed to 4
+  9. Generic EDF directory (legacy)                   type='edf_dir'
+       Each file treated as a separate 'subject' (use only for unstructured dumps)
+
+Not yet supported (need custom loaders):
+  - Sleep-EDF / Sleep-EDFx: bipolar derivations (Fpz-Cz, Pz-Oz) don't match
+    the standard 10-20 monopolar COMMON_CHANNELS. Extend COMMON_CHANNELS or
+    add a bipolar-aware loader to enable.
+  - SEED / SEED-IV / SEED-V: MATLAB .mat format, needs dedicated reader.
 
 All datasets are normalized to:
   - Resampled to 256 Hz
@@ -23,8 +42,12 @@ Usage:
           {"type": "physionet", "n_subjects": 109},
           {"type": "moabb", "name": "Cho2017"},
           {"type": "moabb", "name": "Lee2019_MI"},
-          {"type": "moabb", "name": "BNCI2014001"},
-          {"type": "edf_dir", "path": "/data/tueg/edf/"},
+          {"type": "moabb", "name": "Schirrmeister2017"},     # HGD
+          {"type": "moabb", "name": "BNCI2014001"},           # BCIC-IV-2a
+          {"type": "tueg",   "path": "/data/tuh_eeg/edf/"},
+          {"type": "chb_mit","path": "/data/chb-mit/"},
+          {"type": "siena",  "path": "/data/siena-scalp-eeg/"},
+          {"type": "hbn",    "path": "/data/hbn/eeg/"},
       ],
       sample_rate=256,
       trial_duration_s=4,
@@ -111,6 +134,27 @@ def pick_common_channels(ch_names: list[str]) -> tuple[list[int], list[str]]:
                 matched.append(target)
                 break
     return indices, matched
+
+
+# ============================================================
+# Subject-id extractors for grouped EDF loading
+# (Used so per-subject Euclidean Alignment works correctly when one subject
+#  spans multiple .edf files, e.g. CHB-MIT, TUH, Siena.)
+# ============================================================
+
+def _sid_before_underscore(path):
+    """Prefix before first underscore.
+    TUH:     '00000003_s002_t000.edf' → '00000003'
+    CHB-MIT: 'chb01_03.edf'           → 'chb01'
+    """
+    return path.stem.split("_")[0]
+
+
+def _sid_before_dash(path):
+    """Prefix before first dash.
+    Siena: 'PN00-1.edf' → 'PN00'
+    """
+    return path.stem.split("-")[0]
 
 
 # ============================================================
@@ -323,8 +367,16 @@ class HBNDataset(Dataset):
 class EDFDirectoryDataset(Dataset):
     """Load EEG from a directory of .edf files (e.g., TUH EEG Corpus).
 
-    Scans recursively for .edf files, loads each as continuous EEG,
-    segments into 4s trials.
+    Recursively scans for .edf files, picks the common 10-20 subset, applies
+    Euclidean Alignment, and segments into 4s trials.
+
+    Two subject-counting modes:
+      - subject_id_fn=None (default, legacy): each .edf file is one "subject".
+        Use for unstructured EDF dumps where one file = one recording.
+      - subject_id_fn=callable(Path)->str: group files by the returned id,
+        apply EA on the concatenated per-subject data, and count distinct
+        subjects. Required for datasets where one subject spans multiple files
+        (TUH, CHB-MIT, Siena, etc.).
     """
 
     def __init__(
@@ -335,6 +387,7 @@ class EDFDirectoryDataset(Dataset):
         use_ea: bool = True,
         max_files: int = None,
         min_channels: int = 19,
+        subject_id_fn=None,
     ):
         if not MNE_AVAILABLE:
             raise ImportError("mne required: pip install mne")
@@ -348,44 +401,79 @@ class EDFDirectoryDataset(Dataset):
         if max_files:
             edf_files = edf_files[:max_files]
 
-        print(f"  Loading EDF dir: {data_dir} ({len(edf_files)} files)...")
-
-        for file_idx, edf_path in enumerate(edf_files):
+        def _load_one(edf_path):
+            """Return [T, C] float32 array, or None on failure / channel-mismatch."""
             try:
                 raw = mne.io.read_raw_edf(str(edf_path), preload=True, verbose=False)
                 if raw.info["sfreq"] != sample_rate:
                     raw.resample(sample_rate, verbose=False)
                 raw.filter(0.1, 75.0, verbose=False)
-
                 ch_indices, ch_names = pick_common_channels(raw.ch_names)
                 if len(ch_indices) < min_channels:
-                    continue
+                    return None
                 if self.electrode_names is None:
                     self.electrode_names = ch_names
+                return raw.get_data()[ch_indices].T.astype(np.float32)
+            except Exception:
+                return None
 
-                eeg = raw.get_data()[ch_indices].T.astype(np.float32)
+        def _segment_and_store(eeg, subj_idx):
+            n_trials = len(eeg) // self.trial_samples
+            for t in range(n_trials):
+                start = t * self.trial_samples
+                trial = eeg[start:start + self.trial_samples]
+                mean = trial.mean(axis=0, keepdims=True)
+                std = trial.std(axis=0, keepdims=True) + 1e-8
+                self.trials.append(((trial - mean) / std))
+                self.subject_ids.append(subj_idx)
+
+        if subject_id_fn is None:
+            # Per-file mode (legacy): one "subject" per file, per-file EA.
+            print(f"  Loading EDF dir: {data_dir} ({len(edf_files)} files, per-file)...")
+            for file_idx, edf_path in enumerate(edf_files):
+                eeg = _load_one(edf_path)
+                if eeg is None:
+                    if file_idx < 5:
+                        print(f"    Skipping {edf_path.name} (load failed / channel mismatch)")
+                    continue
                 if use_ea:
                     eeg = euclidean_alignment(eeg)
-
-                n_trials = len(eeg) // self.trial_samples
-                for t in range(n_trials):
-                    start = t * self.trial_samples
-                    trial = eeg[start:start + self.trial_samples]
-                    mean = trial.mean(axis=0, keepdims=True)
-                    std = trial.std(axis=0, keepdims=True) + 1e-8
-                    self.trials.append(((trial - mean) / std))
-                    self.subject_ids.append(file_idx)
-
+                _segment_and_store(eeg, file_idx)
                 if file_idx % 100 == 0 and file_idx > 0:
                     print(f"    ... {file_idx}/{len(edf_files)} files, "
                           f"{len(self.trials)} trials so far")
-
-            except Exception as e:
-                if file_idx < 5:
-                    print(f"    Skipping {edf_path.name}: {e}")
+        else:
+            # Grouped mode: bucket files by subject_id_fn, per-subject EA.
+            from collections import defaultdict
+            subject_files = defaultdict(list)
+            for f in edf_files:
+                try:
+                    sid = subject_id_fn(f)
+                    if sid is not None:
+                        subject_files[sid].append(f)
+                except Exception:
+                    pass
+            subjects = sorted(subject_files.keys())
+            print(f"  Loading EDF dir: {data_dir} "
+                  f"({len(edf_files)} files, {len(subjects)} subjects, grouped)...")
+            for subj_idx, sid in enumerate(subjects):
+                subj_recordings = [
+                    eeg for eeg in (_load_one(p) for p in subject_files[sid])
+                    if eeg is not None
+                ]
+                if not subj_recordings:
+                    continue
+                subj_data = np.concatenate(subj_recordings, axis=0)
+                if use_ea:
+                    subj_data = euclidean_alignment(subj_data)
+                _segment_and_store(subj_data, subj_idx)
+                if (subj_idx + 1) % 50 == 0:
+                    print(f"    ... {subj_idx+1}/{len(subjects)} subjects, "
+                          f"{len(self.trials)} trials so far")
 
         self.n_subjects = len(set(self.subject_ids))
-        print(f"    → {len(self.trials)} trials, {self.n_subjects} recordings, "
+        unit = "subjects" if subject_id_fn is not None else "recordings"
+        print(f"    → {len(self.trials)} trials, {self.n_subjects} {unit}, "
               f"{len(self.electrode_names or [])} channels")
 
     def __len__(self):
@@ -490,6 +578,31 @@ class MultiDatasetEEG(Dataset):
                     sample_rate=sample_rate,
                     trial_duration_s=trial_duration_s,
                     max_files=src.get("max_files", None),
+                )
+                for i in range(len(ds.subject_ids)):
+                    ds.subject_ids[i] += total_subjects
+                total_subjects += ds.n_subjects
+                datasets.append(ds)
+
+            elif src_type in ("tueg", "chb_mit", "siena", "hmc", "cap"):
+                # Convenience EDF loaders with per-dataset subject grouping
+                # and sensible defaults. Override with src['min_channels'] /
+                # src['max_files'] / src['subject_id_fn'] if needed.
+                presets = {
+                    "tueg":    dict(subject_id_fn=_sid_before_underscore, min_channels=19),
+                    "chb_mit": dict(subject_id_fn=_sid_before_underscore, min_channels=19),
+                    "siena":   dict(subject_id_fn=_sid_before_dash,       min_channels=19),
+                    # Sleep PSG datasets usually have only a few EEG channels:
+                    "hmc":     dict(subject_id_fn=None,                   min_channels=4),
+                    "cap":     dict(subject_id_fn=None,                   min_channels=4),
+                }[src_type]
+                ds = EDFDirectoryDataset(
+                    data_dir=src["path"],
+                    sample_rate=sample_rate,
+                    trial_duration_s=trial_duration_s,
+                    max_files=src.get("max_files", None),
+                    min_channels=src.get("min_channels", presets["min_channels"]),
+                    subject_id_fn=src.get("subject_id_fn", presets["subject_id_fn"]),
                 )
                 for i in range(len(ds.subject_ids)):
                     ds.subject_ids[i] += total_subjects
