@@ -81,38 +81,119 @@ class EEGJEPAModel:
         model.load_state_dict(self.ckpt["model_state_dict"])
         return model
 
+    @staticmethod
+    def _extract_channel_names(meta):
+        """Try common keys EEG-Bench may use for channel names. None if not found."""
+        if not meta:
+            return None
+        first = meta[0] if isinstance(meta, (list, tuple)) else meta
+        if not isinstance(first, dict):
+            return None
+        for key in ("channels", "channel_names", "ch_names", "channel"):
+            v = first.get(key)
+            if v is not None:
+                return list(v)
+        return None
+
+    def _build_channel_map(self, input_names):
+        """Return W of shape [self.n_channels, n_input], or None on no match.
+
+        Monopolar input → 1.0 in the matching COMMON_CHANNELS slot.
+        Bipolar A-B input → 0.5 to A's slot AND 0.5 to B's slot (covers both
+        ends; loses sign but preserves spatial localization). Falls back to
+        legacy first-N / zero-pad when this returns None.
+        """
+        try:
+            from dataset_multi import normalize_channel_name, COMMON_CHANNELS
+        except Exception:
+            return None
+        if not input_names or self.n_channels != len(COMMON_CHANNELS):
+            return None
+        n_out, n_in = self.n_channels, len(input_names)
+        W = np.zeros((n_out, n_in), dtype=np.float32)
+        idx_of = {c: i for i, c in enumerate(COMMON_CHANNELS)}
+        n_matched = 0
+        for j, raw in enumerate(input_names):
+            name = str(raw).strip()
+            # Strip TUH-style "EEG XYZ-REF" prefixes/suffixes via normalize first
+            base = name
+            for prefix in ("EEG ", "eeg "):
+                if base.startswith(prefix):
+                    base = base[len(prefix):]
+            for suffix in ("-REF", "-LE", "-AR", "-AVG"):
+                if base.upper().endswith(suffix):
+                    base = base[:-len(suffix)]
+            # Bipolar A-B (after stripping reference suffixes)
+            if "-" in base:
+                parts = base.split("-")
+                if len(parts) == 2:
+                    matched_here = 0
+                    for p in parts:
+                        norm = normalize_channel_name(p)
+                        if norm in idx_of:
+                            W[idx_of[norm], j] += 0.5
+                            matched_here += 1
+                    if matched_here:
+                        n_matched += 1
+                    continue
+            # Monopolar
+            norm = normalize_channel_name(base)
+            if norm in idx_of:
+                W[idx_of[norm], j] = 1.0
+                n_matched += 1
+        if n_matched == 0:
+            return None
+        return W
+
     def _preprocess(self, X: List[np.ndarray], meta: List[Dict]) -> torch.Tensor:
         """Convert EEG-Bench format to our format.
 
         EEG-Bench: X is list of arrays, each [n_samples, n_channels, n_timepoints]
-        Our model: expects [B, T, C] (time first, then channels)
+        Our model: expects [B, T, C] (time first, then channels).
+
+        Uses name-based (bipolar-aware) channel mapping when meta exposes
+        channel names. Falls back to legacy first-N / zero-pad otherwise.
         """
+        # Try name-based mapping first (catches MI monopolar AND CHB-MIT bipolar).
+        input_names = self._extract_channel_names(meta)
+        W = self._build_channel_map(input_names) if input_names else None
+        if W is not None:
+            n_used = int((W.sum(axis=0) > 0).sum())
+            print(f"  channel map: {n_used}/{len(input_names)} input channels matched "
+                  f"into {self.n_channels} model slots "
+                  f"(bipolar split into halves where applicable)")
+        elif input_names:
+            print(f"  channel map: name-based mapping found 0 matches in "
+                  f"{input_names[:6]}... → falling back to first-N / pad-zero")
+        else:
+            print("  channel map: no channel names in meta → using first-N / pad-zero")
+
+        target_len = 1024
         all_trials = []
         for dataset_X in X:
             # dataset_X: [n_samples, n_channels, n_timepoints]
             for trial in dataset_X:
-                # trial: [n_channels, n_timepoints] → [n_timepoints, n_channels]
-                t = trial.T.astype(np.float32)
+                t = trial.T.astype(np.float32)              # [T, n_in]
 
-                # Resample to match our model's expected length if needed
-                # Our model expects 1024 samples (4s × 256Hz)
-                target_len = 1024
+                # Resample to our expected length
                 if t.shape[0] != target_len:
-                    # Simple resampling via interpolation
                     from scipy.signal import resample
                     t = resample(t, target_len, axis=0).astype(np.float32)
 
-                # Channel mapping: if trial has more channels than model expects
-                n_ch = t.shape[1]
-                if n_ch > self.n_channels:
-                    # Take first n_channels (or implement proper mapping)
-                    t = t[:, :self.n_channels]
-                elif n_ch < self.n_channels:
-                    # Pad with zeros
-                    pad = np.zeros((target_len, self.n_channels - n_ch), dtype=np.float32)
-                    t = np.concatenate([t, pad], axis=1)
+                if W is not None and W.shape[1] == t.shape[1]:
+                    # [T, n_in] @ [n_in, n_out] = [T, n_out]
+                    t = (t @ W.T).astype(np.float32)
+                else:
+                    # Legacy fallback
+                    n_ch = t.shape[1]
+                    if n_ch > self.n_channels:
+                        t = t[:, :self.n_channels]
+                    elif n_ch < self.n_channels:
+                        pad = np.zeros((target_len, self.n_channels - n_ch),
+                                       dtype=np.float32)
+                        t = np.concatenate([t, pad], axis=1)
 
-                # Z-score normalize
+                # Per-trial z-score
                 mean = t.mean(axis=0, keepdims=True)
                 std = t.std(axis=0, keepdims=True) + 1e-8
                 t = (t - mean) / std
