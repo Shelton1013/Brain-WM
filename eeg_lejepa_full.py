@@ -100,11 +100,17 @@ class SpectralTokenizer(nn.Module):
 
         self._last_attn_weights = None
 
-    def forward(self, eeg, return_band_tokens=False):
+    def forward(self, eeg, return_band_tokens=False, band_tokens_spatial=False):
         """
         Returns:
             tokens: [B, N, D]
-            band_tokens (optional): [B, N, n_bands, d_band] per-band representations
+            band_tokens (optional):
+              - band_tokens_spatial=False (legacy): [B, N, n_bands, d_band]
+                channel-averaged per-band representations.
+              - band_tokens_spatial=True (fixed): [B, N, C, n_bands, d_band]
+                per-channel per-band representations, preserving spatial
+                localization (critical for MI tasks where C3/C4 carry
+                discriminative info).
         """
         B, T, C = eeg.shape
         S = self.state_samples
@@ -140,10 +146,16 @@ class SpectralTokenizer(nn.Module):
         tokens = self.out_norm(self.out_proj(pooled.reshape(B * N, -1)).reshape(B, N, -1))
 
         if return_band_tokens:
-            # Aggregate band tokens across channels (mean over C)
-            # [B*N, C, n_bands, d_band] → [B, N, n_bands, d_band]
-            band_tokens = band_per_channel.mean(dim=1).reshape(B, N, self.n_bands, self.d_band)
-            return tokens, band_tokens
+            # Reshape to [B, N, C, n_bands, d_band]
+            band_per_channel_5d = band_per_channel.reshape(
+                B, N, C, self.n_bands, self.d_band,
+            )
+            if band_tokens_spatial:
+                return tokens, band_per_channel_5d   # [B, N, C, n_bands, d_band]
+            else:
+                # Legacy: channel-averaged
+                band_tokens = band_per_channel_5d.mean(dim=2)  # [B, N, n_bands, d_band]
+                return tokens, band_tokens
 
         return tokens
 
@@ -172,17 +184,39 @@ class CrossFrequencyPredictor(nn.Module):
     Learning these relationships in latent space = better representations.
     """
 
-    def __init__(self, n_bands=5, d_band=8):
+    def __init__(self, n_bands=5, d_band=8,
+                 band_conditioned: bool = True,
+                 preserve_spatial: bool = True):
+        """
+        Args:
+            band_conditioned: if True, the predictor is told WHICH band it is
+              predicting by concatenating a learnable band identity vector
+              with the visible-band context. Old behavior had a band-agnostic
+              predictor (one output for all masked bands), which could only
+              learn to predict the average — losing band-specific structure.
+            preserve_spatial: if True, expect band_tokens of shape
+              [B, N, C, n_bands, d_band] (per-channel per-band), so that
+              MI spatial structure (C3/C4) is preserved through the
+              cross-frequency objective. Old behavior averaged over C,
+              washing this away.
+        """
         super().__init__()
         self.n_bands = n_bands
         self.d_band = d_band
+        self.band_conditioned = band_conditioned
+        self.preserve_spatial = preserve_spatial
 
-        # Learnable mask token per band
+        # Learnable per-band identity vectors used to condition the predictor.
+        # In the old (band_conditioned=False) code path these were defined but
+        # never used (dead parameters).
         self.band_mask_tokens = nn.Parameter(torch.randn(n_bands, d_band) * 0.02)
 
-        # Cross-band predictor: predict masked band from unmasked bands
+        # Cross-band predictor MLP.
+        # Input dim is doubled when band-conditioned (context concatenated with
+        # band identity); kept as d_band for legacy / band-agnostic mode.
+        in_dim = d_band * 2 if band_conditioned else d_band
         self.predictor = nn.Sequential(
-            nn.Linear(d_band, d_band * 2),
+            nn.Linear(in_dim, d_band * 2),
             nn.GELU(),
             nn.Linear(d_band * 2, d_band),
         )
@@ -190,8 +224,9 @@ class CrossFrequencyPredictor(nn.Module):
     def mask_and_predict(self, band_tokens, mask_prob=0.3):
         """
         Args:
-            band_tokens: [B, N, n_bands, d_band]
-            mask_prob: probability of masking each band
+            band_tokens:
+              - preserve_spatial=True : [B, N, C, n_bands, d_band]
+              - preserve_spatial=False: [B, N, n_bands, d_band] (legacy)
         Returns:
             loss: cross-frequency prediction loss
             n_masked: number of bands masked (for logging)
@@ -199,30 +234,50 @@ class CrossFrequencyPredictor(nn.Module):
         if not self.training:
             return torch.tensor(0.0, device=band_tokens.device), 0
 
-        B, N, n_bands, d_band = band_tokens.shape
+        # Detect input shape
+        if band_tokens.dim() == 5:
+            B, N, C, n_bands, d_band = band_tokens.shape
+            spatial = True
+        else:
+            B, N, n_bands, d_band = band_tokens.shape
+            spatial = False
 
-        # Randomly select 1-2 bands to mask
         n_mask = torch.randint(1, min(3, n_bands), (1,)).item()
         perm = torch.randperm(n_bands, device=band_tokens.device)
         masked_bands = perm[:n_mask]
         visible_bands = perm[n_mask:]
-
         if len(visible_bands) == 0:
             return torch.tensor(0.0, device=band_tokens.device), 0
 
-        # Context: mean of visible bands
-        visible = band_tokens[:, :, visible_bands, :]  # [B, N, n_vis, d]
-        context = visible.mean(dim=2)  # [B, N, d]
+        # Context = mean of visible bands.
+        # Spatial mode keeps the per-channel context so each (B, N, C) position
+        # has its own context vector; predictor operates per-channel below.
+        if spatial:
+            visible = band_tokens[:, :, :, visible_bands, :]   # [B, N, C, n_vis, d]
+            context = visible.mean(dim=3)                       # [B, N, C, d]
+        else:
+            visible = band_tokens[:, :, visible_bands, :]       # [B, N, n_vis, d]
+            context = visible.mean(dim=2)                       # [B, N, d]
 
-        # Predict each masked band
-        predicted = self.predictor(context)  # [B, N, d]
-
-        # Target: original masked band representations.
-        # No StopGrad — LeJEPA-consistent; SIGReg on the encoded path guards
-        # against collapse rather than detaching the target.
+        # Predict each masked band SEPARATELY (band-conditioned) so the
+        # predictor produces band-specific outputs rather than a single
+        # average. No StopGrad on target — LeJEPA-consistent.
         total_loss = torch.tensor(0.0, device=band_tokens.device)
         for band_idx in masked_bands:
-            target = band_tokens[:, :, band_idx, :]  # [B, N, d]
+            if self.band_conditioned:
+                band_id = self.band_mask_tokens[band_idx]  # [d_band]
+                # Broadcast band_id to context shape and concatenate
+                if spatial:
+                    band_id_exp = band_id.view(1, 1, 1, -1).expand(B, N, C, -1)
+                else:
+                    band_id_exp = band_id.view(1, 1, -1).expand(B, N, -1)
+                pred_input = torch.cat([context, band_id_exp], dim=-1)
+            else:
+                pred_input = context
+
+            predicted = self.predictor(pred_input)
+            target = (band_tokens[:, :, :, band_idx, :] if spatial
+                      else band_tokens[:, :, band_idx, :])
             total_loss = total_loss + F.mse_loss(predicted, target)
 
         return total_loss / n_mask, n_mask
@@ -336,6 +391,8 @@ class EEGLeJEPAFull(nn.Module):
         query_spec_weight: float = 0.1,
         n_subjects: int = 109,
         reg_type: str = "sigreg",        # "sigreg" (true LeJEPA) | "vicreg" (ablation)
+        cf_band_conditioned: bool = True,  # ★ new: predictor is told which band to predict
+        cf_preserve_spatial: bool = True,  # ★ new: keep per-channel band features
     ):
         super().__init__()
         self.state_samples = state_samples
@@ -347,6 +404,7 @@ class EEGLeJEPAFull(nn.Module):
         self.freq_mask_weight = freq_mask_weight
         self.region_mask_weight = region_mask_weight
         self.reg_type = reg_type
+        self.cf_preserve_spatial = cf_preserve_spatial
 
         # Spectral tokenizer (preserves per-band representations)
         self.tokenizer = SpectralTokenizer(
@@ -356,6 +414,8 @@ class EEGLeJEPAFull(nn.Module):
         # Cross-frequency predictor (our novelty)
         self.freq_predictor = CrossFrequencyPredictor(
             n_bands=n_bands, d_band=self.tokenizer.d_band,
+            band_conditioned=cf_band_conditioned,
+            preserve_spatial=cf_preserve_spatial,
         )
 
         # Region masker
@@ -421,7 +481,10 @@ class EEGLeJEPAFull(nn.Module):
 
         # === Spectral tokenization (get both tokens and band-level features) ===
         if self.training and return_predictions:
-            tokens, band_tokens = self.tokenizer(eeg, return_band_tokens=True)
+            tokens, band_tokens = self.tokenizer(
+                eeg, return_band_tokens=True,
+                band_tokens_spatial=self.cf_preserve_spatial,
+            )
         else:
             tokens = self.tokenizer(eeg, return_band_tokens=False)
             band_tokens = None

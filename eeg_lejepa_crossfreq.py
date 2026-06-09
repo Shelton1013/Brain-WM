@@ -44,6 +44,8 @@ class EEGLeJEPACrossFreq(nn.Module):
         query_spec_weight: float = 0.1,
         n_subjects: int = 109,
         reg_type: str = "sigreg",
+        cf_band_conditioned: bool = True,  # ★ predictor told which band to predict
+        cf_preserve_spatial: bool = True,  # ★ keep per-channel band features
     ):
         super().__init__()
         self.state_samples = state_samples
@@ -54,6 +56,7 @@ class EEGLeJEPACrossFreq(nn.Module):
         self.query_spec_weight = query_spec_weight
         self.freq_mask_weight = freq_mask_weight
         self.reg_type = reg_type
+        self.cf_preserve_spatial = cf_preserve_spatial
 
         # Spectral tokenizer (preserves per-band representations for CF prediction)
         self.tokenizer = SpectralTokenizer(
@@ -63,6 +66,8 @@ class EEGLeJEPACrossFreq(nn.Module):
         # Cross-frequency predictor (the novelty being isolated)
         self.freq_predictor = CrossFrequencyPredictor(
             n_bands=n_bands, d_band=self.tokenizer.d_band,
+            band_conditioned=cf_band_conditioned,
+            preserve_spatial=cf_preserve_spatial,
         )
 
         self.pos_embed = nn.Parameter(torch.randn(1, 256, d_model) * 0.02)
@@ -121,7 +126,10 @@ class EEGLeJEPACrossFreq(nn.Module):
 
         # Spectral tokenization (with band-level features during training)
         if self.training and return_predictions:
-            tokens, band_tokens = self.tokenizer(eeg, return_band_tokens=True)
+            tokens, band_tokens = self.tokenizer(
+                eeg, return_band_tokens=True,
+                band_tokens_spatial=self.cf_preserve_spatial,
+            )
         else:
             tokens = self.tokenizer(eeg, return_band_tokens=False)
             band_tokens = None

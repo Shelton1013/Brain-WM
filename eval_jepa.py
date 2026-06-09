@@ -289,6 +289,13 @@ def main():
         # Pass n_queries if checkpoint was trained with non-default value
         if "n_queries" in ckpt_args:
             model_kwargs["n_queries"] = ckpt_args["n_queries"]
+        # Backward compat: old crossfreq/full checkpoints don't have these
+        # flags in args.json. Default to False so old predictor weights load.
+        if model_type in ("lejepa_crossfreq", "lejepa_full"):
+            model_kwargs["cf_band_conditioned"] = bool(
+                ckpt_args.get("cf_band_conditioned", 0))
+            model_kwargs["cf_preserve_spatial"] = bool(
+                ckpt_args.get("cf_preserve_spatial", 0))
         m = model_cls(**model_kwargs).to(device)
         m.load_state_dict(ckpt["model_state_dict"])
         return m

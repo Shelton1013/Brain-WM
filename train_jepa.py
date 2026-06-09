@@ -221,6 +221,15 @@ def main():
     parser.add_argument("--sigreg_lambda", type=float, default=0.05,
                         help="Weight of the SIGReg/VICReg term inside total loss "
                              "(lejepa-family models). Default 0.05.")
+    parser.add_argument("--cf_band_conditioned", type=int, default=1, choices=[0, 1],
+                        help="CrossFrequencyPredictor: 1=condition predictor on which "
+                             "band is being predicted (uses band_mask_tokens); 0=legacy "
+                             "band-agnostic (single output for all masked bands). "
+                             "Default 1 (recommended).")
+    parser.add_argument("--cf_preserve_spatial", type=int, default=1, choices=[0, 1],
+                        help="CrossFrequencyPredictor: 1=keep per-channel per-band "
+                             "features (preserves MI spatial structure like C3/C4); "
+                             "0=legacy channel-averaged. Default 1 (recommended).")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -348,7 +357,11 @@ def main():
     elif args.model == "jepa":
         model_kwargs.update(predictor_layers=3, predictor_dim=128, predictor_heads=4)
     elif args.model in ("lejepa_crossfreq", "lejepa_full"):
-        model_kwargs.update(freq_mask_weight=args.freq_mask_weight)
+        model_kwargs.update(
+            freq_mask_weight=args.freq_mask_weight,
+            cf_band_conditioned=bool(args.cf_band_conditioned),
+            cf_preserve_spatial=bool(args.cf_preserve_spatial),
+        )
     # All lejepa-family models accept sigreg_lambda (jepa/mae use sigreg_weight)
     if args.model.startswith("lejepa"):
         model_kwargs.update(sigreg_lambda=args.sigreg_lambda)
