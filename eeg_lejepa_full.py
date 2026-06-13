@@ -65,7 +65,16 @@ class SpectralTokenizer(nn.Module):
     """
 
     def __init__(self, n_channels, state_samples, d_model,
-                 d_channel=32, n_queries=16, n_bands=5, sample_rate=256):
+                 d_channel=32, n_queries=16, n_bands=5, sample_rate=256,
+                 d_band: int = None):
+        """
+        Args:
+            d_band: per-band latent dimension. If None (legacy), computed as
+                max(d_channel // n_bands, 8) = 8 for default d_channel=32.
+                Recommended new value: 32 (no compression bottleneck —
+                each band gets a full d_channel-equivalent slot, restoring
+                spectral capacity that was lost in the legacy floor of 8).
+        """
         super().__init__()
         self.state_samples = state_samples
         self.n_channels = n_channels
@@ -75,8 +84,11 @@ class SpectralTokenizer(nn.Module):
 
         self.filter_bank = LearnableFilterBank(n_bands, 17, sample_rate)
 
-        # Per-band encoder
-        self.d_band = max(d_channel // n_bands, 8)
+        # Per-band encoder dimensionality
+        if d_band is None:
+            self.d_band = max(d_channel // n_bands, 8)  # legacy = 8
+        else:
+            self.d_band = d_band
         self.band_encoder = nn.Sequential(
             nn.Linear(state_samples, self.d_band * 2),
             nn.GELU(),
@@ -393,6 +405,7 @@ class EEGLeJEPAFull(nn.Module):
         reg_type: str = "sigreg",        # "sigreg" (true LeJEPA) | "vicreg" (ablation)
         cf_band_conditioned: bool = True,  # ★ new: predictor is told which band to predict
         cf_preserve_spatial: bool = True,  # ★ new: keep per-channel band features
+        cf_d_band: int = None,             # ★ new: per-band latent dim (None = legacy 8)
     ):
         super().__init__()
         self.state_samples = state_samples
@@ -409,6 +422,7 @@ class EEGLeJEPAFull(nn.Module):
         # Spectral tokenizer (preserves per-band representations)
         self.tokenizer = SpectralTokenizer(
             n_channels, state_samples, d_model, d_channel, n_queries, n_bands,
+            d_band=cf_d_band,
         )
 
         # Cross-frequency predictor (our novelty)

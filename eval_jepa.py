@@ -290,12 +290,16 @@ def main():
         if "n_queries" in ckpt_args:
             model_kwargs["n_queries"] = ckpt_args["n_queries"]
         # Backward compat: old crossfreq/full checkpoints don't have these
-        # flags in args.json. Default to False so old predictor weights load.
+        # flags in args.json. Default to legacy values so old weights load.
         if model_type in ("lejepa_crossfreq", "lejepa_full"):
             model_kwargs["cf_band_conditioned"] = bool(
                 ckpt_args.get("cf_band_conditioned", 0))
             model_kwargs["cf_preserve_spatial"] = bool(
                 ckpt_args.get("cf_preserve_spatial", 0))
+            # cf_d_band: pass None if absent → SpectralTokenizer falls back
+            # to legacy formula max(d_channel//n_bands, 8) = 8.
+            if "cf_d_band" in ckpt_args:
+                model_kwargs["cf_d_band"] = ckpt_args["cf_d_band"]
         m = model_cls(**model_kwargs).to(device)
         m.load_state_dict(ckpt["model_state_dict"])
         return m

@@ -230,6 +230,12 @@ def main():
                         help="CrossFrequencyPredictor: 1=keep per-channel per-band "
                              "features (preserves MI spatial structure like C3/C4); "
                              "0=legacy channel-averaged. Default 1 (recommended).")
+    parser.add_argument("--cf_d_band", type=int, default=32,
+                        help="Per-band latent dim in SpectralTokenizer. Default 32 "
+                             "(no compression bottleneck). Legacy value was 8, which "
+                             "compressed each band's representation and limited "
+                             "the spectral tokenizer's overall capacity. Use 8 to "
+                             "reproduce legacy behavior.")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -361,6 +367,7 @@ def main():
             freq_mask_weight=args.freq_mask_weight,
             cf_band_conditioned=bool(args.cf_band_conditioned),
             cf_preserve_spatial=bool(args.cf_preserve_spatial),
+            cf_d_band=args.cf_d_band,
         )
     # All lejepa-family models accept sigreg_lambda (jepa/mae use sigreg_weight)
     if args.model.startswith("lejepa"):

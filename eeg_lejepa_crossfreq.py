@@ -46,6 +46,7 @@ class EEGLeJEPACrossFreq(nn.Module):
         reg_type: str = "sigreg",
         cf_band_conditioned: bool = True,  # ★ predictor told which band to predict
         cf_preserve_spatial: bool = True,  # ★ keep per-channel band features
+        cf_d_band: int = None,             # ★ per-band latent dim (None = legacy 8)
     ):
         super().__init__()
         self.state_samples = state_samples
@@ -61,6 +62,7 @@ class EEGLeJEPACrossFreq(nn.Module):
         # Spectral tokenizer (preserves per-band representations for CF prediction)
         self.tokenizer = SpectralTokenizer(
             n_channels, state_samples, d_model, d_channel, n_queries, n_bands,
+            d_band=cf_d_band,
         )
 
         # Cross-frequency predictor (the novelty being isolated)
