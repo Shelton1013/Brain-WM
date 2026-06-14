@@ -211,6 +211,12 @@ def main():
     parser.add_argument("--download_dir", type=str,
                         default="/home/share/data_makchen/peng/datasets",
                         help="Where MOABB auto-downloads data")
+    parser.add_argument("--data_cache_dir", type=str,
+                        default="/home/share/data_makchen/peng/datasets/dataset_cache",
+                        help="Directory to cache preprocessed datasets (HBN + EDF "
+                             "variants). First run preprocesses & writes cache; "
+                             "subsequent runs load in seconds instead of hours. "
+                             "Set to empty string to disable caching.")
     parser.add_argument("--d_model", type=int, default=256)
     parser.add_argument("--encoder_layers", type=int, default=6)
     parser.add_argument("--n_queries", type=int, default=16,
@@ -303,6 +309,7 @@ def main():
             sources=sources,
             physionet_data_dir=args.data_dir,
             download_dir=args.download_dir,
+            cache_dir=args.data_cache_dir if args.data_cache_dir else None,
         )
     else:
         dataset = PhysioNetMIDataset(

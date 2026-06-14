@@ -54,11 +54,50 @@ Usage:
   )
 """
 
+import hashlib
+import json
+import time
 import numpy as np
 import torch
 from torch.utils.data import Dataset, ConcatDataset
 from pathlib import Path
 from dataset import euclidean_alignment, PhysioNetMIDataset
+
+
+# ============================================================
+# Cache helpers (avoid 10+ hour upfront preprocessing every run)
+# ============================================================
+
+def _cache_key(config: dict) -> str:
+    """Stable 16-char hash of a preprocessing config dict."""
+    s = json.dumps(config, sort_keys=True, default=str)
+    return hashlib.md5(s.encode()).hexdigest()[:16]
+
+
+def _try_load_cache(cache_path: Path):
+    """Load (trials, subject_ids, electrode_names, n_subjects) or None on miss."""
+    if not cache_path.exists():
+        return None
+    print(f"  ↻ loading cache: {cache_path.name}")
+    t0 = time.time()
+    cached = torch.load(str(cache_path), weights_only=False)
+    elapsed = time.time() - t0
+    n_trials = len(cached.get("trials", []))
+    n_subj = cached.get("n_subjects", "?")
+    ch = cached.get("electrode_names") or []
+    print(f"    ← {n_trials} trials, {n_subj} subjects, {len(ch)} channels "
+          f"(cached, loaded in {elapsed:.1f}s)")
+    return cached
+
+
+def _save_cache(cache_path: Path, payload: dict):
+    """Persist preprocessed dataset payload to cache."""
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    print(f"  ↑ saving cache: {cache_path.name}")
+    t0 = time.time()
+    torch.save(payload, str(cache_path))
+    size_mb = cache_path.stat().st_size / 1024**2
+    print(f"    saved {size_mb:.1f} MB in {time.time() - t0:.1f}s")
 
 try:
     import mne
@@ -279,6 +318,7 @@ class HBNDataset(Dataset):
         use_ea: bool = True,
         max_subjects: int = None,
         min_channels: int = 19,
+        cache_dir: str = None,
     ):
         if not MNE_AVAILABLE:
             raise ImportError("mne required: pip install mne")
@@ -287,6 +327,27 @@ class HBNDataset(Dataset):
         self.trials = []
         self.subject_ids = []
         self.electrode_names = None
+
+        # ── Cache check (avoid re-preprocessing on every run) ──
+        cache_path = None
+        if cache_dir:
+            key = _cache_key({
+                "kind": "hbn",
+                "data_dir": str(data_dir),
+                "sample_rate": sample_rate,
+                "trial_duration_s": trial_duration_s,
+                "use_ea": use_ea,
+                "max_subjects": max_subjects,
+                "min_channels": min_channels,
+            })
+            cache_path = Path(cache_dir) / f"hbn_{key}.pt"
+            cached = _try_load_cache(cache_path)
+            if cached is not None:
+                self.trials = cached["trials"]
+                self.subject_ids = cached["subject_ids"]
+                self.electrode_names = cached["electrode_names"]
+                self.n_subjects = cached["n_subjects"]
+                return
 
         # Find all .set files, grouped by subject
         from collections import defaultdict
@@ -357,6 +418,15 @@ class HBNDataset(Dataset):
         print(f"    → {len(self.trials)} trials, {self.n_subjects} subjects, "
               f"{len(self.electrode_names or [])} channels")
 
+        # Persist to cache for next run
+        if cache_path is not None:
+            _save_cache(cache_path, {
+                "trials": self.trials,
+                "subject_ids": self.subject_ids,
+                "electrode_names": self.electrode_names,
+                "n_subjects": self.n_subjects,
+            })
+
     def __len__(self):
         return len(self.trials)
 
@@ -388,6 +458,8 @@ class EDFDirectoryDataset(Dataset):
         max_files: int = None,
         min_channels: int = 19,
         subject_id_fn=None,
+        cache_dir: str = None,
+        cache_tag: str = "edf",
     ):
         if not MNE_AVAILABLE:
             raise ImportError("mne required: pip install mne")
@@ -396,6 +468,28 @@ class EDFDirectoryDataset(Dataset):
         self.trials = []
         self.subject_ids = []
         self.electrode_names = None
+
+        # ── Cache check ──
+        cache_path = None
+        if cache_dir:
+            key = _cache_key({
+                "kind": cache_tag,
+                "data_dir": str(data_dir),
+                "sample_rate": sample_rate,
+                "trial_duration_s": trial_duration_s,
+                "use_ea": use_ea,
+                "max_files": max_files,
+                "min_channels": min_channels,
+                "grouped": subject_id_fn is not None,
+            })
+            cache_path = Path(cache_dir) / f"{cache_tag}_{key}.pt"
+            cached = _try_load_cache(cache_path)
+            if cached is not None:
+                self.trials = cached["trials"]
+                self.subject_ids = cached["subject_ids"]
+                self.electrode_names = cached["electrode_names"]
+                self.n_subjects = cached["n_subjects"]
+                return
 
         edf_files = sorted(Path(data_dir).rglob("*.edf"))
         if max_files:
@@ -476,6 +570,15 @@ class EDFDirectoryDataset(Dataset):
         print(f"    → {len(self.trials)} trials, {self.n_subjects} {unit}, "
               f"{len(self.electrode_names or [])} channels")
 
+        # Persist to cache for next run
+        if cache_path is not None:
+            _save_cache(cache_path, {
+                "trials": self.trials,
+                "subject_ids": self.subject_ids,
+                "electrode_names": self.electrode_names,
+                "n_subjects": self.n_subjects,
+            })
+
     def __len__(self):
         return len(self.trials)
 
@@ -519,6 +622,7 @@ class MultiDatasetEEG(Dataset):
         trial_duration_s: int = 4,
         physionet_data_dir: str = "/home/share/data_makchen/peng/datasets/physionet",
         download_dir: str = "/home/share/data_makchen/peng/datasets",
+        cache_dir: str = None,
     ):
         datasets = []
         total_subjects = 0
@@ -566,6 +670,7 @@ class MultiDatasetEEG(Dataset):
                     sample_rate=sample_rate,
                     trial_duration_s=trial_duration_s,
                     max_subjects=src.get("max_subjects", None),
+                    cache_dir=cache_dir,
                 )
                 for i in range(len(ds.subject_ids)):
                     ds.subject_ids[i] += total_subjects
@@ -578,6 +683,8 @@ class MultiDatasetEEG(Dataset):
                     sample_rate=sample_rate,
                     trial_duration_s=trial_duration_s,
                     max_files=src.get("max_files", None),
+                    cache_dir=cache_dir,
+                    cache_tag="edf",
                 )
                 for i in range(len(ds.subject_ids)):
                     ds.subject_ids[i] += total_subjects
@@ -603,6 +710,8 @@ class MultiDatasetEEG(Dataset):
                     max_files=src.get("max_files", None),
                     min_channels=src.get("min_channels", presets["min_channels"]),
                     subject_id_fn=src.get("subject_id_fn", presets["subject_id_fn"]),
+                    cache_dir=cache_dir,
+                    cache_tag=src_type,  # e.g., "tueg", "chb_mit", "siena"
                 )
                 for i in range(len(ds.subject_ids)):
                     ds.subject_ids[i] += total_subjects
