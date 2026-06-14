@@ -30,6 +30,8 @@ from eeg_lejepa_spectral import EEGLeJEPASpectral
 from eeg_lejepa_region import EEGLeJEPARegion
 from eeg_lejepa_full import EEGLeJEPAFull
 from eeg_lejepa_crossfreq import EEGLeJEPACrossFreq
+from eeg_lejepa_multistream import EEGLeJEPAMultiStream
+from eeg_lejepa_outputcf import EEGLeJEPAOutputCF
 from evaluate import PhysioNetMI_Labeled  # reuse labeled dataset
 
 
@@ -262,6 +264,8 @@ def main():
             "lejepa_region": EEGLeJEPARegion,
             "lejepa_crossfreq": EEGLeJEPACrossFreq,
             "lejepa_full": EEGLeJEPAFull,
+            "lejepa_multistream": EEGLeJEPAMultiStream,
+            "lejepa_outputcf": EEGLeJEPAOutputCF,
             "jepa": EEGJEPA,
         }
         if model_type in model_type_map:
@@ -291,7 +295,8 @@ def main():
             model_kwargs["n_queries"] = ckpt_args["n_queries"]
         # Backward compat: old crossfreq/full checkpoints don't have these
         # flags in args.json. Default to legacy values so old weights load.
-        if model_type in ("lejepa_crossfreq", "lejepa_full"):
+        if model_type in ("lejepa_crossfreq", "lejepa_full",
+                          "lejepa_multistream", "lejepa_outputcf"):
             model_kwargs["cf_band_conditioned"] = bool(
                 ckpt_args.get("cf_band_conditioned", 0))
             model_kwargs["cf_preserve_spatial"] = bool(

@@ -29,6 +29,8 @@ from eeg_lejepa_spectral import EEGLeJEPASpectral
 from eeg_lejepa_region import EEGLeJEPARegion
 from eeg_lejepa_full import EEGLeJEPAFull
 from eeg_lejepa_crossfreq import EEGLeJEPACrossFreq
+from eeg_lejepa_multistream import EEGLeJEPAMultiStream
+from eeg_lejepa_outputcf import EEGLeJEPAOutputCF
 from dataset import PhysioNetMIDataset
 from dataset_multi import MultiDatasetEEG
 
@@ -164,9 +166,12 @@ def main():
                         default="/home/share/data_makchen/peng/models/eeg_jepa")
     parser.add_argument("--model", type=str, default="jepa",
                         choices=["jepa", "mae", "lejepa", "lejepa_spectral",
-                                 "lejepa_region", "lejepa_crossfreq", "lejepa_full"],
+                                 "lejepa_region", "lejepa_crossfreq", "lejepa_full",
+                                 "lejepa_multistream", "lejepa_outputcf"],
                         help="jepa/mae/lejepa/lejepa_spectral/lejepa_region/"
-                             "lejepa_crossfreq (cross-freq only)/lejepa_full (tri-dimensional)")
+                             "lejepa_crossfreq (cross-freq only)/lejepa_full (tri-dimensional)/"
+                             "lejepa_multistream (Plan A: parallel main+band streams)/"
+                             "lejepa_outputcf (Plan B: CF on encoder output)")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=3e-4)
@@ -335,12 +340,16 @@ def main():
         "jepa": EEGJEPA, "mae": EEGMAE, "lejepa": EEGLeJEPA,
         "lejepa_spectral": EEGLeJEPASpectral, "lejepa_region": EEGLeJEPARegion,
         "lejepa_crossfreq": EEGLeJEPACrossFreq, "lejepa_full": EEGLeJEPAFull,
+        "lejepa_multistream": EEGLeJEPAMultiStream,
+        "lejepa_outputcf": EEGLeJEPAOutputCF,
     }
     name_map = {
         "jepa": "EEG-JEPA (Laya-style)", "mae": "EEG-MAE",
         "lejepa": "EEG-LeJEPA", "lejepa_spectral": "EEG-LeJEPA+Spectral",
         "lejepa_region": "EEG-LeJEPA+Region",
         "lejepa_crossfreq": "EEG-LeJEPA+CrossFreq", "lejepa_full": "EEG-LeJEPA+Full",
+        "lejepa_multistream": "EEG-LeJEPA+MultiStream",
+        "lejepa_outputcf": "EEG-LeJEPA+OutputCF",
     }
     model_cls = model_map[args.model]
     model_name = name_map[args.model]
@@ -362,7 +371,8 @@ def main():
         model_kwargs.update(decoder_layers=3, decoder_dim=128, decoder_heads=4)
     elif args.model == "jepa":
         model_kwargs.update(predictor_layers=3, predictor_dim=128, predictor_heads=4)
-    elif args.model in ("lejepa_crossfreq", "lejepa_full"):
+    elif args.model in ("lejepa_crossfreq", "lejepa_full",
+                        "lejepa_multistream", "lejepa_outputcf"):
         model_kwargs.update(
             freq_mask_weight=args.freq_mask_weight,
             cf_band_conditioned=bool(args.cf_band_conditioned),

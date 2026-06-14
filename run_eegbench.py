@@ -54,6 +54,8 @@ from eeg_lejepa_spectral import EEGLeJEPASpectral
 from eeg_lejepa_region import EEGLeJEPARegion
 from eeg_lejepa_full import EEGLeJEPAFull
 from eeg_lejepa_crossfreq import EEGLeJEPACrossFreq
+from eeg_lejepa_multistream import EEGLeJEPAMultiStream
+from eeg_lejepa_outputcf import EEGLeJEPAOutputCF
 
 
 # ============================================================
@@ -683,6 +685,8 @@ def main():
         "mae": (EEGMAE, "EEG-MAE"),
         "lejepa_full": (EEGLeJEPAFull, "EEG-LeJEPA+Full"),
         "lejepa_crossfreq": (EEGLeJEPACrossFreq, "EEG-LeJEPA+CrossFreq"),
+        "lejepa_multistream": (EEGLeJEPAMultiStream, "EEG-LeJEPA+MultiStream"),
+        "lejepa_outputcf": (EEGLeJEPAOutputCF, "EEG-LeJEPA+OutputCF"),
         "lejepa_spectral": (EEGLeJEPASpectral, "EEG-LeJEPA+Spectral"),
         "lejepa_region": (EEGLeJEPARegion, "EEG-LeJEPA+Region"),
         "lejepa": (EEGLeJEPA, "EEG-LeJEPA"),
@@ -715,7 +719,8 @@ def main():
         model_kwargs["n_queries"] = ckpt_args["n_queries"]
     # Backward compat: old crossfreq/full checkpoints don't have these
     # flags in args.json. Default to legacy values so old weights load.
-    if model_type in ("lejepa_crossfreq", "lejepa_full"):
+    if model_type in ("lejepa_crossfreq", "lejepa_full",
+                      "lejepa_multistream", "lejepa_outputcf"):
         model_kwargs["cf_band_conditioned"] = bool(
             ckpt_args.get("cf_band_conditioned", 0))
         model_kwargs["cf_preserve_spatial"] = bool(
