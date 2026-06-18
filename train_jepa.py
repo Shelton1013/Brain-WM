@@ -212,7 +212,7 @@ def main():
                         default="/home/share/data_makchen/peng/datasets",
                         help="Where MOABB auto-downloads data")
     parser.add_argument("--data_cache_dir", type=str,
-                        default="/home/share/data_makchen/peng/datasets/dataset_cache",
+                        default="/home/pxieaf/home2/dataset_cache",
                         help="Directory to cache preprocessed datasets (HBN + EDF "
                              "variants). First run preprocesses & writes cache; "
                              "subsequent runs load in seconds instead of hours. "
