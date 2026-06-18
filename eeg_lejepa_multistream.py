@@ -281,24 +281,28 @@ class EEGLeJEPAMultiStream(nn.Module):
         main_tokens = self.main_tokenizer(eeg)  # [B, N, D]
         main_tokens = main_tokens + self.pos_embed_main[:, :N, :]
 
-        # Eval mode: skip band stream entirely for efficiency
-        if not (return_predictions and self.training):
+        # Pure inference (no losses needed): main stream only
+        if not return_predictions:
             main_encoded = self._encode(main_tokens)
             return {"brain_states": main_encoded}
 
-        # Training: compute band tokens and concatenate
-        band_tokens = self.band_tokenizer(eeg)  # [B, N, n_bands, D]
-        N_band = N * self.n_bands
-        band_tokens_flat = band_tokens.reshape(B, N_band, self.d_model)
-        band_tokens_flat = band_tokens_flat + self.pos_embed_band[:, :N_band, :]
-
-        # Concatenate streams: [main tokens; band tokens]
-        combined = torch.cat([main_tokens, band_tokens_flat], dim=1)  # [B, N + N_band, D]
-
-        # Shared encoder
-        encoded = self._encode(combined)
-        main_encoded = encoded[:, :N]                                  # [B, N, D]
-        band_encoded = encoded[:, N:].reshape(B, N, self.n_bands, self.d_model)
+        # When return_predictions=True we always produce main JEPA
+        # predictions (needed for validate()), but the band-stream + CF
+        # auxiliary loss only runs in training mode to save compute and
+        # keep val_loss focused on main JEPA + reg.
+        if self.training:
+            band_tokens = self.band_tokenizer(eeg)              # [B, N, n_bands, D]
+            N_band = N * self.n_bands
+            band_tokens_flat = band_tokens.reshape(B, N_band, self.d_model)
+            band_tokens_flat = band_tokens_flat + self.pos_embed_band[:, :N_band, :]
+            combined = torch.cat([main_tokens, band_tokens_flat], dim=1)
+            encoded = self._encode(combined)
+            main_encoded = encoded[:, :N]
+            band_encoded = encoded[:, N:].reshape(B, N, self.n_bands, self.d_model)
+        else:
+            # Validation: main stream through encoder, no band stream / CF
+            main_encoded = self._encode(main_tokens)
+            band_encoded = None
 
         # ── Main JEPA loss: temporal block masking on main_encoded ───
         ids_vis, ids_mask, n_vis, n_mask = self._generate_block_mask(B, N, eeg.device)
@@ -317,7 +321,11 @@ class EEGLeJEPAMultiStream(nn.Module):
         predictions = self.pred_head(vis_context)
 
         # ── Cross-frequency loss: band masking on band_encoded ────────
-        freq_loss = self._compute_cf_loss(band_encoded)
+        # (skipped in validation since band_encoded is None)
+        if band_encoded is not None:
+            freq_loss = self._compute_cf_loss(band_encoded)
+        else:
+            freq_loss = torch.tensor(0.0, device=eeg.device)
 
         return {
             "predictions": predictions,
