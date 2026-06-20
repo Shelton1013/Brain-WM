@@ -53,7 +53,9 @@ def is_main():
 
 def setup_dist():
     if "RANK" in os.environ:
-        dist.init_process_group(backend="nccl")
+        # 4h timeout: dataset prebuild on first run can exceed default 10 min
+        from datetime import timedelta
+        dist.init_process_group(backend="nccl", timeout=timedelta(hours=4))
         local_rank = int(os.environ["LOCAL_RANK"])
         torch.cuda.set_device(local_rank)
         return torch.device(f"cuda:{local_rank}"), True

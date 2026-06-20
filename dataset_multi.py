@@ -259,6 +259,9 @@ class MOABBDataset(Dataset):
                         # Resample
                         if raw.info["sfreq"] != sample_rate:
                             raw.resample(sample_rate, verbose=False)
+                        # Skip recordings too short for 0.1 Hz highpass
+                        if raw.n_times < int(40 * sample_rate):
+                            continue
                         # Filter
                         raw.filter(0.1, 75.0, verbose=False)
                         # Pick common channels
@@ -377,6 +380,9 @@ class HBNDataset(Dataset):
                         raw = mne.io.read_raw_eeglab(str(set_file), preload=True, verbose=False)
                         if raw.info["sfreq"] != sample_rate:
                             raw.resample(sample_rate, verbose=False)
+                        # Skip recordings too short for 0.1 Hz highpass
+                        if raw.n_times < int(40 * sample_rate):
+                            continue
                         raw.filter(0.1, 75.0, verbose=False)
 
                         ch_indices, ch_names = pick_common_channels(raw.ch_names)
@@ -501,6 +507,12 @@ class EDFDirectoryDataset(Dataset):
                 raw = mne.io.read_raw_edf(str(edf_path), preload=True, verbose=False)
                 if raw.info["sfreq"] != sample_rate:
                     raw.resample(sample_rate, verbose=False)
+                # 0.1 Hz highpass needs ~8449 samples (~33 s @ 256 Hz) of
+                # filter length; signals shorter than this produce severely
+                # distorted output. Skip them.
+                min_samples_for_filter = int(40 * sample_rate)
+                if raw.n_times < min_samples_for_filter:
+                    return None
                 raw.filter(0.1, 75.0, verbose=False)
                 ch_indices, ch_names = pick_common_channels(raw.ch_names)
                 if len(ch_indices) < min_channels:
