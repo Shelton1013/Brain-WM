@@ -506,6 +506,28 @@ class EDFDirectoryDataset(Dataset):
             cache_path = Path(cache_dir) / f"{cache_tag}_{key}.pt"
             cached = _try_load_cache(cache_path)
             if cached is not None:
+                # Chunked manifest format from prebuild_tueg_cache.py:
+                # iterate chunk files and concatenate. Each chunk is .npz with
+                # (trials [N,T,C] float32, subject_ids [N] int64).
+                if isinstance(cached, dict) and cached.get("format") == "chunked_npz_v1":
+                    chunk_dir = cache_path.with_suffix("")
+                    print(f"  Loading chunked cache: {len(cached['chunk_files'])} chunks "
+                          f"from {chunk_dir}", flush=True)
+                    self.trials = []
+                    self.subject_ids = []
+                    for fname in cached["chunk_files"]:
+                        npz = np.load(str(chunk_dir / fname))
+                        trials_arr = npz["trials"]  # [N, T, C] float32
+                        sids = npz["subject_ids"]   # [N] int64
+                        # Append each trial as separate array (matches non-chunked
+                        # cache schema where trials is list[np.ndarray])
+                        for i in range(len(trials_arr)):
+                            self.trials.append(trials_arr[i])
+                            self.subject_ids.append(int(sids[i]))
+                    self.electrode_names = cached["electrode_names"]
+                    self.n_subjects = cached["n_subjects"]
+                    return
+                # Legacy single-payload format
                 self.trials = cached["trials"]
                 self.subject_ids = cached["subject_ids"]
                 self.electrode_names = cached["electrode_names"]

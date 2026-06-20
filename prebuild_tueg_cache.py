@@ -238,34 +238,71 @@ def main():
           f"{sum(len(patient_files[p]) for p in patients)} EDFs "
           f"({n_excluded_files} EDFs excluded)", flush=True)
 
-    # ── Process patients in parallel ──
+    # ── Process patients in parallel, FLUSH chunks to disk periodically
+    # to avoid pickling a 180 GB list-of-numpy-arrays in one shot
+    # (Python pickle of list[ndarray] needs ~2× RAM and is extremely slow).
     worker_args = [
         (p, patient_files[p], args.sample_rate, args.trial_duration_s,
          args.use_ea, args.min_channels)
         for p in patients
     ]
 
+    CHUNK_SIZE_PATIENTS = 500   # flush a chunk every N patients
+    chunk_dir = cache_path.with_suffix("")  # tueg_<hash>/
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[prebuild] Chunk dir: {chunk_dir}", flush=True)
+
     t_proc = time.time()
-    all_trials: list[np.ndarray] = []
-    all_subject_ids: list[int] = []
+    chunk_trials: list[np.ndarray] = []
+    chunk_subject_ids: list[int] = []
+    all_subject_count = 0
     electrode_names: list[str] | None = None
     n_done = 0
     n_skipped = 0
+    chunk_idx = 0
+    total_trials = 0
+    chunk_files: list[Path] = []
+
+    def _flush_chunk():
+        """Stack chunk_trials into one numpy array and save to disk."""
+        nonlocal chunk_trials, chunk_subject_ids, chunk_idx
+        if not chunk_trials:
+            return
+        # Stack (incurs 2× memory briefly, ok per chunk = ~38 GB for 500 patients)
+        stacked = np.stack(chunk_trials).astype(np.float32)
+        chunk_subj_ids_arr = np.array(chunk_subject_ids, dtype=np.int64)
+        chunk_file = chunk_dir / f"chunk_{chunk_idx:04d}.npz"
+        np.savez(str(chunk_file), trials=stacked, subject_ids=chunk_subj_ids_arr)
+        chunk_files.append(chunk_file)
+        size_gb = chunk_file.stat().st_size / 1e9
+        print(f"    ↑ chunk {chunk_idx:04d}: {len(chunk_trials)} trials "
+              f"({size_gb:.2f} GB) saved", flush=True)
+        chunk_idx += 1
+        # Free Python objects (helps GC reclaim memory)
+        chunk_trials.clear()
+        chunk_subject_ids.clear()
+        del stacked
+        del chunk_subj_ids_arr
 
     print(f"\n[prebuild] Starting parallel processing with "
-          f"{args.n_workers} workers...", flush=True)
+          f"{args.n_workers} workers, chunked save every "
+          f"{CHUNK_SIZE_PATIENTS} patients...", flush=True)
 
+    patients_in_chunk = 0
     with mp.Pool(args.n_workers) as pool:
         for patient_id, trials, ch_names in pool.imap_unordered(
                 _process_patient, worker_args, chunksize=2):
             n_done += 1
+            patients_in_chunk += 1
             if not trials:
                 n_skipped += 1
             else:
-                subj_idx = len(set(all_subject_ids))  # next subject index
+                subj_idx = all_subject_count
+                all_subject_count += 1
                 for trial in trials:
-                    all_trials.append(trial)
-                    all_subject_ids.append(subj_idx)
+                    chunk_trials.append(trial)
+                    chunk_subject_ids.append(subj_idx)
+                    total_trials += 1
                 if electrode_names is None and ch_names is not None:
                     electrode_names = ch_names
 
@@ -274,33 +311,44 @@ def main():
                 rate = n_done / max(elapsed, 1e-6)
                 eta_min = (len(worker_args) - n_done) / max(rate, 1e-6) / 60
                 print(f"  [{n_done}/{len(worker_args)}] "
-                      f"trials={len(all_trials)} "
+                      f"trials={total_trials} "
+                      f"in_chunk={len(chunk_trials)} "
                       f"skipped={n_skipped} "
                       f"elapsed={elapsed/60:.1f}m "
                       f"rate={rate:.2f}p/s "
                       f"ETA={eta_min:.1f}m", flush=True)
 
-    n_subjects = len(set(all_subject_ids))
+            # Flush chunk every CHUNK_SIZE_PATIENTS patients
+            if patients_in_chunk >= CHUNK_SIZE_PATIENTS:
+                _flush_chunk()
+                patients_in_chunk = 0
 
-    # ── Save in EDFDirectoryDataset-compatible format ──
-    print(f"\n[prebuild] Saving cache...", flush=True)
-    _save_cache(cache_path, {
-        "trials": all_trials,
-        "subject_ids": all_subject_ids,
+    # Flush final partial chunk
+    _flush_chunk()
+
+    # ── Save manifest pointing to chunks ──
+    print(f"\n[prebuild] Saving manifest...", flush=True)
+    manifest = {
+        "format": "chunked_npz_v1",
+        "chunk_files": [str(f.name) for f in chunk_files],
+        "n_total_trials": total_trials,
+        "n_subjects": all_subject_count,
         "electrode_names": electrode_names,
-        "n_subjects": n_subjects,
-    })
+    }
+    # Manifest goes alongside chunk dir; cache_path remains the manifest file
+    # so EDFDirectoryDataset's cache hit logic can find it.
+    _save_cache(cache_path, manifest)
 
     elapsed_total = time.time() - t_proc
+    total_chunk_gb = sum(f.stat().st_size for f in chunk_files) / 1e9
     print(f"\n[prebuild] Done in {elapsed_total/60:.1f} min", flush=True)
-    print(f"[prebuild] Trials: {len(all_trials)}", flush=True)
-    print(f"[prebuild] Subjects: {n_subjects}", flush=True)
+    print(f"[prebuild] Trials: {total_trials}", flush=True)
+    print(f"[prebuild] Subjects: {all_subject_count}", flush=True)
+    print(f"[prebuild] Chunks: {len(chunk_files)} ({total_chunk_gb:.2f} GB)", flush=True)
     print(f"[prebuild] Skipped patients: {n_skipped}", flush=True)
     print(f"[prebuild] Excluded patient IDs: {len(exclude_ids)}", flush=True)
-    print(f"[prebuild] Cache file:", flush=True)
-    if cache_path.exists():
-        size_gb = cache_path.stat().st_size / 1e9
-        print(f"  {cache_path.name}  ({size_gb:.2f} GB)", flush=True)
+    print(f"[prebuild] Manifest: {cache_path}", flush=True)
+    print(f"[prebuild] Chunk dir: {chunk_dir}", flush=True)
 
 
 if __name__ == "__main__":
