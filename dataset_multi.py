@@ -466,6 +466,7 @@ class EDFDirectoryDataset(Dataset):
         subject_id_fn=None,
         cache_dir: str = None,
         cache_tag: str = "edf",
+        exclude_patient_ids: set | None = None,
     ):
         if not MNE_AVAILABLE:
             raise ImportError("mne required: pip install mne")
@@ -474,10 +475,17 @@ class EDFDirectoryDataset(Dataset):
         self.trials = []
         self.subject_ids = []
         self.electrode_names = None
+        # Normalize exclude set; use frozenset for hash stability in cache key.
+        exclude_set = frozenset(exclude_patient_ids or [])
 
         # ── Cache check ──
         cache_path = None
         if cache_dir:
+            # Hash the exclude set into the cache key so different exclusion
+            # lists produce different cache files (no silent stale-cache reuse).
+            exclude_hash = hashlib.md5(
+                ",".join(sorted(exclude_set)).encode()
+            ).hexdigest()[:8] if exclude_set else "none"
             key = _cache_key({
                 "kind": cache_tag,
                 "data_dir": str(data_dir),
@@ -487,6 +495,8 @@ class EDFDirectoryDataset(Dataset):
                 "max_files": max_files,
                 "min_channels": min_channels,
                 "grouped": subject_id_fn is not None,
+                "exclude": exclude_hash,
+                "n_excluded": len(exclude_set),
             })
             cache_path = Path(cache_dir) / f"{cache_tag}_{key}.pt"
             cached = _try_load_cache(cache_path)
@@ -498,6 +508,22 @@ class EDFDirectoryDataset(Dataset):
                 return
 
         edf_files = sorted(Path(data_dir).rglob("*.edf"))
+
+        # ── Patient exclusion (only meaningful when subject_id_fn is given;
+        # otherwise we have no way to extract patient ids from filenames) ──
+        if exclude_set and subject_id_fn is not None:
+            before = len(edf_files)
+            edf_files = [
+                f for f in edf_files
+                if subject_id_fn(f) not in exclude_set
+            ]
+            n_dropped = before - len(edf_files)
+            print(f"  [exclude] dropped {n_dropped}/{before} EDFs "
+                  f"({len(exclude_set)} excluded patient IDs)")
+        elif exclude_set and subject_id_fn is None:
+            print(f"  [exclude] WARN: exclude_patient_ids given but "
+                  f"subject_id_fn is None — no filtering performed")
+
         if max_files:
             edf_files = edf_files[:max_files]
 
