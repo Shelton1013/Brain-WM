@@ -135,6 +135,13 @@ CHANNEL_ALIASES = {
 }
 
 
+# Case-insensitive alias lookup table (keys all uppercase). TUEG uses
+# "EEG FP1-REF" (uppercase P) while our alias dict was written with
+# "EEG Fp1" — without this we missed Fp1, Fp2, Fz, Cz, Pz on every TUEG
+# recording, dropping match count below the 19-channel threshold.
+_CHANNEL_ALIASES_UPPER = {k.upper(): v for k, v in CHANNEL_ALIASES.items()}
+
+
 def normalize_channel_name(name: str) -> str:
     """Map various channel naming conventions to standard 10-20."""
     # Strip common suffixes and trailing dots (PhysioNet uses "C3..", "Fp1." etc.)
@@ -143,11 +150,9 @@ def normalize_channel_name(name: str) -> str:
         if clean.upper().endswith(suffix):
             clean = clean[:-len(suffix)].strip()
 
-    # Check aliases
-    if clean in CHANNEL_ALIASES:
-        return CHANNEL_ALIASES[clean]
-    if clean.upper() in CHANNEL_ALIASES:
-        return CHANNEL_ALIASES[clean.upper()]
+    # Case-insensitive alias lookup
+    if clean.upper() in _CHANNEL_ALIASES_UPPER:
+        return _CHANNEL_ALIASES_UPPER[clean.upper()]
 
     # Check if it's already standard
     for std in COMMON_CHANNELS:
