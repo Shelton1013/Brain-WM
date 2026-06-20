@@ -1,1 +1,13 @@
 EEG-Bench
+
+# Python build artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+
+# Local logs / outputs
+*.log
+.DS_Store
