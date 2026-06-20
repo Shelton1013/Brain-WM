@@ -15,12 +15,7 @@ import argparse
 import time
 from pathlib import Path
 
-from dataset_multi import EDFDirectoryDataset
-
-
-def _sid_before_underscore(p: Path) -> str:
-    """TUH naming: aaaaaa.s001_t000.edf -> 'aaaaaa'."""
-    return p.stem.split("_")[0].split(".")[0]
+from dataset_multi import EDFDirectoryDataset, _sid_before_underscore
 
 
 def main():
