@@ -109,7 +109,9 @@ def _process_patient(args_tuple):
         except Exception:
             pass  # if EA not available / fails, fall through
 
-    # Segment into non-overlapping trials, z-score per trial
+    # Segment into non-overlapping trials, z-score per trial.
+    # Filter out trials with NaN/Inf (EA can produce them on
+    # ill-conditioned covariance matrices for some TUH patients).
     trials = []
     n_trials = len(eeg) // trial_samples
     for t in range(n_trials):
@@ -117,7 +119,10 @@ def _process_patient(args_tuple):
         trial = eeg[start:start + trial_samples]
         mean = trial.mean(axis=0, keepdims=True)
         std = trial.std(axis=0, keepdims=True) + 1e-8
-        trials.append(((trial - mean) / std).astype(np.float32))
+        normed = ((trial - mean) / std).astype(np.float32)
+        if not np.isfinite(normed).all():
+            continue
+        trials.append(normed)
 
     return patient_id, trials, matched_ch_names
 

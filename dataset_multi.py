@@ -515,17 +515,33 @@ class EDFDirectoryDataset(Dataset):
                           f"from {chunk_dir}", flush=True)
                     self.trials = []
                     self.subject_ids = []
+                    n_dropped_bad = 0
+                    n_loaded = 0
                     for fname in cached["chunk_files"]:
                         npz = np.load(str(chunk_dir / fname))
                         trials_arr = npz["trials"]  # [N, T, C] float32
                         sids = npz["subject_ids"]   # [N] int64
+                        # Vectorized NaN/Inf filter — Euclidean Alignment can
+                        # produce non-finite values on ill-conditioned R
+                        # matrices for some TUEG patients (overflow in
+                        # fractional_matrix_power). Drop bad trials here
+                        # rather than re-running prebuild.
+                        finite_mask = np.isfinite(trials_arr).all(axis=(1, 2))
+                        good_idx = np.nonzero(finite_mask)[0]
+                        n_dropped_bad += len(trials_arr) - len(good_idx)
                         # Append each trial as separate array (matches non-chunked
                         # cache schema where trials is list[np.ndarray])
-                        for i in range(len(trials_arr)):
+                        for i in good_idx:
                             self.trials.append(trials_arr[i])
                             self.subject_ids.append(int(sids[i]))
+                        n_loaded += len(good_idx)
                     self.electrode_names = cached["electrode_names"]
                     self.n_subjects = cached["n_subjects"]
+                    if n_dropped_bad:
+                        print(f"    [chunked-cache] dropped {n_dropped_bad} "
+                              f"trials with NaN/Inf values "
+                              f"({100*n_dropped_bad/(n_loaded+n_dropped_bad):.2f}%)",
+                              flush=True)
                     return
                 # Legacy single-payload format
                 self.trials = cached["trials"]
