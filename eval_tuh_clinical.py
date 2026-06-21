@@ -67,6 +67,7 @@ from eeg_lejepa_full import EEGLeJEPAFull
 from eeg_lejepa_crossfreq import EEGLeJEPACrossFreq
 from eeg_lejepa_multistream import EEGLeJEPAMultiStream
 from eeg_lejepa_outputcf import EEGLeJEPAOutputCF
+from eeg_lejepa_outputcf_pajr import EEGLeJEPAOutputCFPAJR
 
 from dataset_tuh_clinical import TUABDataset, TUEVDataset, TUEV_LABEL_NAMES
 
@@ -81,6 +82,7 @@ TYPE_MAP = {
     "lejepa_crossfreq":   (EEGLeJEPACrossFreq,    "EEG-LeJEPA+CrossFreq"),
     "lejepa_multistream": (EEGLeJEPAMultiStream,  "EEG-LeJEPA+MultiStream"),
     "lejepa_outputcf":    (EEGLeJEPAOutputCF,     "EEG-LeJEPA+OutputCF"),
+    "lejepa_outputcf_pajr": (EEGLeJEPAOutputCFPAJR, "EEG-LeJEPA+OutputCF+PAJR"),
     "lejepa_spectral":    (EEGLeJEPASpectral,     "EEG-LeJEPA+Spectral"),
     "lejepa_region":      (EEGLeJEPARegion,       "EEG-LeJEPA+Region"),
     "lejepa":             (EEGLeJEPA,             "EEG-LeJEPA"),
@@ -124,13 +126,28 @@ def load_pretrained(checkpoint_path: str, device: torch.device):
     if "n_queries" in ckpt_args:
         model_kwargs["n_queries"] = ckpt_args["n_queries"]
     if model_type in ("lejepa_crossfreq", "lejepa_full",
-                      "lejepa_multistream", "lejepa_outputcf"):
+                      "lejepa_multistream", "lejepa_outputcf",
+                      "lejepa_outputcf_pajr"):
         model_kwargs["cf_band_conditioned"] = bool(
             ckpt_args.get("cf_band_conditioned", 0))
         model_kwargs["cf_preserve_spatial"] = bool(
             ckpt_args.get("cf_preserve_spatial", 0))
         if "cf_d_band" in ckpt_args:
             model_kwargs["cf_d_band"] = ckpt_args["cf_d_band"]
+    if model_type == "lejepa_outputcf_pajr":
+        # n_patients is encoded in the checkpoint's discriminator weight shape
+        n_patients = 4000  # fallback
+        for k, v in ckpt["model_state_dict"].items():
+            if k.endswith("patient_disc.mlp.4.weight"):  # last linear out_features
+                n_patients = v.shape[0]
+                break
+        model_kwargs["n_patients"] = n_patients
+        if "par_lambda" in ckpt_args:
+            model_kwargs["par_lambda"] = ckpt_args["par_lambda"]
+        if "par_weight" in ckpt_args:
+            model_kwargs["par_weight"] = ckpt_args["par_weight"]
+        if "par_disc_hidden" in ckpt_args:
+            model_kwargs["par_disc_hidden"] = ckpt_args["par_disc_hidden"]
 
     model = model_cls(**model_kwargs).to(device)
     model.load_state_dict(ckpt["model_state_dict"])

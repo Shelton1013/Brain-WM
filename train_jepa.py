@@ -31,6 +31,7 @@ from eeg_lejepa_full import EEGLeJEPAFull
 from eeg_lejepa_crossfreq import EEGLeJEPACrossFreq
 from eeg_lejepa_multistream import EEGLeJEPAMultiStream
 from eeg_lejepa_outputcf import EEGLeJEPAOutputCF
+from eeg_lejepa_outputcf_pajr import EEGLeJEPAOutputCFPAJR
 from dataset import PhysioNetMIDataset
 from dataset_multi import MultiDatasetEEG
 
@@ -94,14 +95,15 @@ def train_epoch(model, raw_model, loader, optimizer, scheduler, device,
     total_loss = 0.0
     n = 0
 
-    for batch_idx, (eeg, _subject_ids) in enumerate(loader):
+    for batch_idx, (eeg, subject_ids) in enumerate(loader):
         eeg = eeg.to(device)
+        subject_ids = subject_ids.to(device).long()
 
         progress = global_step / max(total_steps, 1)
         raw_model.set_training_progress(progress)
 
         outputs = model(eeg, return_predictions=True)
-        losses = raw_model.compute_loss(outputs)
+        losses = raw_model.compute_loss(outputs, subject_ids=subject_ids)
 
         optimizer.zero_grad()
         losses["total"].backward()
@@ -127,6 +129,8 @@ def train_epoch(model, raw_model, loader, optimizer, scheduler, device,
                 f"cov={losses.get('cov', 0):.4f} "
                 f"freq={losses.get('freq', 0):.4f} "
                 f"qs={losses.get('qspec', 0):.4f} "
+                f"par={losses.get('par', 0):.4f} "
+                f"pacc={losses.get('par_acc', 0):.3f} "
                 f"lr={lr:.2e}"
             )
 
@@ -169,11 +173,13 @@ def main():
     parser.add_argument("--model", type=str, default="jepa",
                         choices=["jepa", "mae", "lejepa", "lejepa_spectral",
                                  "lejepa_region", "lejepa_crossfreq", "lejepa_full",
-                                 "lejepa_multistream", "lejepa_outputcf"],
+                                 "lejepa_multistream", "lejepa_outputcf",
+                                 "lejepa_outputcf_pajr"],
                         help="jepa/mae/lejepa/lejepa_spectral/lejepa_region/"
                              "lejepa_crossfreq (cross-freq only)/lejepa_full (tri-dimensional)/"
                              "lejepa_multistream (Plan A: parallel main+band streams)/"
-                             "lejepa_outputcf (Plan B: CF on encoder output)")
+                             "lejepa_outputcf (Plan B: CF on encoder output)/"
+                             "lejepa_outputcf_pajr (Plan B + patient-adversarial reg)")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=3e-4)
@@ -254,6 +260,14 @@ def main():
                              "compressed each band's representation and limited "
                              "the spectral tokenizer's overall capacity. Use 8 to "
                              "reproduce legacy behavior.")
+    # PAJR (Patient-Adversarial JEPA Regularization) — lejepa_outputcf_pajr only
+    parser.add_argument("--par_lambda", type=float, default=1.0,
+                        help="PAJR gradient reversal strength. Larger = stronger "
+                             "encoder pressure to erase patient identity.")
+    parser.add_argument("--par_weight", type=float, default=0.1,
+                        help="PAJR loss weight in total loss.")
+    parser.add_argument("--par_disc_hidden", type=int, default=256,
+                        help="Hidden dim of patient discriminator MLP.")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -379,6 +393,7 @@ def main():
         "lejepa_crossfreq": EEGLeJEPACrossFreq, "lejepa_full": EEGLeJEPAFull,
         "lejepa_multistream": EEGLeJEPAMultiStream,
         "lejepa_outputcf": EEGLeJEPAOutputCF,
+        "lejepa_outputcf_pajr": EEGLeJEPAOutputCFPAJR,
     }
     name_map = {
         "jepa": "EEG-JEPA (Laya-style)", "mae": "EEG-MAE",
@@ -387,6 +402,7 @@ def main():
         "lejepa_crossfreq": "EEG-LeJEPA+CrossFreq", "lejepa_full": "EEG-LeJEPA+Full",
         "lejepa_multistream": "EEG-LeJEPA+MultiStream",
         "lejepa_outputcf": "EEG-LeJEPA+OutputCF",
+        "lejepa_outputcf_pajr": "EEG-LeJEPA+OutputCF+PAJR",
     }
     model_cls = model_map[args.model]
     model_name = name_map[args.model]
@@ -409,13 +425,25 @@ def main():
     elif args.model == "jepa":
         model_kwargs.update(predictor_layers=3, predictor_dim=128, predictor_heads=4)
     elif args.model in ("lejepa_crossfreq", "lejepa_full",
-                        "lejepa_multistream", "lejepa_outputcf"):
+                        "lejepa_multistream", "lejepa_outputcf",
+                        "lejepa_outputcf_pajr"):
         model_kwargs.update(
             freq_mask_weight=args.freq_mask_weight,
             cf_band_conditioned=bool(args.cf_band_conditioned),
             cf_preserve_spatial=bool(args.cf_preserve_spatial),
             cf_d_band=args.cf_d_band,
         )
+    # PAJR-specific kwargs (patient discriminator needs to know n_patients,
+    # which we get from dataset.n_subjects, set BEFORE this block runs).
+    if args.model == "lejepa_outputcf_pajr":
+        model_kwargs.update(
+            n_patients=int(dataset.n_subjects),
+            par_lambda=args.par_lambda,
+            par_weight=args.par_weight,
+            par_disc_hidden=args.par_disc_hidden,
+        )
+        pprint(f"  PAJR: n_patients={dataset.n_subjects}, "
+               f"par_lambda={args.par_lambda}, par_weight={args.par_weight}")
     # All lejepa-family models accept sigreg_lambda (jepa/mae use sigreg_weight)
     if args.model.startswith("lejepa"):
         model_kwargs.update(sigreg_lambda=args.sigreg_lambda)
