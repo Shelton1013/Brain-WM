@@ -198,6 +198,11 @@ def main():
     parser.add_argument("--tueg_dir", type=str, default=None,
                         help="TUH EEG Corpus root (subject grouped by filename prefix)")
     parser.add_argument("--tueg_max_files", type=int, default=None)
+    parser.add_argument("--tueg_exclude_dirs", type=str, nargs="*", default=[],
+                        help="Patient ID exclude set for TUEG (typically TUAB+TUEV roots). "
+                             "Must match what prebuild_tueg_cache.py used, otherwise "
+                             "cache hash will mismatch and TUEG will be re-processed "
+                             "from scratch (slow + risk of pretrain-test leakage).")
     parser.add_argument("--chb_mit_dir", type=str, default=None,
                         help="CHB-MIT root (subject = chbXX)")
     parser.add_argument("--chb_mit_max_files", type=int, default=None)
@@ -297,6 +302,26 @@ def main():
         if args.edf_dir:
             sources.append({"type": "edf_dir", "path": args.edf_dir,
                             "max_files": args.edf_max_files})
+        # Build TUEG exclude set (must match prebuild_tueg_cache.py's set
+        # for cache hash to align).
+        tueg_exclude_ids = set()
+        if args.tueg_dir and args.tueg_exclude_dirs:
+            from dataset_multi import _sid_before_underscore
+            from pathlib import Path
+            for d in args.tueg_exclude_dirs:
+                d = Path(d)
+                if not d.is_dir():
+                    pprint(f"  [tueg_exclude] WARN: {d} not a dir, skipping")
+                    continue
+                n_before = len(tueg_exclude_ids)
+                for edf in d.rglob("*.edf"):
+                    pid = _sid_before_underscore(edf)
+                    if pid:
+                        tueg_exclude_ids.add(pid)
+                pprint(f"  [tueg_exclude] {d}: "
+                       f"{len(tueg_exclude_ids) - n_before} new IDs")
+            pprint(f"  [tueg_exclude] Total: {len(tueg_exclude_ids)} patient IDs")
+
         for src_type, dir_arg, max_arg in (
             ("tueg",    args.tueg_dir,    args.tueg_max_files),
             ("chb_mit", args.chb_mit_dir, args.chb_mit_max_files),
@@ -305,8 +330,11 @@ def main():
             ("cap",     args.cap_dir,     args.cap_max_files),
         ):
             if dir_arg:
-                sources.append({"type": src_type, "path": dir_arg,
-                                "max_files": max_arg})
+                src_dict = {"type": src_type, "path": dir_arg,
+                            "max_files": max_arg}
+                if src_type == "tueg" and tueg_exclude_ids:
+                    src_dict["exclude_patient_ids"] = tueg_exclude_ids
+                sources.append(src_dict)
         dataset = MultiDatasetEEG(
             sources=sources,
             physionet_data_dir=args.data_dir,

@@ -777,6 +777,7 @@ class MultiDatasetEEG(Dataset):
                     subject_id_fn=src.get("subject_id_fn", presets["subject_id_fn"]),
                     cache_dir=cache_dir,
                     cache_tag=src_type,  # e.g., "tueg", "chb_mit", "siena"
+                    exclude_patient_ids=src.get("exclude_patient_ids"),
                 )
                 for i in range(len(ds.subject_ids)):
                     ds.subject_ids[i] += total_subjects
