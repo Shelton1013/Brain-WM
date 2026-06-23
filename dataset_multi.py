@@ -226,6 +226,7 @@ class MOABBDataset(Dataset):
         use_ea: bool = True,
         min_channels: int = 19,
         data_dir: str = None,
+        cache_dir: str = None,
     ):
         try:
             import moabb
@@ -247,6 +248,26 @@ class MOABBDataset(Dataset):
         self.trials = []
         self.subject_ids = []
         self.electrode_names = None
+
+        # ── Cache check (avoid re-processing MOABB raw files on every run) ──
+        cache_path = None
+        if cache_dir:
+            key = _cache_key({
+                "kind": "moabb",
+                "dataset_name": dataset_name,
+                "sample_rate": sample_rate,
+                "trial_duration_s": trial_duration_s,
+                "use_ea": use_ea,
+                "min_channels": min_channels,
+            })
+            cache_path = Path(cache_dir) / f"moabb_{dataset_name}_{key}.pt"
+            cached = _try_load_cache(cache_path)
+            if cached is not None:
+                self.trials = cached["trials"]
+                self.subject_ids = cached["subject_ids"]
+                self.electrode_names = cached["electrode_names"]
+                self.n_subjects = cached["n_subjects"]
+                return
 
         # Get dataset class
         ds_class = getattr(moabb.datasets, dataset_name)
@@ -303,6 +324,15 @@ class MOABBDataset(Dataset):
         self.n_subjects = len(set(self.subject_ids))
         print(f"    → {len(self.trials)} trials, {self.n_subjects} subjects, "
               f"{len(self.electrode_names or [])} channels")
+
+        # ── Save cache for next run ──
+        if cache_path is not None:
+            _save_cache(cache_path, {
+                "trials": self.trials,
+                "subject_ids": self.subject_ids,
+                "electrode_names": self.electrode_names,
+                "n_subjects": self.n_subjects,
+            })
 
     def __len__(self):
         return len(self.trials)
@@ -739,6 +769,7 @@ class MultiDatasetEEG(Dataset):
                     sample_rate=sample_rate,
                     trial_duration_s=trial_duration_s,
                     data_dir=src.get("data_dir", download_dir),
+                    cache_dir=cache_dir,
                 )
                 for i in range(len(ds.subject_ids)):
                     ds.subject_ids[i] += total_subjects
