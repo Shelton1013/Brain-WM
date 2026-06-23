@@ -321,7 +321,6 @@ def main():
         tueg_exclude_ids = set()
         if args.tueg_dir and args.tueg_exclude_dirs:
             from dataset_multi import _sid_before_underscore
-            from pathlib import Path
             for d in args.tueg_exclude_dirs:
                 d = Path(d)
                 if not d.is_dir():
