@@ -107,6 +107,50 @@ except ImportError:
 
 
 # ============================================================
+# Normalization (Défossez 2022-style robust scaling)
+# ============================================================
+
+def robust_scale_per_recording(eeg: np.ndarray) -> np.ndarray:
+    """Per-recording robust scaling: (x - median) / (IQR / 1.349 + eps).
+
+    Computes median and IQR (75th - 25th percentile) over the time
+    dimension per channel, then normalizes. Preserves long-range
+    amplitude structure (unlike per-trial z-score). 1.349 = Phi^-1(0.75)
+    - Phi^-1(0.25), making IQR/1.349 a robust std estimator for Gaussian.
+
+    Args:
+        eeg: [T, C] float array (one full recording).
+
+    Returns:
+        [T, C] float32 scaled.
+    """
+    eeg = np.asarray(eeg, dtype=np.float32)
+    median = np.median(eeg, axis=0, keepdims=True)
+    q75 = np.percentile(eeg, 75, axis=0, keepdims=True)
+    q25 = np.percentile(eeg, 25, axis=0, keepdims=True)
+    iqr = q75 - q25
+    robust_std = iqr / 1.349 + 1e-6
+    return ((eeg - median) / robust_std).astype(np.float32)
+
+
+def normalize_signal(eeg: np.ndarray, mode: str) -> np.ndarray:
+    """Apply normalization to a full recording before segmentation.
+
+    Args:
+        eeg: [T, C] full recording.
+        mode: "per_recording_robust" (Laya/Défossez style) or
+              "none" (no recording-level normalization; per-trial
+              z-score is applied later during segmentation).
+    """
+    if mode == "per_recording_robust":
+        return robust_scale_per_recording(eeg)
+    elif mode == "none":
+        return eeg
+    else:
+        raise ValueError(f"Unknown normalization mode: {mode}")
+
+
+# ============================================================
 # Common electrode set (10-20 system, 19 channels minimum)
 # ============================================================
 
@@ -502,6 +546,7 @@ class EDFDirectoryDataset(Dataset):
         cache_dir: str = None,
         cache_tag: str = "edf",
         exclude_patient_ids: set | None = None,
+        normalization: str = "per_trial_zscore",
     ):
         if not MNE_AVAILABLE:
             raise ImportError("mne required: pip install mne")
@@ -510,6 +555,7 @@ class EDFDirectoryDataset(Dataset):
         self.trials = []
         self.subject_ids = []
         self.electrode_names = None
+        self.normalization = normalization
         # Normalize exclude set; use frozenset for hash stability in cache key.
         exclude_set = frozenset(exclude_patient_ids or [])
 
@@ -532,6 +578,7 @@ class EDFDirectoryDataset(Dataset):
                 "grouped": subject_id_fn is not None,
                 "exclude": exclude_hash,
                 "n_excluded": len(exclude_set),
+                "normalization": normalization,
             })
             cache_path = Path(cache_dir) / f"{cache_tag}_{key}.pt"
             cached = _try_load_cache(cache_path)
@@ -623,18 +670,29 @@ class EDFDirectoryDataset(Dataset):
                 return None
 
         def _segment_and_store(eeg, subj_idx):
+            """Apply normalization at recording level OR per-trial, then segment."""
+            # Recording-level normalization (Laya/Défossez style):
+            # apply ONCE per concatenated recording before segmentation.
+            # Preserves long-range amplitude / variance structure across trials.
+            if self.normalization == "per_recording_robust":
+                eeg = normalize_signal(eeg, "per_recording_robust")
             n_trials = len(eeg) // self.trial_samples
             for t in range(n_trials):
                 start = t * self.trial_samples
                 trial = eeg[start:start + self.trial_samples]
-                mean = trial.mean(axis=0, keepdims=True)
-                std = trial.std(axis=0, keepdims=True) + 1e-8
-                self.trials.append(((trial - mean) / std))
+                if self.normalization == "per_trial_zscore":
+                    # Legacy: per-trial z-score (4s window) — destroys long-range
+                    mean = trial.mean(axis=0, keepdims=True)
+                    std = trial.std(axis=0, keepdims=True) + 1e-8
+                    trial = (trial - mean) / std
+                # If per_recording_robust was applied above, trial is already scaled.
+                self.trials.append(trial.astype(np.float32))
                 self.subject_ids.append(subj_idx)
 
         if subject_id_fn is None:
             # Per-file mode (legacy): one "subject" per file, per-file EA.
-            print(f"  Loading EDF dir: {data_dir} ({len(edf_files)} files, per-file)...")
+            print(f"  Loading EDF dir: {data_dir} ({len(edf_files)} files, per-file, "
+                  f"norm={self.normalization})...")
             for file_idx, edf_path in enumerate(edf_files):
                 eeg = _load_one(edf_path)
                 if eeg is None:
@@ -660,7 +718,8 @@ class EDFDirectoryDataset(Dataset):
                     pass
             subjects = sorted(subject_files.keys())
             print(f"  Loading EDF dir: {data_dir} "
-                  f"({len(edf_files)} files, {len(subjects)} subjects, grouped)...")
+                  f"({len(edf_files)} files, {len(subjects)} subjects, grouped, "
+                  f"norm={self.normalization})...")
             for subj_idx, sid in enumerate(subjects):
                 subj_recordings = [
                     eeg for eeg in (_load_one(p) for p in subject_files[sid])
@@ -734,9 +793,11 @@ class MultiDatasetEEG(Dataset):
         physionet_data_dir: str = "/home/share/data_makchen/peng/datasets/physionet",
         download_dir: str = "/home/share/data_makchen/peng/datasets",
         cache_dir: str = None,
+        normalization: str = "per_trial_zscore",
     ):
         datasets = []
         total_subjects = 0
+        self.normalization = normalization
 
         for src in sources:
             src_type = src["type"]
@@ -797,6 +858,7 @@ class MultiDatasetEEG(Dataset):
                     max_files=src.get("max_files", None),
                     cache_dir=cache_dir,
                     cache_tag="edf",
+                    normalization=normalization,
                 )
                 for i in range(len(ds.subject_ids)):
                     ds.subject_ids[i] += total_subjects
@@ -825,6 +887,7 @@ class MultiDatasetEEG(Dataset):
                     cache_dir=cache_dir,
                     cache_tag=src_type,  # e.g., "tueg", "chb_mit", "siena"
                     exclude_patient_ids=src.get("exclude_patient_ids"),
+                    normalization=normalization,
                 )
                 for i in range(len(ds.subject_ids)):
                     ds.subject_ids[i] += total_subjects

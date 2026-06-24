@@ -268,7 +268,14 @@ def main():
                         help="PAJR loss weight in total loss.")
     parser.add_argument("--par_disc_hidden", type=int, default=256,
                         help="Hidden dim of patient discriminator MLP.")
-    # Long-chunk support (Laya-style)
+    # Laya-style preprocessing options
+    parser.add_argument("--normalization", type=str, default="per_trial_zscore",
+                        choices=["per_trial_zscore", "per_recording_robust"],
+                        help="per_trial_zscore: legacy 4s window z-score "
+                             "(MI standard). per_recording_robust: Defossez 2022 "
+                             "/ Laya style; (x-median)/(IQR/1.349) per recording "
+                             "BEFORE segmentation. Use per_recording_robust for "
+                             "clinical task transfer (TUAB/TUEV).")
     parser.add_argument("--trial_duration_s", type=int, default=4,
                         help="Per-trial duration in seconds. Default 4 (BCI standard). "
                              "Bump to 30-60 for clinical-style preprocessing "
@@ -366,6 +373,7 @@ def main():
             download_dir=args.download_dir,
             cache_dir=args.data_cache_dir if args.data_cache_dir else None,
             trial_duration_s=args.trial_duration_s,
+            normalization=args.normalization,
         )
     else:
         dataset = PhysioNetMIDataset(

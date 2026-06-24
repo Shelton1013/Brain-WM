@@ -66,9 +66,10 @@ def _process_patient(args_tuple):
     ch_names) or (subject_pid, [], None) on failure.
 
     `args_tuple = (patient_id, edf_paths, sample_rate, trial_duration_s,
-                   use_ea, min_channels)`
+                   use_ea, min_channels, normalization)`
     """
-    patient_id, edf_paths, sample_rate, trial_duration_s, use_ea, min_channels = args_tuple
+    (patient_id, edf_paths, sample_rate, trial_duration_s,
+     use_ea, min_channels, normalization) = args_tuple
     trial_samples = sample_rate * trial_duration_s
     min_samples_for_filter = int(40 * sample_rate)
 
@@ -109,7 +110,12 @@ def _process_patient(args_tuple):
         except Exception:
             pass  # if EA not available / fails, fall through
 
-    # Segment into non-overlapping trials, z-score per trial.
+    # Recording-level robust normalization BEFORE segmentation (Laya-style)
+    if normalization == "per_recording_robust":
+        from dataset_multi import normalize_signal
+        eeg = normalize_signal(eeg, "per_recording_robust")
+
+    # Segment into non-overlapping trials.
     # Filter out trials with NaN/Inf (EA can produce them on
     # ill-conditioned covariance matrices for some TUH patients).
     trials = []
@@ -117,9 +123,14 @@ def _process_patient(args_tuple):
     for t in range(n_trials):
         start = t * trial_samples
         trial = eeg[start:start + trial_samples]
-        mean = trial.mean(axis=0, keepdims=True)
-        std = trial.std(axis=0, keepdims=True) + 1e-8
-        normed = ((trial - mean) / std).astype(np.float32)
+        if normalization == "per_trial_zscore":
+            # Legacy: per-trial z-score
+            mean = trial.mean(axis=0, keepdims=True)
+            std = trial.std(axis=0, keepdims=True) + 1e-8
+            normed = ((trial - mean) / std).astype(np.float32)
+        else:
+            # per_recording_robust already applied above
+            normed = trial.astype(np.float32)
         if not np.isfinite(normed).all():
             continue
         trials.append(normed)
@@ -169,6 +180,13 @@ def main():
     ap.add_argument("--use_ea", action="store_true", default=True)
     ap.add_argument("--exclude_from_dirs", type=str, nargs="*", default=[])
     ap.add_argument("--exclude_id_file", type=str, default=None)
+    ap.add_argument("--normalization", type=str, default="per_trial_zscore",
+                    choices=["per_trial_zscore", "per_recording_robust"],
+                    help="per_trial_zscore: legacy 4s window z-score (destroys "
+                         "long-range amplitude). per_recording_robust: Defossez "
+                         "2022 / Laya style; (x-median)/(IQR/1.349) per recording "
+                         "BEFORE segmentation. Use per_recording_robust for "
+                         "clinical task transfer (TUAB/TUEV).")
     ap.add_argument("--n_workers", type=int, default=16,
                     help="Number of parallel worker processes.")
     args = ap.parse_args()
@@ -211,6 +229,7 @@ def main():
         "grouped": True,              # we always group by patient
         "exclude": exclude_hash,
         "n_excluded": len(exclude_ids),
+        "normalization": args.normalization,
     })
     cache_path = Path(args.cache_dir) / f"tueg_{cache_payload_key}.pt"
     print(f"[prebuild] Cache target: {cache_path}", flush=True)
@@ -248,7 +267,7 @@ def main():
     # (Python pickle of list[ndarray] needs ~2× RAM and is extremely slow).
     worker_args = [
         (p, patient_files[p], args.sample_rate, args.trial_duration_s,
-         args.use_ea, args.min_channels)
+         args.use_ea, args.min_channels, args.normalization)
         for p in patients
     ]
 
