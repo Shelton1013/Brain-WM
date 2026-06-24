@@ -140,6 +140,7 @@ class TUABDataset(Dataset):
         self.trial_samples = sample_rate * trial_duration_s
         self.trials: list[np.ndarray] = []
         self.labels: list[int] = []
+        self.recording_ids: list[int] = []  # which EDF each trial came from
         self.electrode_names: list[str] | None = None
 
         # Cache key includes split — train and eval are separate cache files
@@ -159,10 +160,13 @@ class TUABDataset(Dataset):
                 self.trials = cached["trials"]
                 self.labels = cached["labels"]
                 self.electrode_names = cached["electrode_names"]
+                # Backward-compat: old caches don't have recording_ids
+                self.recording_ids = cached.get("recording_ids", [])
                 return
 
         # Walk normal/ and abnormal/ subdirectories of the split
         split_root = Path(data_dir) / split
+        recording_counter = 0
         for label_int, label_name in [(0, "normal"), (1, "abnormal")]:
             class_dir = split_root / label_name
             if not class_dir.is_dir():
@@ -185,13 +189,17 @@ class TUABDataset(Dataset):
                 for s in segs:
                     self.trials.append(s)
                     self.labels.append(label_int)
+                    self.recording_ids.append(recording_counter)
+                recording_counter += 1
 
-        print(f"  [TUAB {split}] total: {len(self.trials)} trials")
+        print(f"  [TUAB {split}] total: {len(self.trials)} trials "
+              f"from {recording_counter} recordings")
 
         if cache_path is not None:
             _save_cache(cache_path, {
                 "trials": self.trials,
                 "labels": self.labels,
+                "recording_ids": self.recording_ids,
                 "electrode_names": self.electrode_names,
             })
 
@@ -282,6 +290,7 @@ class TUEVDataset(Dataset):
         self.trial_samples = sample_rate * trial_duration_s
         self.trials: list[np.ndarray] = []
         self.labels: list[int] = []
+        self.recording_ids: list[int] = []  # which EDF each trial came from
         self.electrode_names: list[str] | None = None
 
         cache_path = None
@@ -300,6 +309,8 @@ class TUEVDataset(Dataset):
                 self.trials = cached["trials"]
                 self.labels = cached["labels"]
                 self.electrode_names = cached["electrode_names"]
+                # Backward-compat: old caches don't have recording_ids
+                self.recording_ids = cached.get("recording_ids", [])
                 return
 
         split_root = Path(data_dir) / split
@@ -307,6 +318,7 @@ class TUEVDataset(Dataset):
         print(f"  [TUEV {split}] {len(edf_files)} EDF files")
         events_skipped_oob = 0
         events_extracted = 0
+        recording_counter = 0
         for fi, edf_path in enumerate(edf_files):
             if fi % 200 == 0 and fi > 0:
                 print(f"    {fi}/{len(edf_files)} files, "
@@ -330,6 +342,7 @@ class TUEVDataset(Dataset):
 
             T_total = data_uv.shape[0]
             half = self.trial_samples // 2
+            any_event_added = False
             for start_s, end_s, label_0_to_5 in events:
                 mid = int(round((start_s + end_s) / 2 * sample_rate))
                 lo = mid - half
@@ -342,9 +355,14 @@ class TUEVDataset(Dataset):
                 std = trial.std(axis=0, keepdims=True) + 1e-8
                 self.trials.append(((trial - mean) / std).astype(np.float32))
                 self.labels.append(label_0_to_5)
+                self.recording_ids.append(recording_counter)
                 events_extracted += 1
+                any_event_added = True
+            if any_event_added:
+                recording_counter += 1
 
-        print(f"  [TUEV {split}] total: {len(self.trials)} trials, "
+        print(f"  [TUEV {split}] total: {len(self.trials)} trials "
+              f"from {recording_counter} recordings, "
               f"{events_skipped_oob} skipped (OOB)")
 
         # Per-class count (sanity)
@@ -357,6 +375,7 @@ class TUEVDataset(Dataset):
             _save_cache(cache_path, {
                 "trials": self.trials,
                 "labels": self.labels,
+                "recording_ids": self.recording_ids,
                 "electrode_names": self.electrode_names,
             })
 

@@ -50,6 +50,7 @@ class EEGLeJEPA(nn.Module):
         query_spec_weight: float = 0.1,
         n_subjects: int = 109,
         reg_type: str = "sigreg",       # "sigreg" (true LeJEPA) | "vicreg" (ablation)
+        max_seq_len: int = 256,         # pos_embed length; bump for long chunks
     ):
         super().__init__()
         self.state_samples = state_samples
@@ -59,6 +60,7 @@ class EEGLeJEPA(nn.Module):
         self.sigreg_lambda = sigreg_lambda
         self.query_spec_weight = query_spec_weight
         self.reg_type = reg_type
+        self.max_seq_len = max_seq_len
 
         # --- Tokenizer ---
         self.tokenizer = DynamicChannelMixer(
@@ -66,7 +68,7 @@ class EEGLeJEPA(nn.Module):
         )
 
         # --- Position embedding ---
-        self.pos_embed = nn.Parameter(torch.randn(1, 256, d_model) * 0.02)
+        self.pos_embed = nn.Parameter(torch.randn(1, max_seq_len, d_model) * 0.02)
 
         # --- Single encoder (processes ALL tokens) ---
         self.encoder = nn.ModuleList([

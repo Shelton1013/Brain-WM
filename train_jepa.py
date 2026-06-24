@@ -268,6 +268,18 @@ def main():
                         help="PAJR loss weight in total loss.")
     parser.add_argument("--par_disc_hidden", type=int, default=256,
                         help="Hidden dim of patient discriminator MLP.")
+    # Long-chunk support (Laya-style)
+    parser.add_argument("--trial_duration_s", type=int, default=4,
+                        help="Per-trial duration in seconds. Default 4 (BCI standard). "
+                             "Bump to 30-60 for clinical-style preprocessing "
+                             "(Laya uses 120s). Requires --max_seq_len bump if "
+                             "trial_duration_s * sample_rate / state_samples > 256.")
+    parser.add_argument("--max_seq_len", type=int, default=256,
+                        help="Maximum temporal token sequence length for pos_embed. "
+                             "Default 256 supports trial_duration_s=4 with state_samples=26 "
+                             "(N=39 tokens). Bump to 1024 for trial_duration_s=60+ "
+                             "(N up to ~590). NOTE: changing max_seq_len changes pos_embed "
+                             "shape, so old checkpoints with max_seq_len=256 won't strict-load.")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -353,6 +365,7 @@ def main():
             physionet_data_dir=args.data_dir,
             download_dir=args.download_dir,
             cache_dir=args.data_cache_dir if args.data_cache_dir else None,
+            trial_duration_s=args.trial_duration_s,
         )
     else:
         dataset = PhysioNetMIDataset(
@@ -419,6 +432,11 @@ def main():
         n_subjects=args.n_subjects,
         reg_type=args.reg_type,
     )
+    # Long-chunk support: only pass max_seq_len to models that accept it
+    # (currently lejepa, lejepa_outputcf, lejepa_outputcf_pajr).
+    # Default 256 = backward-compat with existing checkpoints.
+    if args.model in ("lejepa", "lejepa_outputcf", "lejepa_outputcf_pajr"):
+        model_kwargs["max_seq_len"] = args.max_seq_len
     if args.model == "mae":
         model_kwargs.update(decoder_layers=3, decoder_dim=128, decoder_heads=4)
     elif args.model == "jepa":

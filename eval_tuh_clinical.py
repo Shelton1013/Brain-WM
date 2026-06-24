@@ -189,12 +189,44 @@ def _pad_or_trim_channels(X: np.ndarray, target_n_ch: int) -> np.ndarray:
     return np.pad(X, ((0, 0), (0, 0), (0, target_n_ch - n_ch)))
 
 
-def dataset_to_xy(ds, target_n_ch: int) -> tuple[np.ndarray, np.ndarray]:
-    """Convert {trials, labels} dataset to (X [N,T,C] float32, y [N] int)."""
+def dataset_to_xy(ds, target_n_ch: int) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Convert {trials, labels, recording_ids} dataset to (X, y, rec_ids).
+
+    Returns:
+        X: [N, T, C] float32
+        y: [N] int (per-trial labels)
+        rec_ids: [N] int or None (None if dataset has no recording_id tracking)
+    """
     X = np.stack(ds.trials).astype(np.float32)
     X = _pad_or_trim_channels(X, target_n_ch)
     y = np.array(ds.labels, dtype=np.int64)
-    return X, y
+    rec_ids = None
+    if hasattr(ds, "recording_ids") and ds.recording_ids:
+        rec_ids = np.array(ds.recording_ids, dtype=np.int64)
+    return X, y, rec_ids
+
+
+def aggregate_per_recording(features, labels, rec_ids):
+    """Mean-pool per-trial features within each recording.
+
+    Args:
+        features: [N_trials, d_model] per-trial embeddings
+        labels:   [N_trials] per-trial labels (all trials in a recording share label)
+        rec_ids:  [N_trials] recording index per trial
+
+    Returns:
+        agg_features: [N_recordings, d_model]
+        agg_labels:   [N_recordings]
+    """
+    unique_recs = np.unique(rec_ids)
+    agg_features = np.zeros((len(unique_recs), features.shape[1]), dtype=features.dtype)
+    agg_labels = np.zeros(len(unique_recs), dtype=labels.dtype)
+    for i, rec in enumerate(unique_recs):
+        mask = rec_ids == rec
+        agg_features[i] = features[mask].mean(axis=0)
+        # All trials in a recording share the same label (per dataset construction)
+        agg_labels[i] = labels[mask][0]
+    return agg_features, agg_labels
 
 
 def extract_features(model, X_np, device, batch_size=64):
@@ -429,6 +461,13 @@ def main():
                    help="JSON output path; if None, derive from checkpoint")
     p.add_argument("--include_random_baseline", action="store_true",
                    help="Also eval a fresh-random-init model with same config")
+    p.add_argument("--aggregate", action="store_true",
+                   help="Aggregate per-trial features to recording-level "
+                        "(mean-pool over trials in same recording) before "
+                        "linear probe / FT. Reduces patient-shortcut and "
+                        "matches Laya/LaBraM-style recording-level eval. "
+                        "Requires fresh-built dataset cache with recording_ids; "
+                        "old caches (without recording_ids) fall back to per-trial.")
     args = p.parse_args()
 
     device = torch.device(
@@ -461,11 +500,28 @@ def main():
     )
     print(f"Data loaded in {(time.time()-t0)/60:.1f} min")
 
-    X_tr, y_tr = dataset_to_xy(train_ds, n_channels)
-    X_te, y_te = dataset_to_xy(eval_ds,  n_channels)
+    X_tr, y_tr, rec_tr = dataset_to_xy(train_ds, n_channels)
+    X_te, y_te, rec_te = dataset_to_xy(eval_ds,  n_channels)
     print(f"\nShapes: train {X_tr.shape}, eval {X_te.shape}")
     print(f"Class counts (train): {np.bincount(y_tr, minlength=n_classes)}")
     print(f"Class counts (eval):  {np.bincount(y_te, minlength=n_classes)}")
+
+    # Recording-level aggregation availability check
+    aggregate_enabled = bool(args.aggregate)
+    if aggregate_enabled:
+        if rec_tr is None or rec_te is None:
+            print("\n[aggregate] WARN: --aggregate requested but dataset cache "
+                  "has no recording_ids (likely old cache). Falling back to "
+                  "per-trial eval. Rebuild cache to enable aggregation.")
+            aggregate_enabled = False
+        else:
+            n_rec_tr = len(np.unique(rec_tr))
+            n_rec_te = len(np.unique(rec_te))
+            print(f"\n[aggregate] Recording-level mode: "
+                  f"train {n_rec_tr} recordings (from {len(y_tr)} trials), "
+                  f"eval {n_rec_te} recordings (from {len(y_te)} trials)")
+            print(f"[aggregate] Per-trial features will be mean-pooled within "
+                  f"each recording before linear probe / FT.")
 
     results = {
         "checkpoint": args.checkpoint,
@@ -486,8 +542,17 @@ def main():
         print("  [JEPA] Extracting features...")
         feat_tr = extract_features(model, X_tr, device)
         feat_te = extract_features(model, X_te, device)
+        # Recording-level aggregation if enabled
+        if aggregate_enabled:
+            feat_tr_p, y_tr_p = aggregate_per_recording(feat_tr, y_tr, rec_tr)
+            feat_te_p, y_te_p = aggregate_per_recording(feat_te, y_te, rec_te)
+            print(f"  [aggregate] features: train {feat_tr.shape} → {feat_tr_p.shape}, "
+                  f"eval {feat_te.shape} → {feat_te_p.shape}")
+        else:
+            feat_tr_p, y_tr_p = feat_tr, y_tr
+            feat_te_p, y_te_p = feat_te, y_te
         results["jepa_frozen"] = run_frozen_probe(
-            feat_tr, y_tr, feat_te, y_te, n_classes, args.dataset, args.n_reps)
+            feat_tr_p, y_tr_p, feat_te_p, y_te_p, n_classes, args.dataset, args.n_reps)
         _print_metric_line("  JEPA frozen ", results["jepa_frozen"], args.dataset)
 
         if args.include_random_baseline:
@@ -496,9 +561,18 @@ def main():
             r_tr = extract_features(random_model, X_tr, device)
             r_te = extract_features(random_model, X_te, device)
             del random_model; torch.cuda.empty_cache()
+            if aggregate_enabled:
+                r_tr_p, ry_tr_p = aggregate_per_recording(r_tr, y_tr, rec_tr)
+                r_te_p, ry_te_p = aggregate_per_recording(r_te, y_te, rec_te)
+            else:
+                r_tr_p, ry_tr_p = r_tr, y_tr
+                r_te_p, ry_te_p = r_te, y_te
             results["random_frozen"] = run_frozen_probe(
-                r_tr, y_tr, r_te, y_te, n_classes, args.dataset, args.n_reps)
+                r_tr_p, ry_tr_p, r_te_p, ry_te_p, n_classes, args.dataset, args.n_reps)
             _print_metric_line("  Rand frozen ", results["random_frozen"], args.dataset)
+
+    # Save aggregation status in results for transparency
+    results["aggregate_recording_level"] = aggregate_enabled
 
     # ── Fine-tune ──
     if args.mode in ("finetune", "both"):

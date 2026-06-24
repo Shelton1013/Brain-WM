@@ -79,6 +79,11 @@ class EEGLeJEPAOutputCF(nn.Module):
         cf_d_band: int = 64,
         # Present for CLI compatibility; unused (no SpectralTokenizer here):
         cf_preserve_spatial: bool = True,
+        # Max number of temporal tokens for pos_embed. Default 256 supports
+        # 4s @ 256Hz with state_samples=26 (N=39). Increase to ~1024 for
+        # 60s+ chunks. Old checkpoints (256) still load if you do not
+        # increase trial_duration_s.
+        max_seq_len: int = 256,
     ):
         super().__init__()
         self.state_samples = state_samples
@@ -92,12 +97,13 @@ class EEGLeJEPAOutputCF(nn.Module):
         self.n_bands = n_bands
         self.cf_band_conditioned = cf_band_conditioned
         self.d_band_view = cf_d_band if cf_d_band is not None else 64
+        self.max_seq_len = max_seq_len
 
         # ─── Main path: identical to base LeJEPA ──────────────────────
         self.tokenizer = DynamicChannelMixer(
             n_channels, state_samples, d_model, d_channel, n_queries,
         )
-        self.pos_embed = nn.Parameter(torch.randn(1, 256, d_model) * 0.02)
+        self.pos_embed = nn.Parameter(torch.randn(1, max_seq_len, d_model) * 0.02)
         self.encoder = nn.ModuleList([
             TransformerBlock(d_model, encoder_heads)
             for _ in range(encoder_layers)
