@@ -719,6 +719,14 @@ def main():
     )
     if "n_queries" in ckpt_args:
         model_kwargs["n_queries"] = ckpt_args["n_queries"]
+    # max_seq_len drives pos_embed shape — must match the checkpoint or
+    # state_dict load fails on pos_embed shape mismatch.
+    if "max_seq_len" in ckpt_args:
+        model_kwargs["max_seq_len"] = ckpt_args["max_seq_len"]
+    else:
+        pe = ckpt["model_state_dict"].get("pos_embed")
+        if pe is not None:
+            model_kwargs["max_seq_len"] = int(pe.shape[1])
     # Backward compat: old crossfreq/full checkpoints don't have these
     # flags in args.json. Default to legacy values so old weights load.
     if model_type in ("lejepa_crossfreq", "lejepa_full",

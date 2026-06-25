@@ -84,16 +84,44 @@ def _load_and_preprocess_raw(
         return None
 
 
-def _segment(eeg: np.ndarray, trial_samples: int) -> list[np.ndarray]:
-    """Slice continuous [T, C] into list of [trial_samples, C] non-overlapping windows."""
+def _robust_scale_per_recording(eeg: np.ndarray) -> np.ndarray:
+    """Per-recording robust scaling: (x - median) / (IQR/1.349 + eps).
+
+    Applied to the full continuous recording (Defossez 2022 / Laya style).
+    Matches the normalization used in pretraining when
+    --normalization per_recording_robust.
+    """
+    eeg = np.asarray(eeg, dtype=np.float32)
+    median = np.median(eeg, axis=0, keepdims=True)
+    q75 = np.percentile(eeg, 75, axis=0, keepdims=True)
+    q25 = np.percentile(eeg, 25, axis=0, keepdims=True)
+    robust_std = (q75 - q25) / 1.349 + 1e-6
+    return ((eeg - median) / robust_std).astype(np.float32)
+
+
+def _segment(
+    eeg: np.ndarray,
+    trial_samples: int,
+    normalization: str = "per_trial_zscore",
+) -> list[np.ndarray]:
+    """Slice continuous [T, C] into list of [trial_samples, C] non-overlapping windows.
+
+    normalization:
+      - "per_trial_zscore": z-score each segment independently (legacy)
+      - "per_recording_robust": skip per-segment z-score (caller must have
+        already applied _robust_scale_per_recording to the full recording)
+    """
     n_trials = len(eeg) // trial_samples
     out = []
     for t in range(n_trials):
         start = t * trial_samples
         trial = eeg[start:start + trial_samples]
-        mean = trial.mean(axis=0, keepdims=True)
-        std = trial.std(axis=0, keepdims=True) + 1e-8
-        out.append(((trial - mean) / std).astype(np.float32))
+        if normalization == "per_recording_robust":
+            out.append(trial.astype(np.float32))
+        else:
+            mean = trial.mean(axis=0, keepdims=True)
+            std = trial.std(axis=0, keepdims=True) + 1e-8
+            out.append(((trial - mean) / std).astype(np.float32))
     return out
 
 
@@ -131,19 +159,23 @@ class TUABDataset(Dataset):
         trial_duration_s: int = 4,
         min_channels: int = 19,
         cache_dir: str | None = None,
+        normalization: str = "per_trial_zscore",
     ):
         assert split in ("train", "eval"), f"split must be 'train' or 'eval', got {split}"
+        assert normalization in ("per_trial_zscore", "per_recording_robust"), \
+            f"unknown normalization: {normalization}"
         if not MNE_AVAILABLE:
             raise ImportError("mne required: pip install mne")
 
         self.split = split
+        self.normalization = normalization
         self.trial_samples = sample_rate * trial_duration_s
         self.trials: list[np.ndarray] = []
         self.labels: list[int] = []
         self.recording_ids: list[int] = []  # which EDF each trial came from
         self.electrode_names: list[str] | None = None
 
-        # Cache key includes split — train and eval are separate cache files
+        # Cache key includes split + normalization
         cache_path = None
         if cache_dir:
             key = _cache_key({
@@ -153,6 +185,7 @@ class TUABDataset(Dataset):
                 "sample_rate": sample_rate,
                 "trial_duration_s": trial_duration_s,
                 "min_channels": min_channels,
+                "normalization": normalization,
             })
             cache_path = Path(cache_dir) / f"tuab_{split}_{key}.pt"
             cached = _try_load_cache(cache_path)
@@ -185,7 +218,9 @@ class TUABDataset(Dataset):
                 data_uv, ch_names = result
                 if self.electrode_names is None:
                     self.electrode_names = ch_names
-                segs = _segment(data_uv, self.trial_samples)
+                if normalization == "per_recording_robust":
+                    data_uv = _robust_scale_per_recording(data_uv)
+                segs = _segment(data_uv, self.trial_samples, normalization)
                 for s in segs:
                     self.trials.append(s)
                     self.labels.append(label_int)
@@ -281,12 +316,16 @@ class TUEVDataset(Dataset):
         trial_duration_s: int = 4,
         min_channels: int = 19,
         cache_dir: str | None = None,
+        normalization: str = "per_trial_zscore",
     ):
         assert split in ("train", "eval"), f"split must be 'train' or 'eval', got {split}"
+        assert normalization in ("per_trial_zscore", "per_recording_robust"), \
+            f"unknown normalization: {normalization}"
         if not MNE_AVAILABLE:
             raise ImportError("mne required: pip install mne")
 
         self.split = split
+        self.normalization = normalization
         self.trial_samples = sample_rate * trial_duration_s
         self.trials: list[np.ndarray] = []
         self.labels: list[int] = []
@@ -302,6 +341,7 @@ class TUEVDataset(Dataset):
                 "sample_rate": sample_rate,
                 "trial_duration_s": trial_duration_s,
                 "min_channels": min_channels,
+                "normalization": normalization,
             })
             cache_path = Path(cache_dir) / f"tuev_{split}_{key}.pt"
             cached = _try_load_cache(cache_path)
@@ -340,6 +380,11 @@ class TUEVDataset(Dataset):
             if self.electrode_names is None:
                 self.electrode_names = ch_names
 
+            # Per-recording robust scaling applies to full continuous recording
+            # BEFORE event extraction; per-trial z-score applies per event below.
+            if normalization == "per_recording_robust":
+                data_uv = _robust_scale_per_recording(data_uv)
+
             T_total = data_uv.shape[0]
             half = self.trial_samples // 2
             any_event_added = False
@@ -351,9 +396,12 @@ class TUEVDataset(Dataset):
                     events_skipped_oob += 1
                     continue
                 trial = data_uv[lo:hi]
-                mean = trial.mean(axis=0, keepdims=True)
-                std = trial.std(axis=0, keepdims=True) + 1e-8
-                self.trials.append(((trial - mean) / std).astype(np.float32))
+                if normalization == "per_recording_robust":
+                    self.trials.append(trial.astype(np.float32))
+                else:
+                    mean = trial.mean(axis=0, keepdims=True)
+                    std = trial.std(axis=0, keepdims=True) + 1e-8
+                    self.trials.append(((trial - mean) / std).astype(np.float32))
                 self.labels.append(label_0_to_5)
                 self.recording_ids.append(recording_counter)
                 events_extracted += 1

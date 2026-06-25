@@ -125,6 +125,15 @@ def load_pretrained(checkpoint_path: str, device: torch.device):
     )
     if "n_queries" in ckpt_args:
         model_kwargs["n_queries"] = ckpt_args["n_queries"]
+    # max_seq_len drives pos_embed shape — must match the checkpoint or
+    # state_dict load fails with a shape mismatch on pos_embed.
+    if "max_seq_len" in ckpt_args:
+        model_kwargs["max_seq_len"] = ckpt_args["max_seq_len"]
+    else:
+        # Infer from pos_embed in state_dict (handles old ckpts without args)
+        pe = ckpt["model_state_dict"].get("pos_embed")
+        if pe is not None:
+            model_kwargs["max_seq_len"] = int(pe.shape[1])
     if model_type in ("lejepa_crossfreq", "lejepa_full",
                       "lejepa_multistream", "lejepa_outputcf",
                       "lejepa_outputcf_pajr"):
@@ -166,6 +175,8 @@ def build_random_init(model_cls, n_channels, ckpt_args, device):
     )
     if "n_queries" in ckpt_args:
         model_kwargs["n_queries"] = ckpt_args["n_queries"]
+    if "max_seq_len" in ckpt_args:
+        model_kwargs["max_seq_len"] = ckpt_args["max_seq_len"]
     if "cf_band_conditioned" in ckpt_args:
         model_kwargs["cf_band_conditioned"] = bool(ckpt_args["cf_band_conditioned"])
     if "cf_preserve_spatial" in ckpt_args:
@@ -456,6 +467,11 @@ def main():
                    help="Fine-tune max epochs")
     p.add_argument("--sample_rate", type=int, default=256)
     p.add_argument("--trial_duration_s", type=int, default=4)
+    p.add_argument("--normalization", type=str, default="per_trial_zscore",
+                   choices=["per_trial_zscore", "per_recording_robust"],
+                   help="Must match the pretrained checkpoint's normalization. "
+                        "If checkpoint was trained with per_recording_robust, "
+                        "use per_recording_robust here or features will mismatch.")
     p.add_argument("--device", type=str, default="auto")
     p.add_argument("--output", type=str, default=None,
                    help="JSON output path; if None, derive from checkpoint")
@@ -490,6 +506,7 @@ def main():
         sample_rate=args.sample_rate,
         trial_duration_s=args.trial_duration_s,
         cache_dir=args.cache_dir,
+        normalization=args.normalization,
     )
     print(f"--- Loading {args.dataset.upper()} eval ---")
     eval_ds = DSCls(
@@ -497,6 +514,7 @@ def main():
         sample_rate=args.sample_rate,
         trial_duration_s=args.trial_duration_s,
         cache_dir=args.cache_dir,
+        normalization=args.normalization,
     )
     print(f"Data loaded in {(time.time()-t0)/60:.1f} min")
 
