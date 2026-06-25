@@ -177,12 +177,17 @@ def build_random_init(model_cls, n_channels, ckpt_args, device):
         model_kwargs["n_queries"] = ckpt_args["n_queries"]
     if "max_seq_len" in ckpt_args:
         model_kwargs["max_seq_len"] = ckpt_args["max_seq_len"]
-    if "cf_band_conditioned" in ckpt_args:
-        model_kwargs["cf_band_conditioned"] = bool(ckpt_args["cf_band_conditioned"])
-    if "cf_preserve_spatial" in ckpt_args:
-        model_kwargs["cf_preserve_spatial"] = bool(ckpt_args["cf_preserve_spatial"])
-    if "cf_d_band" in ckpt_args:
-        model_kwargs["cf_d_band"] = ckpt_args["cf_d_band"]
+    # CF args only valid for CF model types; base lejepa/jepa/mae reject them.
+    model_type = ckpt_args.get("model", "jepa")
+    if model_type in ("lejepa_crossfreq", "lejepa_full",
+                      "lejepa_multistream", "lejepa_outputcf",
+                      "lejepa_outputcf_pajr"):
+        if "cf_band_conditioned" in ckpt_args:
+            model_kwargs["cf_band_conditioned"] = bool(ckpt_args["cf_band_conditioned"])
+        if "cf_preserve_spatial" in ckpt_args:
+            model_kwargs["cf_preserve_spatial"] = bool(ckpt_args["cf_preserve_spatial"])
+        if "cf_d_band" in ckpt_args:
+            model_kwargs["cf_d_band"] = ckpt_args["cf_d_band"]
     return model_cls(**model_kwargs).to(device)
 
 
