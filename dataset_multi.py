@@ -547,6 +547,13 @@ class EDFDirectoryDataset(Dataset):
         cache_tag: str = "edf",
         exclude_patient_ids: set | None = None,
         normalization: str = "per_trial_zscore",
+        # CBraMod-style quality filter args (cache-key only; actual filtering
+        # is done by prebuild_tueg_cache.py — these args must match prebuild's
+        # values for the cache to hit).
+        drop_short_recording_min: float = 0.0,
+        trim_start_end_sec: int = 0,
+        notch_freq: float = 0.0,
+        reject_abs_uv: float = 0.0,
     ):
         if not MNE_AVAILABLE:
             raise ImportError("mne required: pip install mne")
@@ -567,7 +574,10 @@ class EDFDirectoryDataset(Dataset):
             exclude_hash = hashlib.md5(
                 ",".join(sorted(exclude_set)).encode()
             ).hexdigest()[:8] if exclude_set else "none"
-            key = _cache_key({
+            # Filter-key payload identical to prebuild_tueg_cache.py: only
+            # append filter keys when non-default so legacy hashes are
+            # back-compat.
+            payload = {
                 "kind": cache_tag,
                 "data_dir": str(data_dir),
                 "sample_rate": sample_rate,
@@ -579,7 +589,16 @@ class EDFDirectoryDataset(Dataset):
                 "exclude": exclude_hash,
                 "n_excluded": len(exclude_set),
                 "normalization": normalization,
-            })
+            }
+            if drop_short_recording_min > 0:
+                payload["drop_short_min"] = drop_short_recording_min
+            if trim_start_end_sec > 0:
+                payload["trim_sec"] = trim_start_end_sec
+            if notch_freq > 0:
+                payload["notch_hz"] = notch_freq
+            if reject_abs_uv > 0:
+                payload["reject_uv"] = reject_abs_uv
+            key = _cache_key(payload)
             cache_path = Path(cache_dir) / f"{cache_tag}_{key}.pt"
             cached = _try_load_cache(cache_path)
             if cached is not None:
@@ -794,10 +813,23 @@ class MultiDatasetEEG(Dataset):
         download_dir: str = "/home/share/data_makchen/peng/datasets",
         cache_dir: str = None,
         normalization: str = "per_trial_zscore",
+        # CBraMod-style quality-filter args propagated to EDF-based sources
+        # (TUEG, CHB-MIT, etc.). Must match prebuild_tueg_cache.py values
+        # for the cache to hit.
+        drop_short_recording_min: float = 0.0,
+        trim_start_end_sec: int = 0,
+        notch_freq: float = 0.0,
+        reject_abs_uv: float = 0.0,
     ):
         datasets = []
         total_subjects = 0
         self.normalization = normalization
+        self._filter_kwargs = dict(
+            drop_short_recording_min=drop_short_recording_min,
+            trim_start_end_sec=trim_start_end_sec,
+            notch_freq=notch_freq,
+            reject_abs_uv=reject_abs_uv,
+        )
 
         for src in sources:
             src_type = src["type"]
@@ -859,6 +891,7 @@ class MultiDatasetEEG(Dataset):
                     cache_dir=cache_dir,
                     cache_tag="edf",
                     normalization=normalization,
+                    **self._filter_kwargs,
                 )
                 for i in range(len(ds.subject_ids)):
                     ds.subject_ids[i] += total_subjects
@@ -888,6 +921,7 @@ class MultiDatasetEEG(Dataset):
                     cache_tag=src_type,  # e.g., "tueg", "chb_mit", "siena"
                     exclude_patient_ids=src.get("exclude_patient_ids"),
                     normalization=normalization,
+                    **self._filter_kwargs,
                 )
                 for i in range(len(ds.subject_ids)):
                     ds.subject_ids[i] += total_subjects

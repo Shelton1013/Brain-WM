@@ -287,6 +287,13 @@ def main():
                              "(N=39 tokens). Bump to 1024 for trial_duration_s=60+ "
                              "(N up to ~590). NOTE: changing max_seq_len changes pos_embed "
                              "shape, so old checkpoints with max_seq_len=256 won't strict-load.")
+    # CBraMod-style quality filter args (cache-key only — actual filtering
+    # is done by prebuild_tueg_cache.py; these args must MATCH prebuild's
+    # values for the TUEG cache to hit). Defaults preserve back-compat.
+    parser.add_argument("--drop_short_recording_min", type=float, default=0.0)
+    parser.add_argument("--trim_start_end_sec", type=int, default=0)
+    parser.add_argument("--notch_freq", type=float, default=0.0)
+    parser.add_argument("--reject_abs_uv", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -374,6 +381,10 @@ def main():
             cache_dir=args.data_cache_dir if args.data_cache_dir else None,
             trial_duration_s=args.trial_duration_s,
             normalization=args.normalization,
+            drop_short_recording_min=args.drop_short_recording_min,
+            trim_start_end_sec=args.trim_start_end_sec,
+            notch_freq=args.notch_freq,
+            reject_abs_uv=args.reject_abs_uv,
         )
     else:
         dataset = PhysioNetMIDataset(
