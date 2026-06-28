@@ -89,6 +89,7 @@ def _process_patient(args_tuple):
     subj_recordings = []
     matched_ch_names = None
 
+    last_err = None
     for edf_path in edf_paths:
         try:
             raw = mne.io.read_raw_edf(str(edf_path), preload=True, verbose=False)
@@ -102,10 +103,10 @@ def _process_patient(args_tuple):
             if raw.n_times < min_samples_for_filter:
                 continue
 
-            # Bandpass + optional notch
+            # Bandpass + optional notch (MNE requires array-like for freqs)
             raw.filter(0.1, 75.0, verbose=False)
             if notch_freq and notch_freq > 0:
-                raw.notch_filter(notch_freq, verbose=False)
+                raw.notch_filter([float(notch_freq)], verbose=False)
 
             ch_indices, ch_names = pick_common_channels(raw.ch_names)
             if len(ch_indices) < min_channels:
@@ -123,11 +124,13 @@ def _process_patient(args_tuple):
                 arr = arr[trim_samples:-trim_samples]
 
             subj_recordings.append(arr)
-        except Exception:
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {e}"
             continue
 
     if not subj_recordings:
-        return patient_id, [], None
+        # Return a marker so caller can log why all EDFs for this patient failed
+        return patient_id, [], last_err or "no_edfs_processed"
 
     eeg = np.vstack(subj_recordings)
 
@@ -383,14 +386,22 @@ def main():
           f"{CHUNK_SIZE_PATIENTS} patients...", flush=True)
 
     patients_in_chunk = 0
+    error_samples: list[str] = []  # collect first few skip reasons for debug
     with mp.Pool(args.n_workers) as pool:
-        for patient_id, trials, ch_names in pool.imap_unordered(
+        for patient_id, trials, ch_names_or_err in pool.imap_unordered(
                 _process_patient, worker_args, chunksize=2):
             n_done += 1
             patients_in_chunk += 1
             if not trials:
                 n_skipped += 1
+                # ch_names_or_err contains the error string for skipped patients
+                if isinstance(ch_names_or_err, str) and len(error_samples) < 5:
+                    error_samples.append(f"  [skip-sample] {patient_id}: "
+                                         f"{ch_names_or_err}")
+                    print(error_samples[-1], flush=True)
+                ch_names = None
             else:
+                ch_names = ch_names_or_err   # success path: matched_ch_names
                 subj_idx = all_subject_count
                 all_subject_count += 1
                 for trial in trials:
