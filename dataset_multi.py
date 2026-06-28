@@ -614,9 +614,18 @@ class EDFDirectoryDataset(Dataset):
                     n_dropped_bad = 0
                     n_loaded = 0
                     for fname in cached["chunk_files"]:
-                        npz = np.load(str(chunk_dir / fname))
-                        trials_arr = npz["trials"]  # [N, T, C] float32
-                        sids = npz["subject_ids"]   # [N] int64
+                        # Prefer mmap-friendly side-car .npy if present
+                        # (see convert_chunks_to_npy.py). Falls back to .npz.
+                        stem = fname.rsplit(".", 1)[0]
+                        trials_npy = chunk_dir / f"{stem}_trials.npy"
+                        sids_npy = chunk_dir / f"{stem}_sids.npy"
+                        if trials_npy.exists() and sids_npy.exists():
+                            trials_arr = np.load(str(trials_npy), mmap_mode="r")
+                            sids = np.load(str(sids_npy))
+                        else:
+                            npz = np.load(str(chunk_dir / fname))
+                            trials_arr = npz["trials"]
+                            sids = npz["subject_ids"]
                         # Vectorized NaN/Inf filter — Euclidean Alignment can
                         # produce non-finite values on ill-conditioned R
                         # matrices for some TUEG patients (overflow in
@@ -626,7 +635,8 @@ class EDFDirectoryDataset(Dataset):
                         good_idx = np.nonzero(finite_mask)[0]
                         n_dropped_bad += len(trials_arr) - len(good_idx)
                         # Append each trial as separate array (matches non-chunked
-                        # cache schema where trials is list[np.ndarray])
+                        # cache schema where trials is list[np.ndarray]).
+                        # With mmap, these are zero-copy views into the .npy file.
                         for i in good_idx:
                             self.trials.append(trials_arr[i])
                             self.subject_ids.append(int(sids[i]))
