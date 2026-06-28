@@ -387,46 +387,56 @@ def main():
 
     patients_in_chunk = 0
     error_samples: list[str] = []  # collect first few skip reasons for debug
-    with mp.Pool(args.n_workers) as pool:
-        for patient_id, trials, ch_names_or_err in pool.imap_unordered(
-                _process_patient, worker_args, chunksize=2):
-            n_done += 1
-            patients_in_chunk += 1
-            if not trials:
-                n_skipped += 1
-                # ch_names_or_err contains the error string for skipped patients
-                if isinstance(ch_names_or_err, str) and len(error_samples) < 5:
-                    error_samples.append(f"  [skip-sample] {patient_id}: "
-                                         f"{ch_names_or_err}")
-                    print(error_samples[-1], flush=True)
-                ch_names = None
-            else:
-                ch_names = ch_names_or_err   # success path: matched_ch_names
-                subj_idx = all_subject_count
-                all_subject_count += 1
-                for trial in trials:
-                    chunk_trials.append(trial)
-                    chunk_subject_ids.append(subj_idx)
-                    total_trials += 1
-                if electrode_names is None and ch_names is not None:
-                    electrode_names = ch_names
 
-            if n_done % 50 == 0 or n_done == len(worker_args):
-                elapsed = time.time() - t_proc
-                rate = n_done / max(elapsed, 1e-6)
-                eta_min = (len(worker_args) - n_done) / max(rate, 1e-6) / 60
-                print(f"  [{n_done}/{len(worker_args)}] "
-                      f"trials={total_trials} "
-                      f"in_chunk={len(chunk_trials)} "
-                      f"skipped={n_skipped} "
-                      f"elapsed={elapsed/60:.1f}m "
-                      f"rate={rate:.2f}p/s "
-                      f"ETA={eta_min:.1f}m", flush=True)
+    def _iter_results():
+        """Yield (pid, trials, ch_names_or_err) tuples — serial if n_workers<=1
+        (drops mp.Pool overhead and exposes worker exceptions cleanly), else
+        parallel via mp.Pool.imap_unordered."""
+        if args.n_workers <= 1:
+            for wa in worker_args:
+                yield _process_patient(wa)
+        else:
+            with mp.Pool(args.n_workers) as pool:
+                yield from pool.imap_unordered(
+                    _process_patient, worker_args, chunksize=2)
 
-            # Flush chunk every CHUNK_SIZE_PATIENTS patients
-            if patients_in_chunk >= CHUNK_SIZE_PATIENTS:
-                _flush_chunk()
-                patients_in_chunk = 0
+    for patient_id, trials, ch_names_or_err in _iter_results():
+        n_done += 1
+        patients_in_chunk += 1
+        if not trials:
+            n_skipped += 1
+            # ch_names_or_err contains the error string for skipped patients
+            if isinstance(ch_names_or_err, str) and len(error_samples) < 5:
+                error_samples.append(f"  [skip-sample] {patient_id}: "
+                                     f"{ch_names_or_err}")
+                print(error_samples[-1], flush=True)
+        else:
+            ch_names = ch_names_or_err   # success path: matched_ch_names
+            subj_idx = all_subject_count
+            all_subject_count += 1
+            for trial in trials:
+                chunk_trials.append(trial)
+                chunk_subject_ids.append(subj_idx)
+                total_trials += 1
+            if electrode_names is None and ch_names is not None:
+                electrode_names = ch_names
+
+        if n_done % 50 == 0 or n_done == len(worker_args):
+            elapsed = time.time() - t_proc
+            rate = n_done / max(elapsed, 1e-6)
+            eta_min = (len(worker_args) - n_done) / max(rate, 1e-6) / 60
+            print(f"  [{n_done}/{len(worker_args)}] "
+                  f"trials={total_trials} "
+                  f"in_chunk={len(chunk_trials)} "
+                  f"skipped={n_skipped} "
+                  f"elapsed={elapsed/60:.1f}m "
+                  f"rate={rate:.2f}p/s "
+                  f"ETA={eta_min:.1f}m", flush=True)
+
+        # Flush chunk every CHUNK_SIZE_PATIENTS patients
+        if patients_in_chunk >= CHUNK_SIZE_PATIENTS:
+            _flush_chunk()
+            patients_in_chunk = 0
 
     # Flush final partial chunk
     _flush_chunk()
