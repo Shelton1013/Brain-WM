@@ -65,11 +65,21 @@ def _process_patient(args_tuple):
     """Load all EDFs for one patient, return (subject_pid, trials [list of np],
     ch_names) or (subject_pid, [], None) on failure.
 
+    CBraMod-style quality filters applied (when enabled via args):
+      - drop_short_recording_min: skip EDF if shorter than N minutes
+      - trim_start_end_sec: discard first/last N seconds of each recording
+      - notch_freq: notch filter at given Hz (60 for US/TUH, 50 for EU)
+      - reject_abs_uv: drop any trial where |x| exceeds N µV (before norm)
+
     `args_tuple = (patient_id, edf_paths, sample_rate, trial_duration_s,
-                   use_ea, min_channels, normalization)`
+                   use_ea, min_channels, normalization,
+                   drop_short_recording_min, trim_start_end_sec,
+                   notch_freq, reject_abs_uv)`
     """
     (patient_id, edf_paths, sample_rate, trial_duration_s,
-     use_ea, min_channels, normalization) = args_tuple
+     use_ea, min_channels, normalization,
+     drop_short_recording_min, trim_start_end_sec,
+     notch_freq, reject_abs_uv) = args_tuple
     trial_samples = sample_rate * trial_duration_s
     min_samples_for_filter = int(40 * sample_rate)
 
@@ -84,15 +94,34 @@ def _process_patient(args_tuple):
             raw = mne.io.read_raw_edf(str(edf_path), preload=True, verbose=False)
             if raw.info["sfreq"] != sample_rate:
                 raw.resample(sample_rate, verbose=False)
+
+            # Drop too-short recordings (after resample so duration is consistent)
+            if drop_short_recording_min and drop_short_recording_min > 0:
+                if raw.n_times < drop_short_recording_min * 60 * sample_rate:
+                    continue
             if raw.n_times < min_samples_for_filter:
                 continue
+
+            # Bandpass + optional notch
             raw.filter(0.1, 75.0, verbose=False)
+            if notch_freq and notch_freq > 0:
+                raw.notch_filter(notch_freq, verbose=False)
+
             ch_indices, ch_names = pick_common_channels(raw.ch_names)
             if len(ch_indices) < min_channels:
                 continue
             if matched_ch_names is None:
                 matched_ch_names = ch_names
             arr = raw.get_data()[ch_indices].T.astype(np.float32)
+
+            # Trim first/last N seconds (remove start/end artifacts).
+            # Skip the file if trimming leaves too little data.
+            if trim_start_end_sec and trim_start_end_sec > 0:
+                trim_samples = trim_start_end_sec * sample_rate
+                if arr.shape[0] <= 2 * trim_samples + trial_samples:
+                    continue
+                arr = arr[trim_samples:-trim_samples]
+
             subj_recordings.append(arr)
         except Exception:
             continue
@@ -110,19 +139,30 @@ def _process_patient(args_tuple):
         except Exception:
             pass  # if EA not available / fails, fall through
 
+    # Amplitude reject check is done BEFORE normalization, on µV-scale data
+    # after EA. EA preserves µV scale (it's a linear projection).
+    eeg_unnormed_for_amp_check = eeg
+
     # Recording-level robust normalization BEFORE segmentation (Laya-style)
     if normalization == "per_recording_robust":
         from dataset_multi import normalize_signal
         eeg = normalize_signal(eeg, "per_recording_robust")
 
     # Segment into non-overlapping trials.
-    # Filter out trials with NaN/Inf (EA can produce them on
-    # ill-conditioned covariance matrices for some TUH patients).
+    # Filter out: NaN/Inf trials (EA can produce them); trials exceeding
+    # reject_abs_uv (CBraMod-style amplitude reject; checked on pre-norm µV).
     trials = []
     n_trials = len(eeg) // trial_samples
     for t in range(n_trials):
         start = t * trial_samples
         trial = eeg[start:start + trial_samples]
+
+        # Amplitude reject (on pre-normalization µV data)
+        if reject_abs_uv and reject_abs_uv > 0:
+            raw_trial = eeg_unnormed_for_amp_check[start:start + trial_samples]
+            if np.abs(raw_trial).max() > reject_abs_uv:
+                continue
+
         if normalization == "per_trial_zscore":
             # Legacy: per-trial z-score
             mean = trial.mean(axis=0, keepdims=True)
@@ -189,6 +229,22 @@ def main():
                          "clinical task transfer (TUAB/TUEV).")
     ap.add_argument("--n_workers", type=int, default=16,
                     help="Number of parallel worker processes.")
+    # CBraMod-style quality filters (paper §3.1)
+    ap.add_argument("--drop_short_recording_min", type=float, default=0.0,
+                    help="Drop recordings shorter than N minutes. "
+                         "CBraMod uses 5. Default 0 = no filter (legacy).")
+    ap.add_argument("--trim_start_end_sec", type=int, default=0,
+                    help="Discard first/last N seconds of each recording "
+                         "(start/end artifacts). CBraMod uses 60. "
+                         "Default 0 = no trim.")
+    ap.add_argument("--notch_freq", type=float, default=0.0,
+                    help="Notch filter at given Hz (60 for US/TUH data, "
+                         "50 for EU). Default 0 = no notch.")
+    ap.add_argument("--reject_abs_uv", type=float, default=0.0,
+                    help="Drop any trial where |x| exceeds N µV (pre-norm). "
+                         "CBraMod uses 100. Default 0 = no reject. "
+                         "WARNING: 100 is very aggressive and may drop 60-70%% "
+                         "of TUH clinical trials.")
     args = ap.parse_args()
 
     Path(args.cache_dir).mkdir(parents=True, exist_ok=True)
@@ -218,7 +274,10 @@ def main():
     exclude_hash = hashlib.md5(
         ",".join(sorted(exclude_ids)).encode()
     ).hexdigest()[:8] if exclude_ids else "none"
-    cache_payload_key = _cache_key({
+    # Quality-filter fields are appended ONLY when non-default to keep the
+    # cache hash backward-compatible: a run with all filters off produces
+    # the same hash as the legacy (pre-patch) run.
+    payload = {
         "kind": "tueg",
         "data_dir": str(args.tueg_dir),
         "sample_rate": args.sample_rate,
@@ -230,7 +289,16 @@ def main():
         "exclude": exclude_hash,
         "n_excluded": len(exclude_ids),
         "normalization": args.normalization,
-    })
+    }
+    if args.drop_short_recording_min > 0:
+        payload["drop_short_min"] = args.drop_short_recording_min
+    if args.trim_start_end_sec > 0:
+        payload["trim_sec"] = args.trim_start_end_sec
+    if args.notch_freq > 0:
+        payload["notch_hz"] = args.notch_freq
+    if args.reject_abs_uv > 0:
+        payload["reject_uv"] = args.reject_abs_uv
+    cache_payload_key = _cache_key(payload)
     cache_path = Path(args.cache_dir) / f"tueg_{cache_payload_key}.pt"
     print(f"[prebuild] Cache target: {cache_path}", flush=True)
 
@@ -267,7 +335,9 @@ def main():
     # (Python pickle of list[ndarray] needs ~2× RAM and is extremely slow).
     worker_args = [
         (p, patient_files[p], args.sample_rate, args.trial_duration_s,
-         args.use_ea, args.min_channels, args.normalization)
+         args.use_ea, args.min_channels, args.normalization,
+         args.drop_short_recording_min, args.trim_start_end_sec,
+         args.notch_freq, args.reject_abs_uv)
         for p in patients
     ]
 
