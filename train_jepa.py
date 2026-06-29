@@ -127,7 +127,7 @@ def train_epoch(model, raw_model, loader, optimizer, scheduler, device,
                 f"sig={losses.get('sigreg', 0):.4f} "
                 f"var={losses.get('var', 0):.4f} "
                 f"cov={losses.get('cov', 0):.4f} "
-                f"freq={losses.get('freq', 0):.4f} "
+                f"freq={losses.get('freq', 0):.6f} "
                 f"qs={losses.get('qspec', 0):.4f} "
                 f"par={losses.get('par', 0):.4f} "
                 f"pacc={losses.get('par_acc', 0):.3f} "
