@@ -196,22 +196,50 @@ def build_random_init(model_cls, n_channels, ckpt_args, device):
 # ============================================================
 
 def _pad_or_trim_channels(X: np.ndarray, target_n_ch: int) -> np.ndarray:
-    """X: [N, T, C] → [N, T, target_n_ch] via zero-pad or trim."""
+    """X: [N, T, C] OR [T, C] → matching shape with target_n_ch via zero-pad/trim."""
     n_ch = X.shape[-1]
     if n_ch == target_n_ch:
         return X
     if n_ch > target_n_ch:
         return X[..., :target_n_ch]
-    return np.pad(X, ((0, 0), (0, 0), (0, target_n_ch - n_ch)))
+    pad_dims = [(0, 0)] * (X.ndim - 1) + [(0, target_n_ch - n_ch)]
+    return np.pad(X, pad_dims)
+
+
+class _TrialDataset(torch.utils.data.Dataset):
+    """Streaming wrapper over ds.trials (list[np.ndarray]) + labels.
+
+    Avoids the np.stack RAM doubling. For TUAB (372k trials × 2560 × 19 ×
+    4 bytes = ~70 GB), np.stack + fancy indexing copy = ~200 GB peak;
+    this wrapper stays at ~70 GB (just the trials list already in RAM).
+    """
+    def __init__(self, trials, labels, target_n_ch):
+        self.trials = trials
+        self.labels = labels
+        self.target_n_ch = target_n_ch
+
+    def __len__(self):
+        return len(self.trials)
+
+    def __getitem__(self, idx):
+        x = self.trials[idx]
+        if x.shape[-1] != self.target_n_ch:
+            x = _pad_or_trim_channels(x, self.target_n_ch)
+        # Ensure contiguous + float32; copy is cheap for one trial
+        x = np.ascontiguousarray(x, dtype=np.float32)
+        return torch.from_numpy(x), int(self.labels[idx])
 
 
 def dataset_to_xy(ds, target_n_ch: int) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
     """Convert {trials, labels, recording_ids} dataset to (X, y, rec_ids).
 
+    LEGACY path used by frozen probe; this DOES stack to a single array
+    (RAM-heavy for TUAB-scale). Prefer dataset_to_streaming for FT.
+
     Returns:
-        X: [N, T, C] float32
+        X: [N, T, C] float32 (single contiguous array)
         y: [N] int (per-trial labels)
-        rec_ids: [N] int or None (None if dataset has no recording_id tracking)
+        rec_ids: [N] int or None
     """
     X = np.stack(ds.trials).astype(np.float32)
     X = _pad_or_trim_channels(X, target_n_ch)
@@ -220,6 +248,19 @@ def dataset_to_xy(ds, target_n_ch: int) -> tuple[np.ndarray, np.ndarray, np.ndar
     if hasattr(ds, "recording_ids") and ds.recording_ids:
         rec_ids = np.array(ds.recording_ids, dtype=np.int64)
     return X, y, rec_ids
+
+
+def dataset_to_streaming(ds, target_n_ch: int):
+    """Build a streaming _TrialDataset + label/rec_id arrays.
+
+    Used by run_finetune to avoid RAM doubling on large datasets.
+    """
+    stream = _TrialDataset(ds.trials, ds.labels, target_n_ch)
+    y = np.array(ds.labels, dtype=np.int64)
+    rec_ids = None
+    if hasattr(ds, "recording_ids") and ds.recording_ids:
+        rec_ids = np.array(ds.recording_ids, dtype=np.int64)
+    return stream, y, rec_ids
 
 
 def aggregate_per_recording(features, labels, rec_ids):
@@ -329,10 +370,17 @@ def run_frozen_probe(
 # ============================================================
 
 def run_finetune(
-    base_model, X_tr_np, y_tr_np, X_te_np, y_te_np,
+    base_model, train_stream, y_tr_np, test_stream, y_te_np,
     n_classes: int, dataset: str, device, max_epochs: int = 50,
+    num_workers: int = 4,
 ) -> dict:
     """Fine-tune backbone + new BN+Linear head, return test metrics.
+
+    Args:
+        train_stream: _TrialDataset wrapping training trials (streaming)
+        y_tr_np: [N_train] int labels (for class-weight computation)
+        test_stream: _TrialDataset wrapping test trials
+        y_te_np: [N_test] int labels
 
     Protocol mirrors run_eegbench.py:
       - 85/15 train/val split for early stopping (patience=10)
@@ -340,6 +388,9 @@ def run_finetune(
       - AdamW(wd=0.01), grad clip 3.0
       - Class-weighted CE
       - Eval on test set with best-val checkpoint
+
+    Streaming impl: data stays as list[np.ndarray] in RAM; DataLoader
+    workers stream batches on demand. No np.stack of 70+ GB arrays.
     """
     model = copy.deepcopy(base_model)
     head = nn.Sequential(
@@ -347,26 +398,29 @@ def run_finetune(
         nn.Linear(model.d_model, n_classes),
     ).to(device)
 
-    X_tr = torch.from_numpy(X_tr_np)
     y_tr = torch.from_numpy(y_tr_np).long()
-    X_te = torch.from_numpy(X_te_np).to(device)
-
-    n_total = len(X_tr)
+    n_total = len(train_stream)
     n_val = max(1, int(n_total * 0.15))
     n_train = n_total - n_val
-    perm = torch.randperm(n_total)
+    perm = torch.randperm(n_total).tolist()
     train_idx, val_idx = perm[:n_train], perm[n_train:]
 
+    train_subset = torch.utils.data.Subset(train_stream, train_idx)
+    val_subset = torch.utils.data.Subset(train_stream, val_idx)
+
     train_loader = DataLoader(
-        TensorDataset(X_tr[train_idx], y_tr[train_idx]),
+        train_subset,
         batch_size=32, shuffle=True, drop_last=True,
+        num_workers=num_workers, pin_memory=True, persistent_workers=num_workers > 0,
     )
     val_loader = DataLoader(
-        TensorDataset(X_tr[val_idx], y_tr[val_idx]),
+        val_subset,
         batch_size=64, shuffle=False,
+        num_workers=max(1, num_workers // 2), pin_memory=True,
+        persistent_workers=num_workers > 0,
     )
 
-    class_counts = torch.bincount(y_tr[train_idx], minlength=n_classes)
+    class_counts = torch.bincount(y_tr[torch.tensor(train_idx)], minlength=n_classes)
     class_weights = 1.0 / class_counts.float().clamp(min=1)
     class_weights = (class_weights / class_weights.sum() * n_classes).to(device)
 
@@ -432,12 +486,16 @@ def run_finetune(
         head.load_state_dict(best_state["head"]);   head.to(device)
     model.eval(); head.eval()
 
-    # Test
+    # Test — stream from test_stream Dataset
+    test_loader = DataLoader(
+        test_stream, batch_size=64, shuffle=False,
+        num_workers=max(1, num_workers // 2), pin_memory=True,
+    )
     preds, probas = [], []
     with torch.no_grad():
-        for i in range(0, len(X_te), 64):
-            batch = X_te[i:i+64]
-            feats = model._encode(model._tokenize(batch)).mean(1)
+        for bx, _ in test_loader:
+            bx = bx.to(device, non_blocking=True)
+            feats = model._encode(model._tokenize(bx)).mean(1)
             logits = head(feats)
             probas.append(torch.softmax(logits, dim=-1).cpu().numpy())
             preds.append(logits.argmax(-1).cpu().numpy())
@@ -448,7 +506,7 @@ def run_finetune(
     out["best_val_ba"] = float(best_val_ba)
     out["epochs_trained"] = int(ep + 1)
 
-    del model, head, best_state
+    del model, head, best_state, train_loader, val_loader, test_loader
     torch.cuda.empty_cache()
     return out
 
@@ -523,9 +581,21 @@ def main():
     )
     print(f"Data loaded in {(time.time()-t0)/60:.1f} min")
 
-    X_tr, y_tr, rec_tr = dataset_to_xy(train_ds, n_channels)
-    X_te, y_te, rec_te = dataset_to_xy(eval_ds,  n_channels)
-    print(f"\nShapes: train {X_tr.shape}, eval {X_te.shape}")
+    # FT path uses streaming Datasets (no np.stack, low RAM); frozen probe
+    # path uses stacked arrays via dataset_to_xy (sklearn needs np.array).
+    need_stacked_xy = args.mode in ("frozen", "both")
+    train_stream, y_tr, rec_tr = dataset_to_streaming(train_ds, n_channels)
+    test_stream,  y_te, rec_te = dataset_to_streaming(eval_ds,  n_channels)
+    if need_stacked_xy:
+        print(f"\n[main] --mode {args.mode}: also stacking train+eval to np.array "
+              f"for frozen probe (RAM-heavy on TUAB)...")
+        X_tr, _, _ = dataset_to_xy(train_ds, n_channels)
+        X_te, _, _ = dataset_to_xy(eval_ds,  n_channels)
+        print(f"Shapes: train {X_tr.shape}, eval {X_te.shape}")
+    else:
+        X_tr = X_te = None
+        print(f"\nN trials: train {len(train_stream)}, eval {len(test_stream)} "
+              f"(streaming mode, no np.stack)")
     print(f"Class counts (train): {np.bincount(y_tr, minlength=n_classes)}")
     print(f"Class counts (eval):  {np.bincount(y_te, minlength=n_classes)}")
 
@@ -597,12 +667,12 @@ def main():
     # Save aggregation status in results for transparency
     results["aggregate_recording_level"] = aggregate_enabled
 
-    # ── Fine-tune ──
+    # ── Fine-tune (streaming, low RAM) ──
     if args.mode in ("finetune", "both"):
-        print(f"\n{'='*70}\n  Fine-tune ({args.max_epochs} epochs)\n{'='*70}")
+        print(f"\n{'='*70}\n  Fine-tune ({args.max_epochs} epochs, streaming)\n{'='*70}")
         print("  [JEPA] Fine-tuning...")
         results["jepa_finetune"] = run_finetune(
-            model, X_tr, y_tr, X_te, y_te,
+            model, train_stream, y_tr, test_stream, y_te,
             n_classes, args.dataset, device, args.max_epochs)
         _print_metric_line_ft("  JEPA-FT ", results["jepa_finetune"], args.dataset)
 
@@ -610,7 +680,7 @@ def main():
             print("  [Random] Fine-tuning from scratch...")
             random_model = build_random_init(model_cls, n_channels, ckpt_args, device)
             results["random_finetune"] = run_finetune(
-                random_model, X_tr, y_tr, X_te, y_te,
+                random_model, train_stream, y_tr, test_stream, y_te,
                 n_classes, args.dataset, device, args.max_epochs)
             _print_metric_line_ft("  Rand-FT ", results["random_finetune"], args.dataset)
             del random_model; torch.cuda.empty_cache()
