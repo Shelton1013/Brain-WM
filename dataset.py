@@ -163,7 +163,12 @@ class PhysioNetMIDataset(Dataset):
 
         for subj_idx, subj in enumerate(subjects):
             try:
-                files = eegbci.load_data(subj, task_runs, path=data_dir)
+                # update_path=False: prevent the interactive prompt
+                #     "Do you want to set the path ... [y]/n?"
+                # which hangs any nohup / DDP job with no stdin.
+                files = eegbci.load_data(
+                    subj, task_runs, path=data_dir, update_path=False,
+                )
                 # Concatenate all runs for this subject (for EA)
                 subj_data_list = []
                 for f in files:
