@@ -615,7 +615,8 @@ def run_finetune(
             torch.cat(val_preds).numpy(),
         )
 
-        if val_ba > best_val_ba:
+        improved = val_ba > best_val_ba
+        if improved:
             best_val_ba = val_ba
             best_state = {
                 "model": {k: v.cpu().clone() for k, v in model.state_dict().items()},
@@ -624,8 +625,18 @@ def run_finetune(
             no_improve = 0
         else:
             no_improve += 1
-            if no_improve >= patience:
-                break
+
+        # Per-epoch progress print (helps monitor overfitting live)
+        cur_lr = optimizer.param_groups[-1]["lr"]  # head LR (highest)
+        star = "*" if improved else " "
+        print(f"      ep{ep+1:03d}{star} val_ba={val_ba:.4f} "
+              f"best={best_val_ba:.4f} no_improve={no_improve}/{patience} "
+              f"lr={cur_lr:.2e}", flush=True)
+
+        if no_improve >= patience:
+            print(f"      early stop at ep{ep+1} (best_val_ba={best_val_ba:.4f})",
+                  flush=True)
+            break
 
     # Restore best
     if best_state is not None:
