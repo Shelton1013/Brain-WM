@@ -474,6 +474,7 @@ def run_finetune(
     ft_warmup_epochs: int = 5,
     ft_patience: int = 10,
     ft_batch_size: int = 32,
+    train_rec_ids_np=None,   # recording_ids for subject-disjoint val split
 ) -> dict:
     """Fine-tune backbone + new BN+Linear head, return test metrics.
 
@@ -501,10 +502,34 @@ def run_finetune(
 
     y_tr = torch.from_numpy(y_tr_np).long()
     n_total = len(train_stream)
-    n_val = max(1, int(n_total * 0.15))
-    n_train = n_total - n_val
-    perm = torch.randperm(n_total).tolist()
-    train_idx, val_idx = perm[:n_train], perm[n_train:]
+
+    if train_rec_ids_np is not None:
+        # Recording-disjoint val split: 80% of unique recording_ids → train,
+        # 20% → val. This mirrors LaBraM/CBraMod/CSBrain's subject-disjoint
+        # protocol so val distribution matches the subject-disjoint test set.
+        # Val ceases to be a "same-subject hold-out" (which grows monotonically
+        # with training) and instead measures unseen-recording generalization.
+        rng = np.random.RandomState(42)
+        unique_recs = np.unique(train_rec_ids_np)
+        rng.shuffle(unique_recs)
+        n_val_recs = max(1, int(len(unique_recs) * 0.20))
+        val_recs = set(unique_recs[:n_val_recs].tolist())
+        train_recs = set(unique_recs[n_val_recs:].tolist())
+        train_idx = [i for i, r in enumerate(train_rec_ids_np) if r in train_recs]
+        val_idx   = [i for i, r in enumerate(train_rec_ids_np) if r in val_recs]
+        print(f"      [FT] recording-disjoint val split: "
+              f"{len(train_recs)} train recs ({len(train_idx)} trials) / "
+              f"{len(val_recs)} val recs ({len(val_idx)} trials)")
+    else:
+        # Fallback: trial-level 85/15 random split (not subject-disjoint;
+        # val distribution matches train, so best-val ckpt may pick a
+        # late-overfit epoch that generalizes worse to the test set)
+        n_val = max(1, int(n_total * 0.15))
+        n_train = n_total - n_val
+        perm = torch.randperm(n_total).tolist()
+        train_idx, val_idx = perm[:n_train], perm[n_train:]
+        print(f"      [FT] trial-level val split (no rec_ids provided): "
+              f"{n_train} train / {n_val} val")
 
     train_subset = torch.utils.data.Subset(train_stream, train_idx)
     val_subset = torch.utils.data.Subset(train_stream, val_idx)
@@ -521,7 +546,8 @@ def run_finetune(
         persistent_workers=num_workers > 0,
     )
 
-    class_counts = torch.bincount(y_tr[torch.tensor(train_idx)], minlength=n_classes)
+    class_counts = torch.bincount(y_tr[torch.tensor(train_idx, dtype=torch.long)],
+                                    minlength=n_classes)
     class_weights = 1.0 / class_counts.float().clamp(min=1)
     class_weights = (class_weights / class_weights.sum() * n_classes).to(device)
 
@@ -830,6 +856,7 @@ def main():
             ft_warmup_epochs=args.ft_warmup_epochs,
             ft_patience=args.ft_patience,
             ft_batch_size=args.ft_batch_size,
+            train_rec_ids_np=rec_tr,   # Recording-disjoint val split when available
         )
         print(f"\n{'='*70}\n  Fine-tune ({args.max_epochs} epochs, "
               f"streaming, protocol={args.ft_protocol})\n{'='*70}")
