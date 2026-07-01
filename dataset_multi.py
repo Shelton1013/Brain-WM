@@ -278,15 +278,38 @@ class MOABBDataset(Dataset):
         except ImportError:
             raise ImportError("moabb required: pip install moabb")
 
-        # Set MOABB/MNE download path BEFORE creating dataset
+        # Set MOABB/MNE download path BEFORE creating dataset.
+        # In DDP jobs, only rank 0 writes to the shared mne-python.json to
+        # avoid concurrent writes corrupting the config (each other rank
+        # would race to also write the same value, but the JSON file
+        # can end up half-written). Other ranks wait via barrier, then
+        # only set the env var (no disk write).
         if data_dir:
             import os
             import mne
             moabb_path = os.path.join(data_dir, "moabb")
             os.makedirs(moabb_path, exist_ok=True)
-            mne.set_config("MNE_DATA", moabb_path, set_env=True)
-            # Also set MOABB-specific path
-            moabb.utils.set_download_dir(moabb_path)
+
+            # Detect DDP rank
+            rank = int(os.environ.get("LOCAL_RANK", os.environ.get("RANK", "0")))
+
+            if rank == 0:
+                # Persistent config write (only rank 0)
+                mne.set_config("MNE_DATA", moabb_path, set_env=True)
+                try:
+                    moabb.utils.set_download_dir(moabb_path)
+                except Exception as e:
+                    print(f"  [MOABB] set_download_dir failed on rank 0: {e}")
+
+            # All ranks: wait for rank 0 to finish, then set env var
+            # (in-process, no file write).
+            try:
+                import torch.distributed as dist
+                if dist.is_available() and dist.is_initialized():
+                    dist.barrier()
+            except Exception:
+                pass
+            os.environ["MNE_DATA"] = moabb_path
 
         self.trial_samples = sample_rate * trial_duration_s
         self.trials = []
