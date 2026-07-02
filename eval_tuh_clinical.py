@@ -279,16 +279,23 @@ def dataset_to_xy(ds, target_n_ch: int) -> tuple[np.ndarray, np.ndarray, np.ndar
 
 
 def dataset_to_streaming(ds, target_n_ch: int):
-    """Build a streaming _TrialDataset + label/rec_id arrays.
+    """Build a streaming _TrialDataset + label/rec_id/patient_id arrays.
 
     Used by run_finetune to avoid RAM doubling on large datasets.
+
+    Returns rec_ids AND patient_ids (patient_ids preferred for val split
+    to match LaBraM/CBraMod/CSBrain subject-disjoint 80/20 protocol).
     """
     stream = _TrialDataset(ds.trials, ds.labels, target_n_ch)
     y = np.array(ds.labels, dtype=np.int64)
     rec_ids = None
     if hasattr(ds, "recording_ids") and ds.recording_ids:
         rec_ids = np.array(ds.recording_ids, dtype=np.int64)
-    return stream, y, rec_ids
+    patient_ids = None
+    if hasattr(ds, "patient_ids") and ds.patient_ids:
+        # Keep as np string array (patient IDs are 8-letter strings)
+        patient_ids = np.array(ds.patient_ids, dtype=object)
+    return stream, y, rec_ids, patient_ids
 
 
 def aggregate_per_recording(features, labels, rec_ids):
@@ -522,7 +529,8 @@ def run_finetune(
     ft_batch_size: int = 32,
     ft_drop_path: float = 0.0,   # stochastic depth (LaBraM Base: 0.1)
     ft_head_lr_mult: float = 1.0,   # head_lr = base_lr × mult
-    train_rec_ids_np=None,   # recording_ids for subject-disjoint val split
+    train_rec_ids_np=None,   # recording_ids fallback for val split
+    train_patient_ids_np=None,   # patient_ids (preferred, matches LaBraM/CBraMod)
     ft_monitor_test_every: int = 0,   # 0 disables debug test monitor
 ) -> dict:
     """Fine-tune backbone + new BN+Linear head, return test metrics.
@@ -573,9 +581,27 @@ def run_finetune(
     y_tr = torch.from_numpy(y_tr_np).long()
     n_total = len(train_stream)
 
-    if train_rec_ids_np is not None:
-        # Recording-disjoint val split: 80/20 by recording_id. Deterministic
-        # (fixed seed) so all DDP ranks agree on the same split.
+    if train_patient_ids_np is not None:
+        # Patient-disjoint 80/20 val split matching LaBraM/CBraMod/CSBrain
+        # (verified from their source code: they use filename.split("_")[0]
+        # on TUAB naming convention `aaaaaaaa_s001_t000.edf` to get 8-letter
+        # patient prefix, then 80/20 split of unique patients).
+        # We use LaBraM-style: fixed seed 42 (LaBraM uses unseeded shuffle;
+        # we seed for reproducibility, which is stricter).
+        rng = np.random.RandomState(42)
+        unique_patients = np.unique(train_patient_ids_np)
+        rng.shuffle(unique_patients)
+        n_val_pat = max(1, int(len(unique_patients) * 0.20))
+        val_patients = set(unique_patients[:n_val_pat].tolist())
+        train_patients = set(unique_patients[n_val_pat:].tolist())
+        train_idx = [i for i, p in enumerate(train_patient_ids_np) if p in train_patients]
+        val_idx   = [i for i, p in enumerate(train_patient_ids_np) if p in val_patients]
+        _rank0_print(f"      [FT] patient-disjoint val split (80/20, LaBraM/CBraMod-style): "
+                     f"{len(train_patients)} train patients ({len(train_idx)} trials) / "
+                     f"{len(val_patients)} val patients ({len(val_idx)} trials)")
+    elif train_rec_ids_np is not None:
+        # Fallback: recording-disjoint val split (approximation of patient-
+        # disjoint when patient_ids are not available in the cache).
         rng = np.random.RandomState(42)
         unique_recs = np.unique(train_rec_ids_np)
         rng.shuffle(unique_recs)
@@ -584,7 +610,7 @@ def run_finetune(
         train_recs = set(unique_recs[n_val_recs:].tolist())
         train_idx = [i for i, r in enumerate(train_rec_ids_np) if r in train_recs]
         val_idx   = [i for i, r in enumerate(train_rec_ids_np) if r in val_recs]
-        _rank0_print(f"      [FT] recording-disjoint val split: "
+        _rank0_print(f"      [FT] recording-disjoint val split (fallback, no patient_ids): "
                      f"{len(train_recs)} train recs ({len(train_idx)} trials) / "
                      f"{len(val_recs)} val recs ({len(val_idx)} trials)")
     else:
@@ -594,7 +620,7 @@ def run_finetune(
         rng = np.random.RandomState(42)
         perm = rng.permutation(n_total).tolist()
         train_idx, val_idx = perm[:n_train], perm[n_train:]
-        _rank0_print(f"      [FT] trial-level val split (no rec_ids provided): "
+        _rank0_print(f"      [FT] trial-level val split (no rec/patient_ids provided): "
                      f"{n_train} train / {n_val} val")
 
     train_subset = torch.utils.data.Subset(train_stream, train_idx)
@@ -947,8 +973,15 @@ def main():
     # FT path uses streaming Datasets (no np.stack, low RAM); frozen probe
     # path uses stacked arrays via dataset_to_xy (sklearn needs np.array).
     need_stacked_xy = args.mode in ("frozen", "both")
-    train_stream, y_tr, rec_tr = dataset_to_streaming(train_ds, n_channels)
-    test_stream,  y_te, rec_te = dataset_to_streaming(eval_ds,  n_channels)
+    train_stream, y_tr, rec_tr, pat_tr = dataset_to_streaming(train_ds, n_channels)
+    test_stream,  y_te, rec_te, pat_te = dataset_to_streaming(eval_ds,  n_channels)
+    if pat_tr is not None:
+        print(f"[main] patient_ids available: train {len(set(pat_tr.tolist()))} unique "
+              f"patients (matches LaBraM/CBraMod protocol)")
+    else:
+        print(f"[main] patient_ids NOT in cache (old cache); will fall back to "
+              f"recording-disjoint val split. Rebuild cache to enable "
+              f"patient-disjoint split matching LaBraM/CBraMod.")
     if need_stacked_xy:
         print(f"\n[main] --mode {args.mode}: also stacking train+eval to np.array "
               f"for frozen probe (RAM-heavy on TUAB)...")
@@ -1052,7 +1085,8 @@ def main():
             ft_batch_size=args.ft_batch_size,
             ft_drop_path=args.ft_drop_path,
             ft_head_lr_mult=args.ft_head_lr_mult,
-            train_rec_ids_np=rec_tr,   # Recording-disjoint val split when available
+            train_rec_ids_np=rec_tr,   # Recording-disjoint fallback
+            train_patient_ids_np=pat_tr,   # Patient-disjoint preferred (LaBraM/CBraMod)
             ft_monitor_test_every=args.ft_monitor_test_every,
         )
         print(f"\n{'='*70}\n  Fine-tune ({args.max_epochs} epochs, "

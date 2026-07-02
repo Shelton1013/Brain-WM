@@ -173,6 +173,7 @@ class TUABDataset(Dataset):
         self.trials: list[np.ndarray] = []
         self.labels: list[int] = []
         self.recording_ids: list[int] = []  # which EDF each trial came from
+        self.patient_ids: list[str] = []    # 8-letter TUAB patient id per trial
         self.electrode_names: list[str] | None = None
 
         # Cache key includes split + normalization
@@ -193,8 +194,9 @@ class TUABDataset(Dataset):
                 self.trials = cached["trials"]
                 self.labels = cached["labels"]
                 self.electrode_names = cached["electrode_names"]
-                # Backward-compat: old caches don't have recording_ids
+                # Backward-compat: old caches don't have recording_ids / patient_ids
                 self.recording_ids = cached.get("recording_ids", [])
+                self.patient_ids = cached.get("patient_ids", [])
                 return
 
         # Walk normal/ and abnormal/ subdirectories of the split
@@ -221,20 +223,25 @@ class TUABDataset(Dataset):
                 if normalization == "per_recording_robust":
                     data_uv = _robust_scale_per_recording(data_uv)
                 segs = _segment(data_uv, self.trial_samples, normalization)
+                # TUAB filename: aaaaaaaa_s001_t000.edf  → patient = "aaaaaaaa"
+                patient_id = edf_path.stem.split("_")[0]
                 for s in segs:
                     self.trials.append(s)
                     self.labels.append(label_int)
                     self.recording_ids.append(recording_counter)
+                    self.patient_ids.append(patient_id)
                 recording_counter += 1
 
         print(f"  [TUAB {split}] total: {len(self.trials)} trials "
-              f"from {recording_counter} recordings")
+              f"from {recording_counter} recordings, "
+              f"{len(set(self.patient_ids))} unique patients")
 
         if cache_path is not None:
             _save_cache(cache_path, {
                 "trials": self.trials,
                 "labels": self.labels,
                 "recording_ids": self.recording_ids,
+                "patient_ids": self.patient_ids,
                 "electrode_names": self.electrode_names,
             })
 
@@ -330,6 +337,7 @@ class TUEVDataset(Dataset):
         self.trials: list[np.ndarray] = []
         self.labels: list[int] = []
         self.recording_ids: list[int] = []  # which EDF each trial came from
+        self.patient_ids: list[str] = []    # 8-letter TUEV patient id per trial
         self.electrode_names: list[str] | None = None
 
         cache_path = None
@@ -349,8 +357,9 @@ class TUEVDataset(Dataset):
                 self.trials = cached["trials"]
                 self.labels = cached["labels"]
                 self.electrode_names = cached["electrode_names"]
-                # Backward-compat: old caches don't have recording_ids
+                # Backward-compat: old caches don't have recording_ids / patient_ids
                 self.recording_ids = cached.get("recording_ids", [])
+                self.patient_ids = cached.get("patient_ids", [])
                 return
 
         split_root = Path(data_dir) / split
@@ -388,6 +397,8 @@ class TUEVDataset(Dataset):
             T_total = data_uv.shape[0]
             half = self.trial_samples // 2
             any_event_added = False
+            # TUEV filename: aaaaaaaa_s001_t000.edf → patient = "aaaaaaaa"
+            patient_id = edf_path.stem.split("_")[0]
             for start_s, end_s, label_0_to_5 in events:
                 mid = int(round((start_s + end_s) / 2 * sample_rate))
                 lo = mid - half
@@ -404,6 +415,7 @@ class TUEVDataset(Dataset):
                     self.trials.append(((trial - mean) / std).astype(np.float32))
                 self.labels.append(label_0_to_5)
                 self.recording_ids.append(recording_counter)
+                self.patient_ids.append(patient_id)
                 events_extracted += 1
                 any_event_added = True
             if any_event_added:
@@ -411,6 +423,7 @@ class TUEVDataset(Dataset):
 
         print(f"  [TUEV {split}] total: {len(self.trials)} trials "
               f"from {recording_counter} recordings, "
+              f"{len(set(self.patient_ids))} unique patients, "
               f"{events_skipped_oob} skipped (OOB)")
 
         # Per-class count (sanity)
@@ -424,6 +437,7 @@ class TUEVDataset(Dataset):
                 "trials": self.trials,
                 "labels": self.labels,
                 "recording_ids": self.recording_ids,
+                "patient_ids": self.patient_ids,
                 "electrode_names": self.electrode_names,
             })
 
