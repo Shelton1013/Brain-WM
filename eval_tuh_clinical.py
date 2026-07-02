@@ -475,6 +475,7 @@ def run_finetune(
     ft_patience: int = 10,
     ft_batch_size: int = 32,
     train_rec_ids_np=None,   # recording_ids for subject-disjoint val split
+    ft_monitor_test_every: int = 0,   # 0 disables debug test monitor
 ) -> dict:
     """Fine-tune backbone + new BN+Linear head, return test metrics.
 
@@ -588,6 +589,36 @@ def run_finetune(
     patience = ft_patience
     no_improve = 0
 
+    # Debug: test_ba monitor loader (persistent across epochs).
+    # Used ONLY for logging/debugging — never for ckpt selection.
+    # Reported final BA is still the best-val ckpt's test BA.
+    monitor_test_loader = DataLoader(
+        test_stream, batch_size=ft_batch_size * 2, shuffle=False,
+        num_workers=max(1, num_workers // 2), pin_memory=True,
+        persistent_workers=num_workers > 0,
+    ) if ft_monitor_test_every > 0 else None
+    y_te_tensor = torch.from_numpy(y_te_np)
+
+    def _compute_test_ba_debug():
+        """Compute current test BA WITHOUT modifying model state. Debug only."""
+        was_training_model = model.training
+        was_training_head = head.training
+        model.eval(); head.eval()
+        preds = []
+        with torch.no_grad():
+            for bx, _ in monitor_test_loader:
+                bx = bx.to(device, non_blocking=True)
+                feats = model._encode(model._tokenize(bx)).mean(1)
+                preds.append(head(feats).argmax(-1).cpu().numpy())
+        preds = np.concatenate(preds)
+        ba = balanced_accuracy_score(y_te_np, preds)
+        if was_training_model: model.train()
+        if was_training_head:  head.train()
+        return float(ba)
+
+    best_test_ba_seen = 0.0        # for oracle upper bound (debug only)
+    best_test_ep_seen = 0
+
     for ep in range(max_epochs):
         model.train(); head.train()
         for bx, by in train_loader:
@@ -626,12 +657,24 @@ def run_finetune(
         else:
             no_improve += 1
 
+        # Debug: monitor test_ba every N epochs (DOES NOT affect selection)
+        test_ba_str = ""
+        if ft_monitor_test_every > 0 and (
+            (ep + 1) % ft_monitor_test_every == 0 or ep == 0
+        ):
+            cur_test_ba = _compute_test_ba_debug()
+            if cur_test_ba > best_test_ba_seen:
+                best_test_ba_seen = cur_test_ba
+                best_test_ep_seen = ep + 1
+            test_ba_str = (f" TEST_ba={cur_test_ba:.4f} "
+                           f"(oracle_best={best_test_ba_seen:.4f}@ep{best_test_ep_seen})")
+
         # Per-epoch progress print (helps monitor overfitting live)
         cur_lr = optimizer.param_groups[-1]["lr"]  # head LR (highest)
         star = "*" if improved else " "
         print(f"      ep{ep+1:03d}{star} val_ba={val_ba:.4f} "
               f"best={best_val_ba:.4f} no_improve={no_improve}/{patience} "
-              f"lr={cur_lr:.2e}", flush=True)
+              f"lr={cur_lr:.2e}{test_ba_str}", flush=True)
 
         if no_improve >= patience:
             print(f"      early stop at ep{ep+1} (best_val_ba={best_val_ba:.4f})",
@@ -663,6 +706,18 @@ def run_finetune(
     out = compute_metrics(y_te_np, preds, proba, dataset=dataset)
     out["best_val_ba"] = float(best_val_ba)
     out["epochs_trained"] = int(ep + 1)
+    # Debug: oracle upper bound (max test_ba seen during training). This is
+    # NOT what we report as the paper number — it would be cheating (using
+    # test set for ckpt selection). It only shows the gap between val-selected
+    # test BA vs an oracle that could pick the best test epoch.
+    if ft_monitor_test_every > 0:
+        out["oracle_best_test_ba"] = float(best_test_ba_seen)
+        out["oracle_best_test_ep"] = int(best_test_ep_seen)
+        print(f"      [debug] oracle_best_test_ba={best_test_ba_seen:.4f} "
+              f"@ep{best_test_ep_seen}  "
+              f"val-selected test_ba={out['balanced_accuracy']:.4f}  "
+              f"gap={best_test_ba_seen - out['balanced_accuracy']:+.4f}",
+              flush=True)
 
     del model, head, best_state, train_loader, val_loader, test_loader
     torch.cuda.empty_cache()
@@ -727,6 +782,12 @@ def main():
                         "(e.g. 50) to effectively disable when using labram "
                         "protocol.")
     p.add_argument("--ft_batch_size", type=int, default=32)
+    p.add_argument("--ft_monitor_test_every", type=int, default=0,
+                   help="If > 0, compute test_ba every N epochs and log it "
+                        "(along with an 'oracle_best_test_ba' upper bound). "
+                        "For DEBUG ONLY — reported final test_ba is still "
+                        "based on the best-val ckpt selection. Setting to 5 "
+                        "or 10 gives visibility into val vs test dynamics.")
     args = p.parse_args()
 
     device = torch.device(
@@ -868,6 +929,7 @@ def main():
             ft_patience=args.ft_patience,
             ft_batch_size=args.ft_batch_size,
             train_rec_ids_np=rec_tr,   # Recording-disjoint val split when available
+            ft_monitor_test_every=args.ft_monitor_test_every,
         )
         print(f"\n{'='*70}\n  Fine-tune ({args.max_epochs} epochs, "
               f"streaming, protocol={args.ft_protocol})\n{'='*70}")
