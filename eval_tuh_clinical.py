@@ -44,7 +44,35 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.distributed as dist
 from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+
+# ============================================================
+# DDP helpers
+# ============================================================
+
+def _ddp_active():
+    return dist.is_available() and dist.is_initialized()
+
+def _ddp_rank():
+    return dist.get_rank() if _ddp_active() else 0
+
+def _ddp_world():
+    return dist.get_world_size() if _ddp_active() else 1
+
+def _is_main():
+    return _ddp_rank() == 0
+
+def _rank0_print(*args, **kwargs):
+    if _is_main():
+        print(*args, **kwargs)
+
+def _ddp_barrier():
+    if _ddp_active():
+        dist.barrier()
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -522,8 +550,13 @@ def run_finetune(
     Streaming impl: data stays as list[np.ndarray] in RAM; DataLoader
     workers stream batches on demand. No np.stack of 70+ GB arrays.
     """
-    model = copy.deepcopy(base_model)
-    # Inject drop path (stochastic depth) into encoder blocks — LaBraM style
+    ddp = _ddp_active()
+    world = _ddp_world()
+    rank = _ddp_rank()
+
+    model = copy.deepcopy(base_model).to(device)
+    # Inject drop path (stochastic depth) into encoder blocks — LaBraM style.
+    # Must be applied BEFORE DDP wrapping.
     if ft_drop_path > 0:
         _inject_drop_path(model, ft_drop_path)
     head = nn.Sequential(
@@ -531,15 +564,25 @@ def run_finetune(
         nn.Linear(model.d_model, n_classes),
     ).to(device)
 
+    # DDP wrap
+    if ddp:
+        # find_unused_parameters=True: some CF apparatus (band_head, cf_predictor)
+        # is not used at FT time; DDP would error otherwise.
+        model = DDP(model, device_ids=[device.index] if device.type == "cuda"
+                    else None, find_unused_parameters=True)
+        head = DDP(head, device_ids=[device.index] if device.type == "cuda"
+                   else None)
+
+    # Access underlying model for _tokenize/_encode calls
+    core_model = model.module if ddp else model
+    core_head = head.module if ddp else head
+
     y_tr = torch.from_numpy(y_tr_np).long()
     n_total = len(train_stream)
 
     if train_rec_ids_np is not None:
-        # Recording-disjoint val split: 80% of unique recording_ids → train,
-        # 20% → val. This mirrors LaBraM/CBraMod/CSBrain's subject-disjoint
-        # protocol so val distribution matches the subject-disjoint test set.
-        # Val ceases to be a "same-subject hold-out" (which grows monotonically
-        # with training) and instead measures unseen-recording generalization.
+        # Recording-disjoint val split: 80/20 by recording_id. Deterministic
+        # (fixed seed) so all DDP ranks agree on the same split.
         rng = np.random.RandomState(42)
         unique_recs = np.unique(train_rec_ids_np)
         rng.shuffle(unique_recs)
@@ -548,28 +591,43 @@ def run_finetune(
         train_recs = set(unique_recs[n_val_recs:].tolist())
         train_idx = [i for i, r in enumerate(train_rec_ids_np) if r in train_recs]
         val_idx   = [i for i, r in enumerate(train_rec_ids_np) if r in val_recs]
-        print(f"      [FT] recording-disjoint val split: "
-              f"{len(train_recs)} train recs ({len(train_idx)} trials) / "
-              f"{len(val_recs)} val recs ({len(val_idx)} trials)")
+        _rank0_print(f"      [FT] recording-disjoint val split: "
+                     f"{len(train_recs)} train recs ({len(train_idx)} trials) / "
+                     f"{len(val_recs)} val recs ({len(val_idx)} trials)")
     else:
-        # Fallback: trial-level 85/15 random split (not subject-disjoint;
-        # val distribution matches train, so best-val ckpt may pick a
-        # late-overfit epoch that generalizes worse to the test set)
         n_val = max(1, int(n_total * 0.15))
         n_train = n_total - n_val
-        perm = torch.randperm(n_total).tolist()
+        # Same seed across ranks
+        rng = np.random.RandomState(42)
+        perm = rng.permutation(n_total).tolist()
         train_idx, val_idx = perm[:n_train], perm[n_train:]
-        print(f"      [FT] trial-level val split (no rec_ids provided): "
-              f"{n_train} train / {n_val} val")
+        _rank0_print(f"      [FT] trial-level val split (no rec_ids provided): "
+                     f"{n_train} train / {n_val} val")
 
     train_subset = torch.utils.data.Subset(train_stream, train_idx)
     val_subset = torch.utils.data.Subset(train_stream, val_idx)
 
-    train_loader = DataLoader(
-        train_subset,
-        batch_size=ft_batch_size, shuffle=True, drop_last=True,
-        num_workers=num_workers, pin_memory=True, persistent_workers=num_workers > 0,
-    )
+    # DDP: use DistributedSampler on train so each rank sees 1/world_size.
+    # Val/test are small enough to replicate on each rank (each rank
+    # computes full metric; identical result on all ranks).
+    if ddp:
+        train_sampler = DistributedSampler(
+            train_subset, num_replicas=world, rank=rank,
+            shuffle=True, drop_last=True, seed=42,
+        )
+        train_loader = DataLoader(
+            train_subset, batch_size=ft_batch_size, sampler=train_sampler,
+            drop_last=True, num_workers=num_workers, pin_memory=True,
+            persistent_workers=num_workers > 0,
+        )
+    else:
+        train_sampler = None
+        train_loader = DataLoader(
+            train_subset,
+            batch_size=ft_batch_size, shuffle=True, drop_last=True,
+            num_workers=num_workers, pin_memory=True,
+            persistent_workers=num_workers > 0,
+        )
     val_loader = DataLoader(
         val_subset,
         batch_size=ft_batch_size * 2, shuffle=False,
@@ -584,9 +642,8 @@ def run_finetune(
 
     steps_per_epoch = max(1, len(train_loader))
     if ft_protocol == "labram":
-        # LaBraM-style: layer-wise LR decay + cosine + linear warmup + wd 0.05
         optimizer = _build_labram_optimizer(
-            model, head,
+            core_model, core_head,
             base_lr=ft_base_lr,
             weight_decay=ft_weight_decay,
             layer_decay=ft_layer_decay,
@@ -598,15 +655,16 @@ def run_finetune(
             total_epochs=max_epochs,
             min_lr_ratio=1e-3,
         )
-        print(f"      [FT] LaBraM protocol: base_lr={ft_base_lr:.1e} "
-              f"layer_decay={ft_layer_decay} wd={ft_weight_decay} "
-              f"warmup={ft_warmup_epochs}ep cosine patience={ft_patience} "
-              f"drop_path={ft_drop_path}")
+        eff_batch = ft_batch_size * world
+        _rank0_print(f"      [FT] LaBraM protocol: base_lr={ft_base_lr:.1e} "
+                     f"layer_decay={ft_layer_decay} wd={ft_weight_decay} "
+                     f"warmup={ft_warmup_epochs}ep cosine patience={ft_patience} "
+                     f"drop_path={ft_drop_path} "
+                     f"batch={ft_batch_size}×{world}={eff_batch}")
     else:
-        # Legacy OneCycleLR (run_eegbench.py protocol)
         optimizer = torch.optim.AdamW([
-            {"params": model.parameters(), "lr": 1e-6},
-            {"params": head.parameters(),  "lr": 1e-6},
+            {"params": core_model.parameters(), "lr": 1e-6},
+            {"params": core_head.parameters(),  "lr": 1e-6},
         ], weight_decay=0.01)
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer, max_lr=[4e-4, 4e-3],
@@ -631,36 +689,40 @@ def run_finetune(
     y_te_tensor = torch.from_numpy(y_te_np)
 
     def _compute_test_ba_debug():
-        """Compute current test BA WITHOUT modifying model state. Debug only."""
-        was_training_model = model.training
-        was_training_head = head.training
-        model.eval(); head.eval()
+        """Compute current test BA WITHOUT modifying model state. Debug only.
+        Replicated across ranks (each rank does full test, identical result)."""
+        was_training_model = core_model.training
+        was_training_head = core_head.training
+        core_model.eval(); core_head.eval()
         preds = []
         with torch.no_grad():
             for bx, _ in monitor_test_loader:
                 bx = bx.to(device, non_blocking=True)
-                feats = model._encode(model._tokenize(bx)).mean(1)
-                preds.append(head(feats).argmax(-1).cpu().numpy())
+                feats = core_model._encode(core_model._tokenize(bx)).mean(1)
+                preds.append(core_head(feats).argmax(-1).cpu().numpy())
         preds = np.concatenate(preds)
         ba = balanced_accuracy_score(y_te_np, preds)
-        if was_training_model: model.train()
-        if was_training_head:  head.train()
+        if was_training_model: core_model.train()
+        if was_training_head:  core_head.train()
         return float(ba)
 
     best_test_ba_seen = 0.0        # for oracle upper bound (debug only)
     best_test_ep_seen = 0
 
     for ep in range(max_epochs):
+        # DDP: ensure each rank shuffles the same way each epoch
+        if train_sampler is not None:
+            train_sampler.set_epoch(ep)
         model.train(); head.train()
         for bx, by in train_loader:
-            bx, by = bx.to(device), by.to(device)
-            feats = model._encode(model._tokenize(bx)).mean(1)
+            bx, by = bx.to(device, non_blocking=True), by.to(device, non_blocking=True)
+            feats = core_model._encode(core_model._tokenize(bx)).mean(1)
             logits = head(feats)
             loss = criterion(logits, by)
             optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
-                list(model.parameters()) + list(head.parameters()), 3.0)
+                list(core_model.parameters()) + list(core_head.parameters()), 3.0)
             optimizer.step()
             scheduler.step()
 
@@ -668,9 +730,9 @@ def run_finetune(
         val_preds, val_labels = [], []
         with torch.no_grad():
             for bx, by in val_loader:
-                bx = bx.to(device)
-                feats = model._encode(model._tokenize(bx)).mean(1)
-                val_preds.append(head(feats).argmax(-1).cpu())
+                bx = bx.to(device, non_blocking=True)
+                feats = core_model._encode(core_model._tokenize(bx)).mean(1)
+                val_preds.append(core_head(feats).argmax(-1).cpu())
                 val_labels.append(by)
         val_ba = balanced_accuracy_score(
             torch.cat(val_labels).numpy(),
@@ -680,10 +742,13 @@ def run_finetune(
         improved = val_ba > best_val_ba
         if improved:
             best_val_ba = val_ba
-            best_state = {
-                "model": {k: v.cpu().clone() for k, v in model.state_dict().items()},
-                "head":  {k: v.cpu().clone() for k, v in head.state_dict().items()},
-            }
+            # Only rank 0 keeps best_state (saves RAM); other ranks skip.
+            # At end, rank 0 broadcasts the state to all ranks.
+            if _is_main():
+                best_state = {
+                    "model": {k: v.cpu().clone() for k, v in core_model.state_dict().items()},
+                    "head":  {k: v.cpu().clone() for k, v in core_head.state_dict().items()},
+                }
             no_improve = 0
         else:
             no_improve += 1
@@ -700,35 +765,52 @@ def run_finetune(
             test_ba_str = (f" TEST_ba={cur_test_ba:.4f} "
                            f"(oracle_best={best_test_ba_seen:.4f}@ep{best_test_ep_seen})")
 
-        # Per-epoch progress print (helps monitor overfitting live)
-        cur_lr = optimizer.param_groups[-1]["lr"]  # head LR (highest)
+        cur_lr = optimizer.param_groups[-1]["lr"]
         star = "*" if improved else " "
-        print(f"      ep{ep+1:03d}{star} val_ba={val_ba:.4f} "
-              f"best={best_val_ba:.4f} no_improve={no_improve}/{patience} "
-              f"lr={cur_lr:.2e}{test_ba_str}", flush=True)
+        _rank0_print(f"      ep{ep+1:03d}{star} val_ba={val_ba:.4f} "
+                     f"best={best_val_ba:.4f} no_improve={no_improve}/{patience} "
+                     f"lr={cur_lr:.2e}{test_ba_str}", flush=True)
 
         if no_improve >= patience:
-            print(f"      early stop at ep{ep+1} (best_val_ba={best_val_ba:.4f})",
-                  flush=True)
+            _rank0_print(f"      early stop at ep{ep+1} (best_val_ba={best_val_ba:.4f})",
+                         flush=True)
             break
 
-    # Restore best
-    if best_state is not None:
-        model.load_state_dict(best_state["model"]); model.to(device)
-        head.load_state_dict(best_state["head"]);   head.to(device)
+    # Restore best (rank 0 has best_state; broadcast to all ranks via DDP)
+    if ddp:
+        # Broadcast best_state from rank 0 by loading state on rank 0 then
+        # all ranks sync via DDP. Simplest: rank 0 saves best_state file,
+        # then all ranks load. But since best_state lives in RAM only, we
+        # do an in-place broadcast of parameters.
+        if _is_main() and best_state is not None:
+            core_model.load_state_dict(best_state["model"])
+            core_head.load_state_dict(best_state["head"])
+        # Broadcast parameters from rank 0 to all
+        for p in core_model.parameters():
+            dist.broadcast(p.data, src=0)
+        for p in core_head.parameters():
+            dist.broadcast(p.data, src=0)
+        for b in core_model.buffers():
+            dist.broadcast(b.data, src=0)
+        for b in core_head.buffers():
+            dist.broadcast(b.data, src=0)
+    else:
+        if best_state is not None:
+            core_model.load_state_dict(best_state["model"])
+            core_head.load_state_dict(best_state["head"])
     model.eval(); head.eval()
 
-    # Test — stream from test_stream Dataset
+    # Test — replicated on each rank (small, ~40k trials)
     test_loader = DataLoader(
-        test_stream, batch_size=64, shuffle=False,
+        test_stream, batch_size=max(64, ft_batch_size), shuffle=False,
         num_workers=max(1, num_workers // 2), pin_memory=True,
     )
     preds, probas = [], []
     with torch.no_grad():
         for bx, _ in test_loader:
             bx = bx.to(device, non_blocking=True)
-            feats = model._encode(model._tokenize(bx)).mean(1)
-            logits = head(feats)
+            feats = core_model._encode(core_model._tokenize(bx)).mean(1)
+            logits = core_head(feats)
             probas.append(torch.softmax(logits, dim=-1).cpu().numpy())
             preds.append(logits.argmax(-1).cpu().numpy())
     preds = np.concatenate(preds)
@@ -737,18 +819,14 @@ def run_finetune(
     out = compute_metrics(y_te_np, preds, proba, dataset=dataset)
     out["best_val_ba"] = float(best_val_ba)
     out["epochs_trained"] = int(ep + 1)
-    # Debug: oracle upper bound (max test_ba seen during training). This is
-    # NOT what we report as the paper number — it would be cheating (using
-    # test set for ckpt selection). It only shows the gap between val-selected
-    # test BA vs an oracle that could pick the best test epoch.
     if ft_monitor_test_every > 0:
         out["oracle_best_test_ba"] = float(best_test_ba_seen)
         out["oracle_best_test_ep"] = int(best_test_ep_seen)
-        print(f"      [debug] oracle_best_test_ba={best_test_ba_seen:.4f} "
-              f"@ep{best_test_ep_seen}  "
-              f"val-selected test_ba={out['balanced_accuracy']:.4f}  "
-              f"gap={best_test_ba_seen - out['balanced_accuracy']:+.4f}",
-              flush=True)
+        _rank0_print(f"      [debug] oracle_best_test_ba={best_test_ba_seen:.4f} "
+                     f"@ep{best_test_ep_seen}  "
+                     f"val-selected test_ba={out['balanced_accuracy']:.4f}  "
+                     f"gap={best_test_ba_seen - out['balanced_accuracy']:+.4f}",
+                     flush=True)
 
     del model, head, best_state, train_loader, val_loader, test_loader
     torch.cuda.empty_cache()
@@ -825,9 +903,18 @@ def main():
                         "as regularization. 0 disables.")
     args = p.parse_args()
 
-    device = torch.device(
-        "cuda" if args.device == "auto" and torch.cuda.is_available()
-        else args.device if args.device != "auto" else "cpu")
+    # DDP init if torchrun set WORLD_SIZE > 1
+    if int(os.environ.get("WORLD_SIZE", "1")) > 1:
+        dist.init_process_group(backend="nccl")
+        local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+        torch.cuda.set_device(local_rank)
+        device = torch.device(f"cuda:{local_rank}")
+        _rank0_print(f"[DDP] world_size={dist.get_world_size()} "
+                     f"rank={dist.get_rank()} local_rank={local_rank}", flush=True)
+    else:
+        device = torch.device(
+            "cuda" if args.device == "auto" and torch.cuda.is_available()
+            else args.device if args.device != "auto" else "cpu")
 
     n_classes = 2 if args.dataset == "tuab" else 6
 
@@ -984,15 +1071,19 @@ def main():
             _print_metric_line_ft("  Rand-FT ", results["random_finetune"], args.dataset)
             del random_model; torch.cuda.empty_cache()
 
-    # ── Save ──
-    out_path = args.output
-    if out_path is None:
-        ckpt_stem = Path(args.checkpoint).parent.name  # use model dir name
-        out_path = f"/home/pxieaf/home2/eval/{ckpt_stem}_{args.dataset}.json"
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(out_path, "w") as f:
-        json.dump(results, f, indent=2)
-    print(f"\n→ Saved: {out_path}")
+    # ── Save (rank 0 only) ──
+    if _is_main():
+        out_path = args.output
+        if out_path is None:
+            ckpt_stem = Path(args.checkpoint).parent.name  # use model dir name
+            out_path = f"/home/pxieaf/home2/eval/{ckpt_stem}_{args.dataset}.json"
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w") as f:
+            json.dump(results, f, indent=2)
+        print(f"\n→ Saved: {out_path}")
+
+    if _ddp_active():
+        dist.destroy_process_group()
 
 
 def _print_metric_line(prefix, agg, dataset):
