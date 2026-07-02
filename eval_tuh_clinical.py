@@ -398,22 +398,14 @@ def run_frozen_probe(
 # ============================================================
 
 def _build_labram_optimizer(model, head, base_lr: float, weight_decay: float,
-                             layer_decay: float = 0.65):
+                             layer_decay: float = 0.65,
+                             head_lr_mult: float = 1.0):
     """LaBraM-style optimizer with layer-wise LR decay.
 
-    Deep layers (encoder blocks near the input) get lower LR; shallow
-    layers (near output) and the head get higher LR. This prevents
-    fine-tuning from corrupting the pretrained representations in early
-    layers while still adapting late layers + head to the downstream task.
-
-    Layers ordered as (deepest first):
-        tokenizer + pos_embed  →  lr × decay^(n_layers + 1)
-        encoder[0]             →  lr × decay^n_layers
-        encoder[1]             →  lr × decay^(n_layers-1)
-        ...
-        encoder[n_layers-1]    →  lr × decay^1
-        encoder_norm + pred_head + (CF apparatus if present)  →  lr × decay^0
-        head (BN + classifier) →  lr × 1.0
+    head_lr_mult (default 1.0 matches LaBraM). Setting 10 gives the head
+    10× higher LR than backbone base_lr — closer to run_eegbench's
+    [4e-4 backbone, 4e-3 head] split, useful when head_lr = base_lr
+    leaves the classifier undertrained.
     """
     param_groups = []
     n_layers = len(model.encoder)   # 6 for our default
@@ -458,10 +450,10 @@ def _build_labram_optimizer(model, head, base_lr: float, weight_decay: float,
         "name": "shallow",
     })
 
-    # Head: highest LR (× 1.0, no decay)
+    # Head: (base_lr × head_lr_mult), no layer decay
     param_groups.append({
         "params": list(head.parameters()),
-        "lr": base_lr,
+        "lr": base_lr * head_lr_mult,
         "weight_decay": weight_decay,
         "name": "head",
     })
@@ -529,6 +521,7 @@ def run_finetune(
     ft_patience: int = 10,
     ft_batch_size: int = 32,
     ft_drop_path: float = 0.0,   # stochastic depth (LaBraM Base: 0.1)
+    ft_head_lr_mult: float = 1.0,   # head_lr = base_lr × mult
     train_rec_ids_np=None,   # recording_ids for subject-disjoint val split
     ft_monitor_test_every: int = 0,   # 0 disables debug test monitor
 ) -> dict:
@@ -647,6 +640,7 @@ def run_finetune(
             base_lr=ft_base_lr,
             weight_decay=ft_weight_decay,
             layer_decay=ft_layer_decay,
+            head_lr_mult=ft_head_lr_mult,
         )
         scheduler = _build_cosine_warmup_scheduler(
             optimizer,
@@ -659,7 +653,7 @@ def run_finetune(
         _rank0_print(f"      [FT] LaBraM protocol: base_lr={ft_base_lr:.1e} "
                      f"layer_decay={ft_layer_decay} wd={ft_weight_decay} "
                      f"warmup={ft_warmup_epochs}ep cosine patience={ft_patience} "
-                     f"drop_path={ft_drop_path} "
+                     f"drop_path={ft_drop_path} head_mult={ft_head_lr_mult} "
                      f"batch={ft_batch_size}×{world}={eff_batch}")
     else:
         optimizer = torch.optim.AdamW([
@@ -901,6 +895,12 @@ def main():
                    help="Stochastic depth prob (LaBraM Base 0.1, Huge 0.2). "
                         "Randomly skip entire encoder blocks during training "
                         "as regularization. 0 disables.")
+    p.add_argument("--ft_head_lr_mult", type=float, default=1.0,
+                   help="head_lr = base_lr × mult. LaBraM uses 1.0 (same LR "
+                        "for backbone and head). Set 10 to give head 10× "
+                        "higher LR, matching run_eegbench's OneCycleLR split "
+                        "(head 4e-3 vs backbone 4e-4). Useful when head "
+                        "undertrains under labram protocol.")
     args = p.parse_args()
 
     # DDP init if torchrun set WORLD_SIZE > 1
@@ -1051,6 +1051,7 @@ def main():
             ft_patience=args.ft_patience,
             ft_batch_size=args.ft_batch_size,
             ft_drop_path=args.ft_drop_path,
+            ft_head_lr_mult=args.ft_head_lr_mult,
             train_rec_ids_np=rec_tr,   # Recording-disjoint val split when available
             ft_monitor_test_every=args.ft_monitor_test_every,
         )
