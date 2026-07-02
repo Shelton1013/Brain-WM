@@ -463,6 +463,32 @@ def _build_cosine_warmup_scheduler(optimizer, steps_per_epoch: int,
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
 
+def _inject_drop_path(model, drop_prob: float):
+    """Monkey-patch model.encoder blocks with stochastic depth (drop path).
+
+    Wraps each block's forward: with prob drop_prob during training,
+    the block is skipped (residual only). At eval, always active.
+    Only affects model in place; use on deepcopy to avoid side effects.
+
+    Following LaBraM: drop_prob 0.1 for Base/Large, 0.2 for Huge.
+    """
+    if drop_prob <= 0:
+        return
+
+    def _wrap(block, prob):
+        original_forward = block.forward
+
+        def new_forward(x):
+            if block.training and torch.rand(1, device=x.device).item() < prob:
+                return x   # skip entire block, keep only identity
+            return original_forward(x)
+
+        block.forward = new_forward
+
+    for blk in model.encoder:
+        _wrap(blk, drop_prob)
+
+
 def run_finetune(
     base_model, train_stream, y_tr_np, test_stream, y_te_np,
     n_classes: int, dataset: str, device, max_epochs: int = 50,
@@ -474,6 +500,7 @@ def run_finetune(
     ft_warmup_epochs: int = 5,
     ft_patience: int = 10,
     ft_batch_size: int = 32,
+    ft_drop_path: float = 0.0,   # stochastic depth (LaBraM Base: 0.1)
     train_rec_ids_np=None,   # recording_ids for subject-disjoint val split
     ft_monitor_test_every: int = 0,   # 0 disables debug test monitor
 ) -> dict:
@@ -496,6 +523,9 @@ def run_finetune(
     workers stream batches on demand. No np.stack of 70+ GB arrays.
     """
     model = copy.deepcopy(base_model)
+    # Inject drop path (stochastic depth) into encoder blocks — LaBraM style
+    if ft_drop_path > 0:
+        _inject_drop_path(model, ft_drop_path)
     head = nn.Sequential(
         nn.BatchNorm1d(model.d_model),
         nn.Linear(model.d_model, n_classes),
@@ -570,7 +600,8 @@ def run_finetune(
         )
         print(f"      [FT] LaBraM protocol: base_lr={ft_base_lr:.1e} "
               f"layer_decay={ft_layer_decay} wd={ft_weight_decay} "
-              f"warmup={ft_warmup_epochs}ep cosine patience={ft_patience}")
+              f"warmup={ft_warmup_epochs}ep cosine patience={ft_patience} "
+              f"drop_path={ft_drop_path}")
     else:
         # Legacy OneCycleLR (run_eegbench.py protocol)
         optimizer = torch.optim.AdamW([
@@ -788,6 +819,10 @@ def main():
                         "For DEBUG ONLY — reported final test_ba is still "
                         "based on the best-val ckpt selection. Setting to 5 "
                         "or 10 gives visibility into val vs test dynamics.")
+    p.add_argument("--ft_drop_path", type=float, default=0.0,
+                   help="Stochastic depth prob (LaBraM Base 0.1, Huge 0.2). "
+                        "Randomly skip entire encoder blocks during training "
+                        "as regularization. 0 disables.")
     args = p.parse_args()
 
     device = torch.device(
@@ -928,6 +963,7 @@ def main():
             ft_warmup_epochs=args.ft_warmup_epochs,
             ft_patience=args.ft_patience,
             ft_batch_size=args.ft_batch_size,
+            ft_drop_path=args.ft_drop_path,
             train_rec_ids_np=rec_tr,   # Recording-disjoint val split when available
             ft_monitor_test_every=args.ft_monitor_test_every,
         )
