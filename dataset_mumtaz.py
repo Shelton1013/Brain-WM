@@ -74,9 +74,13 @@ N_CLASSES = 2
 NATIVE_SR = 256
 
 
-# Match filename patterns like: MDD_S9_EC.edf, MDD_S1__EO.edf, H_S3_EC.edf
+# Match filename patterns (real Mumtaz2016 Figshare format):
+#   "H S13 EO.edf"            -> group=H, subj=13, cond=EO
+#   "MDD S11  EC.edf"         -> group=MDD, subj=11, cond=EC (double space OK)
+#   "H S1 EC.edf"             -> subj=1
+# Skip artifacts like "6921143_H S15 EO.edf" (Figshare duplicate downloads).
 _FNAME_RE = re.compile(
-    r"^(?P<group>MDD|H)_S(?P<subj>\d+)_+(?P<cond>EC|EO|TASK)\.edf$",
+    r"^(?P<group>MDD|H)\s+S(?P<subj>\d+)\s+(?P<cond>EC|EO|TASK)\.edf$",
     re.IGNORECASE,
 )
 
