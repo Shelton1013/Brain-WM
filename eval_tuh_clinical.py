@@ -532,6 +532,7 @@ def run_finetune(
     train_rec_ids_np=None,   # recording_ids fallback for val split
     train_patient_ids_np=None,   # patient_ids (preferred, matches LaBraM/CBraMod)
     ft_monitor_test_every: int = 0,   # 0 disables debug test monitor
+    seed: int = 42,   # RNG for val split + DDP sampler + torch (multi-seed paper)
 ) -> dict:
     """Fine-tune backbone + new BN+Linear head, return test metrics.
 
@@ -586,9 +587,9 @@ def run_finetune(
         # (verified from their source code: they use filename.split("_")[0]
         # on TUAB naming convention `aaaaaaaa_s001_t000.edf` to get 8-letter
         # patient prefix, then 80/20 split of unique patients).
-        # We use LaBraM-style: fixed seed 42 (LaBraM uses unseeded shuffle;
-        # we seed for reproducibility, which is stricter).
-        rng = np.random.RandomState(42)
+        # We use LaBraM-style: seed-parameterized shuffle (LaBraM uses unseeded;
+        # we seed for reproducibility + multi-seed paper reporting).
+        rng = np.random.RandomState(seed)
         unique_patients = np.unique(train_patient_ids_np)
         rng.shuffle(unique_patients)
         n_val_pat = max(1, int(len(unique_patients) * 0.20))
@@ -602,7 +603,7 @@ def run_finetune(
     elif train_rec_ids_np is not None:
         # Fallback: recording-disjoint val split (approximation of patient-
         # disjoint when patient_ids are not available in the cache).
-        rng = np.random.RandomState(42)
+        rng = np.random.RandomState(seed)
         unique_recs = np.unique(train_rec_ids_np)
         rng.shuffle(unique_recs)
         n_val_recs = max(1, int(len(unique_recs) * 0.20))
@@ -617,7 +618,7 @@ def run_finetune(
         n_val = max(1, int(n_total * 0.15))
         n_train = n_total - n_val
         # Same seed across ranks
-        rng = np.random.RandomState(42)
+        rng = np.random.RandomState(seed)
         perm = rng.permutation(n_total).tolist()
         train_idx, val_idx = perm[:n_train], perm[n_train:]
         _rank0_print(f"      [FT] trial-level val split (no rec/patient_ids provided): "
@@ -632,7 +633,7 @@ def run_finetune(
     if ddp:
         train_sampler = DistributedSampler(
             train_subset, num_replicas=world, rank=rank,
-            shuffle=True, drop_last=True, seed=42,
+            shuffle=True, drop_last=True, seed=seed,
         )
         train_loader = DataLoader(
             train_subset, batch_size=ft_batch_size, sampler=train_sampler,
@@ -927,7 +928,19 @@ def main():
                         "higher LR, matching run_eegbench's OneCycleLR split "
                         "(head 4e-3 vs backbone 4e-4). Useful when head "
                         "undertrains under labram protocol.")
+    p.add_argument("--seed", type=int, default=42,
+                   help="Random seed for val split (patient/rec/trial), "
+                        "torch/numpy/random RNGs, and DDP DistributedSampler. "
+                        "Vary across runs for mean±std reporting (paper).")
     args = p.parse_args()
+
+    # ── Global seeding (paper-critical: reproducibility + multi-seed) ──
+    import random as _pyrandom
+    _pyrandom.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
 
     # DDP init if torchrun set WORLD_SIZE > 1
     if int(os.environ.get("WORLD_SIZE", "1")) > 1:
@@ -1016,6 +1029,7 @@ def main():
         "checkpoint": args.checkpoint,
         "model_type": model_type_name,
         "dataset": args.dataset,
+        "seed": int(args.seed),
         "n_classes": n_classes,
         "n_train": int(len(y_tr)),
         "n_eval":  int(len(y_te)),
@@ -1088,6 +1102,7 @@ def main():
             train_rec_ids_np=rec_tr,   # Recording-disjoint fallback
             train_patient_ids_np=pat_tr,   # Patient-disjoint preferred (LaBraM/CBraMod)
             ft_monitor_test_every=args.ft_monitor_test_every,
+            seed=args.seed,
         )
         print(f"\n{'='*70}\n  Fine-tune ({args.max_epochs} epochs, "
               f"streaming, protocol={args.ft_protocol})\n{'='*70}")
