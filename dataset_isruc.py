@@ -74,11 +74,20 @@ N_CLASSES = 5
 EPOCH_S = 30
 ISRUC_NATIVE_SR = 200
 
-# CBraMod's fixed subject-level split
+# CBraMod's fixed subject-level split for subgroupI (100 subjects, 80/10/10)
 CBRAMOD_ISRUC_SPLITS = {
     "train": list(range(1, 81)),
     "val":   list(range(81, 91)),
     "test":  list(range(91, 101)),
+}
+
+# Subgroup III (10 healthy subjects, standard EEG-FM benchmark used by
+# LaBraM/CBraMod/CSBrain). We use a fixed 6/2/2 subject-disjoint split
+# for single-fold reporting; 5-fold CV wrapper can be added later.
+CBRAMOD_ISRUC_III_SPLITS = {
+    "train": [1, 2, 3, 4, 5, 6],
+    "val":   [7, 8],
+    "test":  [9, 10],
 }
 
 

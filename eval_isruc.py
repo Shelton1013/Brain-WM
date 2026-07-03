@@ -31,7 +31,8 @@ from sklearn.metrics import (
 )
 
 from dataset_isruc import (
-    ISRUCDataset, CBRAMOD_ISRUC_SPLITS, LABEL_NAMES, N_CLASSES,
+    ISRUCDataset, CBRAMOD_ISRUC_SPLITS, CBRAMOD_ISRUC_III_SPLITS,
+    LABEL_NAMES, N_CLASSES,
 )
 from eval_tuh_clinical import load_pretrained, build_random_init
 
@@ -160,8 +161,13 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--checkpoint", required=True)
     p.add_argument("--isruc_dir", required=True,
-                   help="Path to ISRUC Subgroup I root "
-                        "(contains subject dirs 1/, 2/, ...)")
+                   help="Path to ISRUC subgroup root "
+                        "(contains subject dirs 1/, 2/, ... — "
+                        "e.g. subgroupIII_official/ISRUC-Sleep-III/)")
+    p.add_argument("--subgroup", choices=["I", "III"], default="III",
+                   help="ISRUC cohort: I (100 subj, 80/10/10) or III "
+                        "(10 healthy, 6/2/2). Default III = standard "
+                        "LaBraM/CBraMod/CSBrain benchmark.")
     p.add_argument("--cache_dir", default="/home/pxieaf/home2/dataset_cache")
     p.add_argument("--sample_rate", type=int, default=256)
     p.add_argument("--trial_duration_s", type=int, default=10,
@@ -175,15 +181,23 @@ def main():
     p.add_argument("--output", default=None)
     args = p.parse_args()
 
+    # Select subject-disjoint split based on subgroup
+    if args.subgroup == "III":
+        splits = CBRAMOD_ISRUC_III_SPLITS
+    else:
+        splits = CBRAMOD_ISRUC_SPLITS
+
     device = torch.device(
         "cuda" if args.device == "auto" and torch.cuda.is_available()
         else args.device if args.device != "auto" else "cpu")
 
     print(f"\n{'='*72}")
-    print(f"  ISRUC Sleep 5-class eval (CBraMod protocol)")
+    print(f"  ISRUC Sleep 5-class eval (subgroup {args.subgroup})")
     print(f"{'='*72}")
     print(f"  Checkpoint: {args.checkpoint}")
-    print(f"  Reference: CBraMod BA 0.6655, κ 0.5567, F1 0.6499")
+    print(f"  Split: train {splits['train']} / val {splits['val']} / test {splits['test']}")
+    print(f"  Reference (subgroup III, published):")
+    print(f"    LaBraM 0.7527 / CBraMod 0.7865 / CSBrain 0.7925 (BA)")
 
     model, model_cls, model_type_name, n_channels, ckpt_args = \
         load_pretrained(args.checkpoint, device)
@@ -192,7 +206,7 @@ def main():
     t0 = time.time()
     train_ds = ISRUCDataset(
         data_dir=args.isruc_dir,
-        subjects=CBRAMOD_ISRUC_SPLITS["train"],
+        subjects=splits["train"],
         sample_rate=args.sample_rate,
         trial_duration_s=args.trial_duration_s,
         normalization=args.normalization,
@@ -200,7 +214,7 @@ def main():
     )
     val_ds = ISRUCDataset(
         data_dir=args.isruc_dir,
-        subjects=CBRAMOD_ISRUC_SPLITS["val"],
+        subjects=splits["val"],
         sample_rate=args.sample_rate,
         trial_duration_s=args.trial_duration_s,
         normalization=args.normalization,
@@ -208,7 +222,7 @@ def main():
     )
     test_ds = ISRUCDataset(
         data_dir=args.isruc_dir,
-        subjects=CBRAMOD_ISRUC_SPLITS["test"],
+        subjects=splits["test"],
         sample_rate=args.sample_rate,
         trial_duration_s=args.trial_duration_s,
         normalization=args.normalization,
@@ -225,7 +239,7 @@ def main():
         "checkpoint": args.checkpoint,
         "model_type": model_type_name,
         "n_channels": int(n_channels),
-        "split": CBRAMOD_ISRUC_SPLITS,
+        "split": splits,
         "n_train": int(len(y_tr)),
         "n_val":   int(len(y_val)),
         "n_test":  int(len(y_te)),
