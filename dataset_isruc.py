@@ -107,11 +107,27 @@ def _cache_key(config: dict) -> str:
 
 
 def _resolve_subject_dir(data_dir: Path, subj: int) -> Path:
-    """Find subject's directory: could be {data_dir}/{N}/ or {data_dir}/Subject{N}/."""
+    """Find subject's directory across ISRUC naming conventions.
+
+    ISRUC ships subgroupI/II/III with different directory layouts:
+      subgroupI:   {N}/{N}.rec              (1..100)
+      subgroupIII: Subject{N}/{N}.rec       (1..10)
+      Nested variants: ISRUC-Sleep-I/{N}/... or subgroupI/{N}/...
+    """
     candidates = [
+        # Flat: data_dir points directly at subject-parent dir
         data_dir / str(subj),
         data_dir / f"Subject{subj}",
+        data_dir / f"Subject_{subj}",
+        # subgroupI naming (nested)
         data_dir / "subgroupI" / str(subj),
+        data_dir / "ISRUC-Sleep-I" / str(subj),
+        data_dir / "ISRUC-Sleep-1" / str(subj),
+        data_dir / "group1" / str(subj),
+        # subgroupIII naming (nested)
+        data_dir / "subgroupIII" / f"Subject{subj}",
+        data_dir / "ISRUC-Sleep-III" / f"Subject{subj}",
+        data_dir / "ISRUC-Sleep-3" / f"Subject{subj}",
     ]
     for c in candidates:
         if c.is_dir():
