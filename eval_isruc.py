@@ -124,7 +124,8 @@ def run_finetune(base_model, X_tr_np, y_tr_np, X_val_np, y_val_np,
             torch.cat(val_preds).numpy(),
         )
 
-        if val_ba > best_val_ba:
+        improved = val_ba > best_val_ba
+        if improved:
             best_val_ba = val_ba
             best_state = {
                 "model": {k: v.cpu().clone() for k, v in model.state_dict().items()},
@@ -133,9 +134,13 @@ def run_finetune(base_model, X_tr_np, y_tr_np, X_val_np, y_val_np,
             no_improve = 0
         else:
             no_improve += 1
-            if no_improve >= patience:
-                print(f"      early stop at epoch {ep+1} (best_val_ba={best_val_ba:.4f})")
-                break
+        marker = "*" if improved else " "
+        print(f"      ep{ep+1:03d}{marker} val_ba={val_ba:.4f} "
+              f"best={best_val_ba:.4f} no_improve={no_improve}/{patience}",
+              flush=True)
+        if no_improve >= patience:
+            print(f"      early stop at epoch {ep+1} (best_val_ba={best_val_ba:.4f})")
+            break
 
     if best_state is not None:
         model.load_state_dict(best_state["model"]); model.to(device)
