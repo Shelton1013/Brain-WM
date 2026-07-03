@@ -134,6 +134,17 @@ def _find_rec_and_labels(subj_dir: Path, subj: int):
         if not recs:
             raise FileNotFoundError(f"No .rec/.edf in {subj_dir}")
         rec = recs[0]
+    # MNE's read_raw_edf strictly checks extension; ISRUC ships .rec (which
+    # is EDF format inside). Create a sibling .edf symlink so mne accepts it.
+    if rec.suffix == ".rec":
+        edf_link = rec.with_suffix(".edf")
+        if not edf_link.exists():
+            try:
+                edf_link.symlink_to(rec.name)   # relative symlink to sibling
+            except (OSError, FileExistsError):
+                pass
+        if edf_link.exists():
+            rec = edf_link
     if not txt.exists():
         txts = sorted(subj_dir.glob("*_1.txt"))
         if not txts:
