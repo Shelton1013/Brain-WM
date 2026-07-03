@@ -29,6 +29,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
     balanced_accuracy_score, roc_auc_score, average_precision_score,
 )
@@ -51,6 +53,50 @@ def compute_metrics(y_true, y_pred, y_proba):
         "roc_auc":           float(roc_auc_score(y_true, y_proba)),
         "pr_auc":            float(average_precision_score(y_true, y_proba)),
     }
+
+
+def extract_features(model, X_np, device, batch_size=64):
+    """Run encoder over X (mean-pool tokens) → [N, d_model]."""
+    model.eval()
+    feats = []
+    with torch.no_grad():
+        for i in range(0, len(X_np), batch_size):
+            batch = torch.from_numpy(X_np[i:i+batch_size]).to(device)
+            tokens = model._tokenize(batch)
+            encoded = model._encode(tokens)
+            feats.append(encoded.mean(dim=1).cpu().numpy())
+    return np.concatenate(feats)
+
+
+def run_frozen_probe(feat_tr, y_tr, feat_te, y_te, n_reps: int = 5) -> dict:
+    """LogisticRegression × n_reps, returns mean metrics + per-rep list.
+
+    For binary depression detection: features standardized + LogReg,
+    reports BA + ROC-AUC + PR-AUC.
+    """
+    metrics_by_rep = []
+    for seed in range(n_reps):
+        scaler = StandardScaler()
+        tr_s = scaler.fit_transform(feat_tr)
+        te_s = scaler.transform(feat_te)
+        clf = LogisticRegression(
+            max_iter=1000, C=1.0, solver="lbfgs",
+            random_state=42 + seed,
+            class_weight="balanced",
+        )
+        clf.fit(tr_s, y_tr)
+        preds = clf.predict(te_s)
+        proba = clf.predict_proba(te_s)[:, 1]   # prob of MDD
+        metrics_by_rep.append(compute_metrics(y_te, preds, proba))
+
+    keys = list(metrics_by_rep[0].keys())
+    agg = {}
+    for k in keys:
+        vals = [m[k] for m in metrics_by_rep]
+        agg[k] = {"mean": float(np.mean(vals)),
+                  "std": float(np.std(vals))}
+    agg["_per_rep"] = metrics_by_rep
+    return agg
 
 
 def run_finetune(base_model, X_tr_np, y_tr_np, X_val_np, y_val_np,
@@ -178,6 +224,13 @@ def main():
                    help="Directory containing MDD_S{N}_(EC|EO).edf and "
                         "H_S{N}_(EC|EO).edf files (TASK auto-dropped)")
     p.add_argument("--cache_dir", default="/home/pxieaf/home2/dataset_cache")
+    p.add_argument("--mode", choices=["frozen", "finetune", "both"],
+                   default="finetune",
+                   help="frozen: linear probe on frozen features (fast "
+                        "diagnostic). finetune: full FT (default). "
+                        "both: run both.")
+    p.add_argument("--frozen_reps", type=int, default=5,
+                   help="Number of LogReg reps for frozen probe (mean±std).")
     p.add_argument("--sample_rate", type=int, default=256)
     p.add_argument("--trial_duration_s", type=int, default=10)
     p.add_argument("--normalization", default="per_recording_robust",
@@ -269,22 +322,53 @@ def main():
         },
     }
 
-    print(f"\n{'='*72}\n  [JEPA] Fine-tune\n{'='*72}")
-    m_jepa = run_finetune(model, X_tr, y_tr, X_val, y_val, X_te, y_te,
-                          device, args.max_epochs, args.ft_batch_size,
-                          args.ft_patience)
-    _print_ft("  JEPA-FT ", m_jepa)
-    results["jepa_finetune"] = m_jepa
+    # ─── Frozen probe (fast feature-quality diagnostic) ───
+    if args.mode in ("frozen", "both"):
+        print(f"\n{'='*72}\n  [JEPA] Frozen probe (LogReg × {args.frozen_reps} reps)\n{'='*72}")
+        print("  Extracting JEPA features from train/test ...")
+        feat_tr = extract_features(model, X_tr, device)
+        feat_te = extract_features(model, X_te, device)
+        print(f"  Feature shape: train {feat_tr.shape}, test {feat_te.shape}")
+        m_jepa_frozen = run_frozen_probe(feat_tr, y_tr, feat_te, y_te,
+                                          n_reps=args.frozen_reps)
+        print(f"  JEPA frozen  BA={m_jepa_frozen['balanced_accuracy']['mean']:.4f}"
+              f"±{m_jepa_frozen['balanced_accuracy']['std']:.4f}  "
+              f"ROC-AUC={m_jepa_frozen['roc_auc']['mean']:.4f}"
+              f"±{m_jepa_frozen['roc_auc']['std']:.4f}")
+        results["jepa_frozen"] = m_jepa_frozen
 
-    if args.include_random_baseline:
-        print(f"\n{'='*72}\n  [Random] Fine-tune from scratch\n{'='*72}")
-        random_model = build_random_init(model_cls, n_channels, ckpt_args, device)
-        m_rand = run_finetune(random_model, X_tr, y_tr, X_val, y_val, X_te, y_te,
+        if args.include_random_baseline:
+            print(f"\n{'='*72}\n  [Random] Frozen probe (untrained encoder)\n{'='*72}")
+            random_model = build_random_init(model_cls, n_channels, ckpt_args, device)
+            r_feat_tr = extract_features(random_model, X_tr, device)
+            r_feat_te = extract_features(random_model, X_te, device)
+            m_rand_frozen = run_frozen_probe(r_feat_tr, y_tr, r_feat_te, y_te,
+                                              n_reps=args.frozen_reps)
+            print(f"  Rand frozen  BA={m_rand_frozen['balanced_accuracy']['mean']:.4f}"
+                  f"±{m_rand_frozen['balanced_accuracy']['std']:.4f}  "
+                  f"ROC-AUC={m_rand_frozen['roc_auc']['mean']:.4f}"
+                  f"±{m_rand_frozen['roc_auc']['std']:.4f}")
+            results["random_frozen"] = m_rand_frozen
+            del random_model; torch.cuda.empty_cache()
+
+    # ─── Fine-tune ───
+    if args.mode in ("finetune", "both"):
+        print(f"\n{'='*72}\n  [JEPA] Fine-tune\n{'='*72}")
+        m_jepa = run_finetune(model, X_tr, y_tr, X_val, y_val, X_te, y_te,
                               device, args.max_epochs, args.ft_batch_size,
                               args.ft_patience)
-        _print_ft("  Rand-FT ", m_rand)
-        results["random_finetune"] = m_rand
-        del random_model; torch.cuda.empty_cache()
+        _print_ft("  JEPA-FT ", m_jepa)
+        results["jepa_finetune"] = m_jepa
+
+        if args.include_random_baseline:
+            print(f"\n{'='*72}\n  [Random] Fine-tune from scratch\n{'='*72}")
+            random_model = build_random_init(model_cls, n_channels, ckpt_args, device)
+            m_rand = run_finetune(random_model, X_tr, y_tr, X_val, y_val, X_te, y_te,
+                                  device, args.max_epochs, args.ft_batch_size,
+                                  args.ft_patience)
+            _print_ft("  Rand-FT ", m_rand)
+            results["random_finetune"] = m_rand
+            del random_model; torch.cuda.empty_cache()
 
     print(f"\n{'='*72}")
     print(f"  SUMMARY (Mumtaz2016 Depression, seed {args.seed})")
@@ -294,17 +378,30 @@ def main():
     ref = results["reference"]
     print(f"  {'CBraMod (published)':<28} {ref['CBraMod_BA']:>8.4f}")
     print(f"  {'LaBraM (published)':<28} {ref['LaBraM_BA']:>8.4f}")
+    if "random_frozen" in results:
+        m = results["random_frozen"]
+        print(f"  {'Random frozen (Ours)':<28} "
+              f"{m['balanced_accuracy']['mean']:>8.4f} "
+              f"{m['roc_auc']['mean']:>10.4f} "
+              f"{m['pr_auc']['mean']:>10.4f}")
+    if "jepa_frozen" in results:
+        m = results["jepa_frozen"]
+        print(f"  {'JEPA frozen (Ours)':<28} "
+              f"{m['balanced_accuracy']['mean']:>8.4f} "
+              f"{m['roc_auc']['mean']:>10.4f} "
+              f"{m['pr_auc']['mean']:>10.4f}")
     if "random_finetune" in results:
         m = results["random_finetune"]
-        print(f"  {'Random init (Ours)':<28} "
+        print(f"  {'Random FT (Ours)':<28} "
               f"{m['balanced_accuracy']:>8.4f} "
               f"{m['roc_auc']:>10.4f} "
               f"{m['pr_auc']:>10.4f}")
-    m = results["jepa_finetune"]
-    print(f"  {'JEPA (Ours)':<28} "
-          f"{m['balanced_accuracy']:>8.4f} "
-          f"{m['roc_auc']:>10.4f} "
-          f"{m['pr_auc']:>10.4f}")
+    if "jepa_finetune" in results:
+        m = results["jepa_finetune"]
+        print(f"  {'JEPA FT (Ours)':<28} "
+              f"{m['balanced_accuracy']:>8.4f} "
+              f"{m['roc_auc']:>10.4f} "
+              f"{m['pr_auc']:>10.4f}")
 
     # Save
     out_path = args.output
