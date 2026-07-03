@@ -130,8 +130,9 @@ def _pick_mumtaz_channels(raw) -> list[str]:
     return [picked_by_std_name[std] for std in OUR_19CH_ORDER]
 
 
-def _list_subjects(data_dir: Path):
+def _list_subjects(data_dir):
     """Return list of (subject_id_str, group, edf_paths_for_EC_and_EO)."""
+    data_dir = Path(data_dir)
     subjects: dict[tuple[str, int], list[Path]] = {}
     for p in sorted(data_dir.glob("*.edf")):
         m = _FNAME_RE.match(p.name)
