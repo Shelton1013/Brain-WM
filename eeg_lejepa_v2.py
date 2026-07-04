@@ -464,14 +464,16 @@ class EEGLeJEPA_v2(nn.Module):
         loss_cf = F.mse_loss(band_pred, band_target.detach())
 
         # ─── SIGReg (anti-collapse) ────────────────────────────────
-        z_flat = enc_flat  # [B, N, D]
+        # sigreg_loss expects [M, D] (flatten B and N)
+        z_flat = enc_flat.reshape(-1, D)  # [B*N, D]
         reg, _ = distribution_reg(z_flat, self.reg_type)
 
         # ─── PAJR patient-adversarial (optional) ───────────────────
         loss_pajr = torch.tensor(0.0, device=eeg.device)
         if subject_ids is not None:
             # Discriminator predicts subject from mean-pooled features
-            feats_mean = z_flat.mean(dim=1)  # [B, D]
+            # enc_flat is [B, N, D]; pool across N to get [B, D]
+            feats_mean = enc_flat.mean(dim=1)  # [B, D]
             logits = self.par_disc(feats_mean)
             loss_pajr = F.cross_entropy(logits, subject_ids)
             # Note: for full PAJR you'd add gradient reversal; simplified here
