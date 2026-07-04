@@ -342,9 +342,22 @@ class EEGLeJEPA_v2(nn.Module):
         """eeg: [B, T, C] → tokens [B, C, T_p, D] with pos embed added."""
         tokens = self.patch_embed(eeg)          # [B, C, T_p, D]
         B, C, Tp, D = tokens.shape
+
+        # Safety: crop C to fit pos_channel and pad pos_time if needed
+        max_c = self.pos_channel.shape[1]
+        max_t = self.pos_time.shape[2]
+        if C > max_c:
+            tokens = tokens[:, :max_c, :, :]
+            C = max_c
+        if Tp > max_t:
+            tokens = tokens[:, :, :max_t, :]
+            Tp = max_t
+
         # Add separate spatial + temporal pos embeddings
-        tokens = tokens + self.pos_time[:, :, :Tp, :] \
-                        + self.pos_channel[:, :C, :, :]
+        # Use explicit expand + add to be robust to broadcasting quirks
+        pt = self.pos_time[:, :, :Tp, :]      # [1, 1, Tp, D]
+        pc = self.pos_channel[:, :C, :, :]    # [1, C, 1, D]
+        tokens = tokens + pt + pc
         return tokens
 
     def _encode_4d(self, tokens: torch.Tensor) -> torch.Tensor:
