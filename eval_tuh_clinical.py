@@ -134,11 +134,14 @@ def load_pretrained(checkpoint_path: str, device: torch.device):
             break
 
     model_type = ckpt_args.get("model", "jepa")
+    # Auto-detect v2 by state_dict signature (v2 has encoder_blocks, patch_embed)
+    keys_str = str(ckpt["model_state_dict"].keys())
+    if "encoder_blocks" in keys_str and "patch_embed" in keys_str:
+        model_type = "lejepa_v2"
     if model_type in TYPE_MAP:
         model_cls, model_type_name = TYPE_MAP[model_type]
     else:
         # Fallback by inspecting keys (rare; old checkpoints)
-        keys_str = str(ckpt["model_state_dict"].keys())
         if "reconstruction_head" in keys_str:
             model_cls, model_type_name = EEGMAE, "EEG-MAE"
         elif "band_head" in keys_str:

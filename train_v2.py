@@ -347,12 +347,14 @@ def main():
             pprint(f"[Epoch {epoch}/{args.epochs}] avg_loss={avg_loss:.4f}  {comp_str}")
 
             # Save checkpoint
+            args_to_save = vars(args).copy()
+            args_to_save["model"] = "lejepa_v2"   # for eval load_pretrained
             torch.save({
                 "epoch": epoch,
                 "model_state_dict": raw_model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "loss": avg_loss,
-                "args": vars(args),
+                "args": args_to_save,
             }, output_dir / f"checkpoint_ep{epoch}.pt")
 
             if avg_loss < best_loss:
@@ -361,7 +363,7 @@ def main():
                     "epoch": epoch,
                     "model_state_dict": raw_model.state_dict(),
                     "loss": avg_loss,
-                    "args": vars(args),
+                    "args": args_to_save,
                 }, output_dir / "best_model.pt")
                 pprint(f"  → new best_model.pt saved (loss {avg_loss:.4f})")
 
