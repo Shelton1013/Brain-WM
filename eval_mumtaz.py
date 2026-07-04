@@ -38,7 +38,11 @@ from sklearn.metrics import (
 from dataset_mumtaz import (
     MumtazDataset, make_subject_split, LABEL_NAMES, N_CLASSES,
 )
-from eval_tuh_clinical import load_pretrained, build_random_init
+from eval_tuh_clinical import (
+    load_pretrained, build_random_init,
+    _build_labram_optimizer, _build_cosine_warmup_scheduler,
+    _inject_drop_path,
+)
 
 
 def dataset_to_xy(ds):
@@ -102,8 +106,18 @@ def run_frozen_probe(feat_tr, y_tr, feat_te, y_te, n_reps: int = 5) -> dict:
 def run_finetune(base_model, X_tr_np, y_tr_np, X_val_np, y_val_np,
                  X_te_np, y_te_np, device, max_epochs: int = 50,
                  batch_size: int = 64,
-                 patience: int = 10) -> dict:
+                 patience: int = 10,
+                 ft_protocol: str = "onecycle",
+                 ft_base_lr: float = 5e-4,
+                 ft_weight_decay: float = 0.05,
+                 ft_layer_decay: float = 0.65,
+                 ft_warmup_epochs: int = 5,
+                 ft_drop_path: float = 0.0,
+                 ft_head_lr_mult: float = 1.0) -> dict:
     model = copy.deepcopy(base_model)
+    # Inject drop_path if requested
+    if ft_drop_path > 0:
+        _inject_drop_path(model, ft_drop_path)
     head = nn.Sequential(
         nn.BatchNorm1d(model.d_model),
         nn.Linear(model.d_model, N_CLASSES),
@@ -129,15 +143,34 @@ def run_finetune(base_model, X_tr_np, y_tr_np, X_val_np, y_val_np,
     class_weights = (class_weights / class_weights.sum() * N_CLASSES).to(device)
 
     steps_per_epoch = max(1, len(train_loader))
-    optimizer = torch.optim.AdamW([
-        {"params": model.parameters(), "lr": 1e-6},
-        {"params": head.parameters(),  "lr": 1e-6},
-    ], weight_decay=0.01)
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer, max_lr=[4e-4, 4e-3],
-        steps_per_epoch=steps_per_epoch,
-        epochs=max_epochs, pct_start=0.2,
-    )
+    if ft_protocol == "labram":
+        # Cosine + warmup + layer_decay (protective for pretrained)
+        optimizer = _build_labram_optimizer(
+            model, head, base_lr=ft_base_lr,
+            weight_decay=ft_weight_decay,
+            layer_decay=ft_layer_decay,
+            head_lr_mult=ft_head_lr_mult,
+        )
+        scheduler = _build_cosine_warmup_scheduler(
+            optimizer, steps_per_epoch=steps_per_epoch,
+            warmup_epochs=ft_warmup_epochs, max_epochs=max_epochs,
+        )
+        print(f"      [FT] LaBraM protocol: base_lr={ft_base_lr:.1e} "
+              f"layer_decay={ft_layer_decay} wd={ft_weight_decay} "
+              f"warmup={ft_warmup_epochs}ep cosine patience={patience} "
+              f"drop_path={ft_drop_path} head_mult={ft_head_lr_mult} "
+              f"batch={batch_size}", flush=True)
+    else:
+        # OneCycleLR (aggressive, favors random init)
+        optimizer = torch.optim.AdamW([
+            {"params": model.parameters(), "lr": 1e-6},
+            {"params": head.parameters(),  "lr": 1e-6},
+        ], weight_decay=0.01)
+        scheduler = torch.optim.lr_scheduler.OneCycleLR(
+            optimizer, max_lr=[4e-4, 4e-3],
+            steps_per_epoch=steps_per_epoch,
+            epochs=max_epochs, pct_start=0.2,
+        )
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
     best_val_ba = 0.0
@@ -238,6 +271,18 @@ def main():
     p.add_argument("--max_epochs", type=int, default=50)
     p.add_argument("--ft_batch_size", type=int, default=64)
     p.add_argument("--ft_patience", type=int, default=10)
+    p.add_argument("--ft_protocol", choices=["onecycle", "labram"],
+                   default="onecycle",
+                   help="onecycle (default, aggressive, favors random init) "
+                        "or labram (cosine+warmup+layer_decay, protective).")
+    p.add_argument("--ft_base_lr", type=float, default=5e-4)
+    p.add_argument("--ft_weight_decay", type=float, default=0.05)
+    p.add_argument("--ft_layer_decay", type=float, default=0.65,
+                   help="labram only. 0.65 LaBraM default; higher = less "
+                        "protective. 1.0 = no decay.")
+    p.add_argument("--ft_warmup_epochs", type=int, default=5)
+    p.add_argument("--ft_drop_path", type=float, default=0.0)
+    p.add_argument("--ft_head_lr_mult", type=float, default=1.0)
     p.add_argument("--n_reps", type=int, default=1)
     p.add_argument("--include_random_baseline", action="store_true")
     p.add_argument("--device", default="auto")
@@ -353,10 +398,19 @@ def main():
 
     # ─── Fine-tune ───
     if args.mode in ("finetune", "both"):
-        print(f"\n{'='*72}\n  [JEPA] Fine-tune\n{'='*72}")
+        ft_kwargs = dict(
+            ft_protocol=args.ft_protocol,
+            ft_base_lr=args.ft_base_lr,
+            ft_weight_decay=args.ft_weight_decay,
+            ft_layer_decay=args.ft_layer_decay,
+            ft_warmup_epochs=args.ft_warmup_epochs,
+            ft_drop_path=args.ft_drop_path,
+            ft_head_lr_mult=args.ft_head_lr_mult,
+        )
+        print(f"\n{'='*72}\n  [JEPA] Fine-tune (protocol={args.ft_protocol})\n{'='*72}")
         m_jepa = run_finetune(model, X_tr, y_tr, X_val, y_val, X_te, y_te,
                               device, args.max_epochs, args.ft_batch_size,
-                              args.ft_patience)
+                              args.ft_patience, **ft_kwargs)
         _print_ft("  JEPA-FT ", m_jepa)
         results["jepa_finetune"] = m_jepa
 
@@ -365,7 +419,7 @@ def main():
             random_model = build_random_init(model_cls, n_channels, ckpt_args, device)
             m_rand = run_finetune(random_model, X_tr, y_tr, X_val, y_val, X_te, y_te,
                                   device, args.max_epochs, args.ft_batch_size,
-                                  args.ft_patience)
+                                  args.ft_patience, **ft_kwargs)
             _print_ft("  Rand-FT ", m_rand)
             results["random_finetune"] = m_rand
             del random_model; torch.cuda.empty_cache()
