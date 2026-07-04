@@ -65,6 +65,27 @@ from regularizers import distribution_reg
 
 
 # ============================================================
+# 0. Gradient reversal (for PAJR adversarial)
+# ============================================================
+
+class _GradReverse(torch.autograd.Function):
+    """Gradient Reversal Layer for adversarial training.
+
+    Forward: identity. Backward: reverse gradient (multiply by -alpha).
+    Used so the discriminator trains normally (minimize its own loss)
+    while the encoder receives inverted gradients (fool discriminator).
+    """
+    @staticmethod
+    def forward(ctx, x, alpha=1.0):
+        ctx.alpha = alpha
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.neg() * ctx.alpha, None
+
+
+# ============================================================
 # 1. Building blocks
 # ============================================================
 
@@ -468,22 +489,26 @@ class EEGLeJEPA_v2(nn.Module):
         z_flat = enc_flat.reshape(-1, D)  # [B*N, D]
         reg, _ = distribution_reg(z_flat, self.reg_type)
 
-        # ─── PAJR patient-adversarial (optional) ───────────────────
+        # ─── PAJR patient-adversarial with gradient reversal ───────
         loss_pajr = torch.tensor(0.0, device=eeg.device)
-        if subject_ids is not None:
+        if subject_ids is not None and self.pajr_weight > 0:
             # Discriminator predicts subject from mean-pooled features
             # enc_flat is [B, N, D]; pool across N to get [B, D]
             feats_mean = enc_flat.mean(dim=1)  # [B, D]
-            logits = self.par_disc(feats_mean)
+            # Gradient reversal: encoder sees NEGATIVE gradient (adversarial)
+            # while discriminator itself trains normally.
+            feats_reversed = _GradReverse.apply(feats_mean, 1.0)
+            logits = self.par_disc(feats_reversed)
             loss_pajr = F.cross_entropy(logits, subject_ids)
-            # Note: for full PAJR you'd add gradient reversal; simplified here
 
         # ─── Total ─────────────────────────────────────────────────
+        # Note: PAJR uses gradient reversal internally (encoder feature path
+        # gets negated gradient), so add with POSITIVE sign here.
         total = (self.jepa_weight * loss_jepa
                  + self.mae_weight * loss_mae
                  + self.cf_weight * loss_cf
                  + self.sigreg_lambda * reg
-                 - self.pajr_weight * loss_pajr)   # note: MINUS for adversarial
+                 + self.pajr_weight * loss_pajr)
 
         return {
             "total": total,
