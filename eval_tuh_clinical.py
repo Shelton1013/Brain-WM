@@ -476,12 +476,21 @@ def _build_labram_optimizer(model, head, base_lr: float, weight_decay: float,
     leaves the classifier undertrained.
     """
     param_groups = []
-    n_layers = len(model.encoder)   # 6 for our default
+    # v2 uses `encoder_blocks` + `patch_embed`; v1 uses `encoder` + `tokenizer`
+    is_v2 = hasattr(model, "encoder_blocks")
+    encoder_module = model.encoder_blocks if is_v2 else model.encoder
+    n_layers = len(encoder_module)
 
-    # Deepest: tokenizer + pos_embed
-    deepest = list(model.tokenizer.parameters())
-    if hasattr(model, "pos_embed"):
-        deepest.append(model.pos_embed)
+    # Deepest: tokenizer/patch_embed + pos embeds
+    deepest = []
+    if is_v2:
+        deepest.extend(model.patch_embed.parameters())
+        deepest.append(model.pos_time)
+        deepest.append(model.pos_channel)
+    else:
+        deepest.extend(model.tokenizer.parameters())
+        if hasattr(model, "pos_embed"):
+            deepest.append(model.pos_embed)
     param_groups.append({
         "params": deepest,
         "lr": base_lr * (layer_decay ** (n_layers + 1)),
@@ -490,7 +499,7 @@ def _build_labram_optimizer(model, head, base_lr: float, weight_decay: float,
     })
 
     # Encoder blocks: block 0 (near input) = deepest decay
-    for i, blk in enumerate(model.encoder):
+    for i, blk in enumerate(encoder_module):
         depth_from_output = n_layers - i    # block 0 = n_layers, block n-1 = 1
         param_groups.append({
             "params": list(blk.parameters()),
@@ -501,10 +510,10 @@ def _build_labram_optimizer(model, head, base_lr: float, weight_decay: float,
 
     # Shallow (near output): encoder_norm + pred_head + any CF apparatus
     shallow = list(model.encoder_norm.parameters())
-    if hasattr(model, "pred_head"):
-        shallow.extend(model.pred_head.parameters())
-    for attr in ("band_head", "cf_predictor", "band_embed_view",
-                 "cf_band_mask_tokens"):
+    for attr in ("pred_head", "jepa_predictor", "band_head", "cf_predictor",
+                 "band_embed_view", "cf_band_mask_tokens",
+                 # v2-specific: decoder is auxiliary MAE branch (frozen at FT)
+                 ):
         if hasattr(model, attr):
             v = getattr(model, attr)
             if isinstance(v, nn.Module):
