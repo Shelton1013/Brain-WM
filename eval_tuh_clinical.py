@@ -96,6 +96,7 @@ from eeg_lejepa_crossfreq import EEGLeJEPACrossFreq
 from eeg_lejepa_multistream import EEGLeJEPAMultiStream
 from eeg_lejepa_outputcf import EEGLeJEPAOutputCF
 from eeg_lejepa_outputcf_pajr import EEGLeJEPAOutputCFPAJR
+from eeg_lejepa_v2 import EEGLeJEPA_v2
 
 from dataset_tuh_clinical import TUABDataset, TUEVDataset, TUEV_LABEL_NAMES
 
@@ -111,6 +112,7 @@ TYPE_MAP = {
     "lejepa_multistream": (EEGLeJEPAMultiStream,  "EEG-LeJEPA+MultiStream"),
     "lejepa_outputcf":    (EEGLeJEPAOutputCF,     "EEG-LeJEPA+OutputCF"),
     "lejepa_outputcf_pajr": (EEGLeJEPAOutputCFPAJR, "EEG-LeJEPA+OutputCF+PAJR"),
+    "lejepa_v2":          (EEGLeJEPA_v2,          "EEG-LeJEPA v2"),
     "lejepa_spectral":    (EEGLeJEPASpectral,     "EEG-LeJEPA+Spectral"),
     "lejepa_region":      (EEGLeJEPARegion,       "EEG-LeJEPA+Region"),
     "lejepa":             (EEGLeJEPA,             "EEG-LeJEPA"),
@@ -145,6 +147,36 @@ def load_pretrained(checkpoint_path: str, device: torch.device):
             model_cls, model_type_name = EEGLeJEPACrossFreq, "EEG-LeJEPA+CrossFreq"
         else:
             model_cls, model_type_name = EEGLeJEPA, "EEG-LeJEPA"
+
+    # v2 has a totally different constructor — handle separately
+    if model_type == "lejepa_v2":
+        model_kwargs = dict(
+            n_channels=n_channels,
+            patch_len=ckpt_args.get("patch_len", 200),
+            d_model=ckpt_args.get("d_model", 512),
+            d_decoder=ckpt_args.get("d_decoder", 256),
+            encoder_layers=ckpt_args.get("encoder_layers", 12),
+            decoder_layers=ckpt_args.get("decoder_layers", 2),
+            mask_ratio=ckpt_args.get("mask_ratio", 0.5),
+            jepa_weight=ckpt_args.get("jepa_weight", 1.0),
+            mae_weight=ckpt_args.get("mae_weight", 0.5),
+            cf_weight=ckpt_args.get("cf_weight", 0.3),
+            sigreg_lambda=ckpt_args.get("sigreg_lambda", 0.05),
+            pajr_weight=ckpt_args.get("pajr_weight", 0.0),
+            reg_type=ckpt_args.get("reg_type", "sigreg"),
+            d_band_view=ckpt_args.get("cf_d_band", 64),
+            cf_band_conditioned=bool(ckpt_args.get("cf_band_conditioned", 1)),
+            max_time_patches=ckpt_args.get("max_time_patches", 64),
+            max_channels=ckpt_args.get("max_channels", 32),
+            n_subjects=ckpt_args.get("n_subjects_actual",
+                                     ckpt_args.get("n_subjects", 2000)),
+        )
+        model = model_cls(**model_kwargs).to(device)
+        model.load_state_dict(ckpt["model_state_dict"])
+        model.eval()
+        print(f"Model: {model_type_name}, {n_channels}ch, "
+              f"d={ckpt_args.get('d_model', 512)}")
+        return model, model_cls, model_type_name, n_channels, ckpt_args
 
     model_kwargs = dict(
         n_channels=n_channels,
@@ -196,6 +228,33 @@ def load_pretrained(checkpoint_path: str, device: torch.device):
 
 def build_random_init(model_cls, n_channels, ckpt_args, device):
     """Build an UNTRAINED model with the same config for the random baseline."""
+    model_type = ckpt_args.get("model", "jepa")
+
+    # v2 uses different constructor
+    if model_type == "lejepa_v2":
+        model_kwargs = dict(
+            n_channels=n_channels,
+            patch_len=ckpt_args.get("patch_len", 200),
+            d_model=ckpt_args.get("d_model", 512),
+            d_decoder=ckpt_args.get("d_decoder", 256),
+            encoder_layers=ckpt_args.get("encoder_layers", 12),
+            decoder_layers=ckpt_args.get("decoder_layers", 2),
+            mask_ratio=ckpt_args.get("mask_ratio", 0.5),
+            jepa_weight=ckpt_args.get("jepa_weight", 1.0),
+            mae_weight=ckpt_args.get("mae_weight", 0.5),
+            cf_weight=ckpt_args.get("cf_weight", 0.3),
+            sigreg_lambda=ckpt_args.get("sigreg_lambda", 0.05),
+            pajr_weight=ckpt_args.get("pajr_weight", 0.0),
+            reg_type=ckpt_args.get("reg_type", "sigreg"),
+            d_band_view=ckpt_args.get("cf_d_band", 64),
+            cf_band_conditioned=bool(ckpt_args.get("cf_band_conditioned", 1)),
+            max_time_patches=ckpt_args.get("max_time_patches", 64),
+            max_channels=ckpt_args.get("max_channels", 32),
+            n_subjects=ckpt_args.get("n_subjects_actual",
+                                     ckpt_args.get("n_subjects", 2000)),
+        )
+        return model_cls(**model_kwargs).to(device)
+
     model_kwargs = dict(
         n_channels=n_channels,
         d_model=ckpt_args.get("d_model", 256),
@@ -206,7 +265,6 @@ def build_random_init(model_cls, n_channels, ckpt_args, device):
     if "max_seq_len" in ckpt_args:
         model_kwargs["max_seq_len"] = ckpt_args["max_seq_len"]
     # CF args only valid for CF model types; base lejepa/jepa/mae reject them.
-    model_type = ckpt_args.get("model", "jepa")
     if model_type in ("lejepa_crossfreq", "lejepa_full",
                       "lejepa_multistream", "lejepa_outputcf",
                       "lejepa_outputcf_pajr"):

@@ -329,9 +329,16 @@ class EEGLeJEPA_v2(nn.Module):
 
     # ─────────────────────────────────────────────────────────────
     # Basic tokenize + encode
+    #
+    # v2 has a DUAL interface:
+    #   - Internal (training): _tokenize_4d / _encode_4d preserve
+    #     [B, C, T_p, D] structure for criss-cross attention.
+    #   - Downstream compat: _tokenize / _encode flatten to [B, N, D]
+    #     so v1's eval code (model._encode(model._tokenize(eeg)).mean(1))
+    #     works unchanged.
     # ─────────────────────────────────────────────────────────────
 
-    def _tokenize(self, eeg: torch.Tensor) -> torch.Tensor:
+    def _tokenize_4d(self, eeg: torch.Tensor) -> torch.Tensor:
         """eeg: [B, T, C] → tokens [B, C, T_p, D] with pos embed added."""
         tokens = self.patch_embed(eeg)          # [B, C, T_p, D]
         B, C, Tp, D = tokens.shape
@@ -340,42 +347,40 @@ class EEGLeJEPA_v2(nn.Module):
                         + self.pos_channel[:, :C, :, :]
         return tokens
 
-    def _encode(self, tokens: torch.Tensor) -> torch.Tensor:
+    def _encode_4d(self, tokens: torch.Tensor) -> torch.Tensor:
         """tokens: [B, C, T_p, D] → encoded [B, C, T_p, D]"""
         x = tokens
         for blk in self.encoder_blocks:
             x = blk(x)
         return self.encoder_norm(x)
 
-    # For downstream compatibility with eval_tuh_clinical / eval_mumtaz:
-    # feats = model._encode(model._tokenize(eeg)).mean(1)
-    # But our _encode returns [B, C, T_p, D] not [B, N, D].
-    # Provide a "flatten" variant used at FT time.
+    # ─── v1-compatible downstream interface ─────────────────────
 
-    def _tokenize_flat(self, eeg):
-        """[B, T, C] → [B, C*T_p, D] for downstream head compatibility."""
-        tokens = self._tokenize(eeg)  # [B, C, T_p, D]
-        B, C, Tp, D = tokens.shape
-        return tokens.reshape(B, C * Tp, D)
+    def _tokenize(self, eeg: torch.Tensor) -> torch.Tensor:
+        """Compat with v1 eval: [B, T, C] → [B, N=C*T_p, D].
 
-    def _encode_flat(self, tokens_flat):
-        """[B, C*T_p, D] → [B, C*T_p, D]. For eval compatibility.
-        Note: this bypasses criss-cross structure; use only if you must.
-        We instead re-shape internally.
+        Cache the encoded 4D tensor on the instance so _encode can pick it
+        up without re-computing (avoids running criss-cross on flat tokens).
         """
-        # Cannot infer C from flat shape; caller must use _encode on 4D.
-        # For safety, treat flat tokens as [B, N, D] and apply MLP-style
-        # attention block. But criss-cross needs 4D.
-        # We assume caller reshapes appropriately or uses _encode_features().
+        eeg_4d = self._tokenize_4d(eeg)          # [B, C, T_p, D]
+        enc_4d = self._encode_4d(eeg_4d)         # [B, C, T_p, D]
+        # Cache for _encode fallback
+        self._cached_enc_4d = enc_4d
+        B, C, Tp, D = enc_4d.shape
+        return enc_4d.reshape(B, C * Tp, D)      # [B, C*T_p, D]
+
+    def _encode(self, tokens_flat: torch.Tensor) -> torch.Tensor:
+        """Compat with v1 eval: identity (encoding already done in _tokenize).
+
+        v1 pattern is `_encode(_tokenize(x))`; we do all work in _tokenize
+        and return an identity here so total behavior matches.
+        """
         return tokens_flat
 
     def _encode_features(self, eeg: torch.Tensor) -> torch.Tensor:
-        """Full downstream helper: [B, T, C] → [B, N_tokens, D].
-        Used at FT / frozen-probe time."""
-        tokens = self._tokenize(eeg)          # [B, C, T_p, D]
-        enc = self._encode(tokens)            # [B, C, T_p, D]
-        B, C, Tp, D = enc.shape
-        return enc.reshape(B, C * Tp, D)
+        """Direct downstream: [B, T, C] → [B, C*T_p, D].
+        Equivalent to _tokenize (which does everything)."""
+        return self._tokenize(eeg)
 
     # ─────────────────────────────────────────────────────────────
     # Masking (channel × time joint random mask)
@@ -410,8 +415,8 @@ class EEGLeJEPA_v2(nn.Module):
         """
         B, T, C = eeg.shape
 
-        # 1. Tokenize
-        tokens_all = self._tokenize(eeg)         # [B, C, T_p, D]
+        # 1. Tokenize (use 4D internal path for criss-cross)
+        tokens_all = self._tokenize_4d(eeg)      # [B, C, T_p, D]
         Bt, Ct, Tp, D = tokens_all.shape
         assert C == Ct and B == Bt
 
@@ -428,7 +433,7 @@ class EEGLeJEPA_v2(nn.Module):
         # 2) JEPA target = encoder output at masked positions (stop-grad).
         # 3) JEPA prediction = encoder output at same positions (with grad).
         # This mimics LeJEPA (no EMA) — same encoder path.
-        enc_all = self._encode(tokens_all)       # [B, C, T_p, D]
+        enc_all = self._encode_4d(tokens_all)    # [B, C, T_p, D]
 
         # ─── JEPA loss (main structure) ────────────────────────────
         # target: encoded (detached at masked positions),
