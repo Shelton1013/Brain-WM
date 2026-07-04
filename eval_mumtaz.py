@@ -153,7 +153,7 @@ def run_finetune(base_model, X_tr_np, y_tr_np, X_val_np, y_val_np,
         )
         scheduler = _build_cosine_warmup_scheduler(
             optimizer, steps_per_epoch=steps_per_epoch,
-            warmup_epochs=ft_warmup_epochs, max_epochs=max_epochs,
+            warmup_epochs=ft_warmup_epochs, total_epochs=max_epochs,
         )
         print(f"      [FT] LaBraM protocol: base_lr={ft_base_lr:.1e} "
               f"layer_decay={ft_layer_decay} wd={ft_weight_decay} "
