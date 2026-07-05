@@ -84,6 +84,10 @@ class EEGLeJEPAOutputCF(nn.Module):
         # 60s+ chunks. Old checkpoints (256) still load if you do not
         # increase trial_duration_s.
         max_seq_len: int = 256,
+        # ─── v3.0: high-pass reconstruction (0.0 = off, backward-compat) ──
+        recon_weight: float = 0.0,
+        recon_highpass_hz: float = 20.0,
+        sample_rate: int = 256,
     ):
         super().__init__()
         self.state_samples = state_samples
@@ -98,6 +102,10 @@ class EEGLeJEPAOutputCF(nn.Module):
         self.cf_band_conditioned = cf_band_conditioned
         self.d_band_view = cf_d_band if cf_d_band is not None else 64
         self.max_seq_len = max_seq_len
+        self.recon_weight = recon_weight
+        self.recon_highpass_hz = recon_highpass_hz
+        self.sample_rate = sample_rate
+        self.n_channels = n_channels
 
         # ─── Main path: identical to base LeJEPA ──────────────────────
         self.tokenizer = DynamicChannelMixer(
@@ -134,6 +142,18 @@ class EEGLeJEPAOutputCF(nn.Module):
             torch.randn(n_bands, self.d_band_view) * 0.02,
         )
 
+        # ─── v3.0: high-pass reconstruction head (built only if enabled) ──
+        # Decodes each encoder-output token back to the >recon_highpass_hz
+        # component of its raw patch, forcing the encoder OUTPUT (what the
+        # frozen probe reads) to retain transient/high-freq detail that pure
+        # latent JEPA smooths away.
+        if recon_weight > 0:
+            self.recon_head = nn.Sequential(
+                nn.Linear(d_model, d_model),
+                nn.GELU(),
+                nn.Linear(d_model, state_samples * n_channels),
+            )
+
     def _tokenize(self, eeg):
         tokens = self.tokenizer(eeg)
         N = tokens.shape[1]
@@ -168,6 +188,24 @@ class EEGLeJEPAOutputCF(nn.Module):
             all_mask.append(mask.nonzero(as_tuple=True)[0])
         return torch.stack(all_vis), torch.stack(all_mask), n_vis, n_mask
 
+    def _highpass_patch_target(self, eeg):
+        """[B,T,C] raw -> [B,N,state_samples*C] high-pass (>hz) target.
+
+        FFT high-pass along time, then patchify to align with encoder tokens
+        (token i covers samples [i*ss:(i+1)*ss] across all channels).
+        Detached: this is a reconstruction target, not a gradient path.
+        """
+        B, T, C = eeg.shape
+        N = T // self.state_samples
+        T2 = N * self.state_samples
+        x = eeg[:, :T2, :]
+        xf = torch.fft.rfft(x, dim=1)
+        freqs = torch.fft.rfftfreq(T2, d=1.0 / self.sample_rate).to(eeg.device)
+        hp_mask = (freqs >= self.recon_highpass_hz).float().view(1, -1, 1)
+        xhp = torch.fft.irfft(xf * hp_mask, n=T2, dim=1)          # [B,T2,C]
+        xhp = xhp.reshape(B, N, self.state_samples * C)
+        return xhp.detach()
+
     def forward(self, eeg, return_predictions=True):
         B, T, C = eeg.shape
         N = T // self.state_samples
@@ -196,11 +234,19 @@ class EEGLeJEPAOutputCF(nn.Module):
         # ── CF loss: project encoded → band views → mask + predict ────
         freq_loss = self._compute_cf_loss_on_output(all_encoded)
 
+        # ── v3.0: high-pass reconstruction on encoder output ──────────
+        recon_pred, recon_target = None, None
+        if self.recon_weight > 0:
+            recon_pred = self.recon_head(all_encoded)            # [B,N,ss*C]
+            recon_target = self._highpass_patch_target(eeg)      # [B,N,ss*C]
+
         return {
             "predictions": predictions,
             "targets": mask_encoded,
             "all_encoded": all_encoded,
             "freq_loss": freq_loss,
+            "recon_pred": recon_pred,
+            "recon_target": recon_target,
             "n_vis": n_vis, "n_mask": n_mask,
             "brain_states": all_encoded,
             "subj_logits": None,
@@ -267,9 +313,16 @@ class EEGLeJEPAOutputCF(nn.Module):
         except Exception:
             query_loss = torch.tensor(0.0, device=pred.device)
 
+        # v3.0: high-pass reconstruction loss (0 when recon_weight == 0)
+        recon_loss = torch.tensor(0.0, device=pred.device)
+        rp, rt = outputs.get("recon_pred"), outputs.get("recon_target")
+        if rp is not None and rt is not None:
+            recon_loss = F.mse_loss(rp, rt)
+
         total = ((1 - self.sigreg_lambda) * pred_loss
                  + self.sigreg_lambda * reg
                  + self.freq_mask_weight * freq_loss
+                 + self.recon_weight * recon_loss
                  + self.query_spec_weight * query_loss)
 
         return {
@@ -277,6 +330,7 @@ class EEGLeJEPAOutputCF(nn.Module):
             "pred": pred_loss,
             **reg_info,
             "freq": freq_loss,
+            "recon": recon_loss,
             "qspec": query_loss,
             "adv": torch.tensor(0.0, device=pred.device),
         }

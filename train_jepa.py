@@ -128,6 +128,7 @@ def train_epoch(model, raw_model, loader, optimizer, scheduler, device,
                 f"var={losses.get('var', 0):.4f} "
                 f"cov={losses.get('cov', 0):.4f} "
                 f"freq={losses.get('freq', 0):.6f} "
+                f"recon={losses.get('recon', 0):.6f} "
                 f"qs={losses.get('qspec', 0):.4f} "
                 f"par={losses.get('par', 0):.4f} "
                 f"pacc={losses.get('par_acc', 0):.3f} "
@@ -294,6 +295,15 @@ def main():
     parser.add_argument("--trim_start_end_sec", type=int, default=0)
     parser.add_argument("--notch_freq", type=float, default=0.0)
     parser.add_argument("--reject_abs_uv", type=float, default=0.0)
+    # v3.0: high-pass reconstruction (outputcf / pajr only). 0.0 = off =
+    # backward-compatible with all v1 checkpoints.
+    parser.add_argument("--recon_weight", type=float, default=0.0,
+                        help="Weight of the high-pass reconstruction loss. "
+                             "0.0 disables it (identical to v1). Try 0.5-2.0.")
+    parser.add_argument("--recon_highpass_hz", type=float, default=20.0,
+                        help="High-pass cutoff (Hz) for the reconstruction "
+                             "target; forces the encoder to keep transient / "
+                             "high-freq detail (spikes) rather than smoothing it.")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
@@ -468,6 +478,13 @@ def main():
             cf_band_conditioned=bool(args.cf_band_conditioned),
             cf_preserve_spatial=bool(args.cf_preserve_spatial),
             cf_d_band=args.cf_d_band,
+        )
+    # v3.0: high-pass reconstruction kwargs (outputcf / pajr only)
+    if args.model in ("lejepa_outputcf", "lejepa_outputcf_pajr"):
+        model_kwargs.update(
+            recon_weight=args.recon_weight,
+            recon_highpass_hz=args.recon_highpass_hz,
+            sample_rate=256,
         )
     # PAJR-specific kwargs (patient discriminator needs to know n_patients,
     # which we get from dataset.n_subjects, set BEFORE this block runs).
