@@ -185,6 +185,7 @@ def load_pretrained(checkpoint_path: str, device: torch.device):
         n_channels=n_channels,
         d_model=ckpt_args.get("d_model", 256),
         encoder_layers=ckpt_args.get("encoder_layers", 6),
+        state_samples=ckpt_args.get("state_samples", 26),
     )
     if "n_queries" in ckpt_args:
         model_kwargs["n_queries"] = ckpt_args["n_queries"]
@@ -267,6 +268,7 @@ def build_random_init(model_cls, n_channels, ckpt_args, device):
         n_channels=n_channels,
         d_model=ckpt_args.get("d_model", 256),
         encoder_layers=ckpt_args.get("encoder_layers", 6),
+        state_samples=ckpt_args.get("state_samples", 26),
     )
     if "n_queries" in ckpt_args:
         model_kwargs["n_queries"] = ckpt_args["n_queries"]

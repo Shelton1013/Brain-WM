@@ -233,6 +233,11 @@ def main():
                              "Set to empty string to disable caching.")
     parser.add_argument("--d_model", type=int, default=256)
     parser.add_argument("--encoder_layers", type=int, default=6)
+    parser.add_argument("--state_samples", type=int, default=26,
+                        help="Temporal patch length in samples (26 = ~102ms "
+                             "@256Hz). Smaller = finer resolution for transient "
+                             "tasks (TUEV spikes <100ms). N = trial_s*sr/"
+                             "state_samples must be <= max_seq_len.")
     parser.add_argument("--n_queries", type=int, default=16,
                         help="Number of channel mixer queries (1=simple, 16=DCM)")
     parser.add_argument("--mask_ratio", type=float, default=0.60)
@@ -452,7 +457,7 @@ def main():
 
     model_kwargs = dict(
         n_channels=n_channels,
-        state_samples=26,
+        state_samples=args.state_samples,
         d_model=args.d_model,
         n_queries=args.n_queries,
         encoder_layers=args.encoder_layers,
