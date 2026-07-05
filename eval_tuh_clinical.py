@@ -222,7 +222,12 @@ def load_pretrained(checkpoint_path: str, device: torch.device):
             model_kwargs["par_disc_hidden"] = ckpt_args["par_disc_hidden"]
 
     model = model_cls(**model_kwargs).to(device)
-    model.load_state_dict(ckpt["model_state_dict"])
+    # v3.0 checkpoints carry a training-only recon_head; the eval model is
+    # built with recon_weight=0 (no such head), so drop those keys. Everything
+    # else still loads strictly.
+    state = {k: v for k, v in ckpt["model_state_dict"].items()
+             if not k.startswith("recon_head")}
+    model.load_state_dict(state)
     model.eval()
     print(f"Model: {model_type_name}, {n_channels}ch, "
           f"d={ckpt_args.get('d_model', 256)}")
