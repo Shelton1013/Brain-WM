@@ -582,7 +582,9 @@ def _inject_drop_path(model, drop_prob: float):
 
         block.forward = new_forward
 
-    for blk in model.encoder:
+    # v2 uses encoder_blocks; v1 uses encoder
+    encoder_module = model.encoder_blocks if hasattr(model, "encoder_blocks") else model.encoder
+    for blk in encoder_module:
         _wrap(blk, drop_prob)
 
 
