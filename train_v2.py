@@ -158,7 +158,8 @@ def main():
                         default="/home/share/data_makchen/peng/datasets/physionet")
     parser.add_argument("--output_dir", type=str, required=True)
     parser.add_argument("--n_subjects", type=int, default=109,
-                        help="physionet MI subjects (for PAJR discriminator size)")
+                        help="physionet MI subjects (for PAJR discriminator "
+                             "size). 0 = skip physionet entirely (TUEG-only).")
     parser.add_argument("--multi_dataset", action="store_true")
     parser.add_argument("--moabb_datasets", type=str, nargs="*",
                         default=["Cho2017", "Lee2019_MI"])
@@ -232,7 +233,9 @@ def main():
 
     # ─── Dataset ──────────────────────────────────────────────────
     pprint("Building dataset (matches clean_v1 config for cache-hit)...")
-    sources = [{"type": "physionet", "n_subjects": args.n_subjects}]
+    sources = []
+    if args.n_subjects > 0:
+        sources.append({"type": "physionet", "n_subjects": args.n_subjects})
     for name in (args.moabb_datasets or []):
         sources.append({"type": "moabb", "name": name})
 
