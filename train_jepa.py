@@ -321,7 +321,9 @@ def main():
     # Dataset
     pprint("Loading dataset...")
     if args.multi_dataset:
-        sources = [{"type": "physionet", "n_subjects": args.n_subjects}]
+        sources = []
+        if args.n_subjects > 0:
+            sources.append({"type": "physionet", "n_subjects": args.n_subjects})
 
         moabb_names = args.moabb_datasets or []
         if moabb_names == ["all"]:
