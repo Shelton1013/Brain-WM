@@ -236,8 +236,9 @@ def main():
     sources = []
     if args.n_subjects > 0:
         sources.append({"type": "physionet", "n_subjects": args.n_subjects})
-    for name in (args.moabb_datasets or []):
-        sources.append({"type": "moabb", "name": name})
+    if args.multi_dataset:
+        for name in (args.moabb_datasets or []):
+            sources.append({"type": "moabb", "name": name})
 
     # TUEG exclude set (must match prebuild_tueg_cache for cache-hit)
     tueg_exclude_ids = set()
