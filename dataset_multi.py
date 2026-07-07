@@ -654,16 +654,26 @@ class EDFDirectoryDataset(Dataset):
                         # matrices for some TUEG patients (overflow in
                         # fractional_matrix_power). Drop bad trials here
                         # rather than re-running prebuild.
-                        finite_mask = np.isfinite(trials_arr).all(axis=(1, 2))
-                        good_idx = np.nonzero(finite_mask)[0]
-                        n_dropped_bad += len(trials_arr) - len(good_idx)
-                        # Append each trial as separate array (matches non-chunked
-                        # cache schema where trials is list[np.ndarray]).
-                        # With mmap, these are zero-copy views into the .npy file.
-                        for i in good_idx:
-                            self.trials.append(trials_arr[i])
-                            self.subject_ids.append(int(sids[i]))
-                        n_loaded += len(good_idx)
+                        # Block-wise finite check to bound peak RAM: with mmap
+                        # trials_arr, np.isfinite over the WHOLE chunk would
+                        # materialize a ~20 GB bool array per DDP rank (×8 = OOM).
+                        # Materialize only a small block at a time for the check;
+                        # the stored trials stay zero-copy mmap views.
+                        n_rows = len(trials_arr)
+                        _BLK = 4096
+                        n_good_chunk = 0
+                        for b0 in range(0, n_rows, _BLK):
+                            b1 = min(b0 + _BLK, n_rows)
+                            block = np.asarray(trials_arr[b0:b1])  # RAM: BLK×T×C
+                            fm = np.isfinite(block).all(axis=(1, 2))
+                            for j in np.nonzero(fm)[0]:
+                                gi = b0 + int(j)
+                                # zero-copy mmap view (block itself is freed next iter)
+                                self.trials.append(trials_arr[gi])
+                                self.subject_ids.append(int(sids[gi]))
+                            n_good_chunk += int(fm.sum())
+                        n_dropped_bad += n_rows - n_good_chunk
+                        n_loaded += n_good_chunk
                     self.electrode_names = cached["electrode_names"]
                     self.n_subjects = cached["n_subjects"]
                     if n_dropped_bad:
