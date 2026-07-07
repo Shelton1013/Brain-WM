@@ -182,6 +182,11 @@ def main():
                              "lejepa_outputcf (Plan B: CF on encoder output)/"
                              "lejepa_outputcf_pajr (Plan B + patient-adversarial reg)")
     parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--warmup_epochs", type=float, default=5,
+                        help="LR warmup length in epochs (was hardcoded 5). "
+                             "Must be < epochs or the whole run is warmup and "
+                             "the LR never cosine-decays (degenerate for short "
+                             "runs, e.g. epochs=5).")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--n_subjects", type=int, default=109)
@@ -523,8 +528,15 @@ def main():
     optimizer = torch.optim.AdamW(raw_model.parameters(), lr=scaled_lr,
                                   weight_decay=0.05, betas=(0.9, 0.95))
     total_steps = len(train_loader) * args.epochs
-    warmup_steps = len(train_loader) * 5
+    warmup_steps = int(len(train_loader) * args.warmup_epochs)
+    if warmup_steps >= total_steps:
+        pprint(f"  WARN: warmup_epochs={args.warmup_epochs} >= epochs="
+               f"{args.epochs}: entire run would be warmup, LR never decays. "
+               f"Clamping warmup to 20% of the run.")
+        warmup_steps = int(total_steps * 0.2)
     scheduler = cosine_schedule(optimizer, warmup_steps, total_steps)
+    pprint(f"  LR schedule: warmup {warmup_steps} steps "
+           f"({args.warmup_epochs} ep) → cosine over {total_steps} steps")
 
     # Output
     output_dir = Path(args.output_dir)
