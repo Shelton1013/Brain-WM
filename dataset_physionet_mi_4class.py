@@ -41,6 +41,11 @@ try:
 except ImportError:
     MNE_AVAILABLE = False
 
+# Canonical 10-20 channel picker (name-based, alias-aware) shared with the
+# pretrain pipeline. Ensures MI trials use the SAME 19 channels in the SAME
+# spatial order the model was pretrained on.
+from dataset_multi import pick_common_channels
+
 
 # Run → which two task labels (T1, T2) it provides
 # T0 (rest) is always discarded for 4-class MI classification.
@@ -122,6 +127,9 @@ class PhysioNetMI4ClassDataset(Dataset):
                 "sample_rate": sample_rate,
                 "trial_duration_s": trial_duration_s,
                 "normalization": normalization,
+                # Bump when channel handling changes so stale 64ch/positional
+                # caches never silently hit. v2 = name-based 10-20 pick.
+                "channels": "1020_named_v2",
             })
             cache_path = Path(cache_dir) / f"physio_mi_4cls_{key}.pt"
             if cache_path.exists():
@@ -163,11 +171,18 @@ class PhysioNetMI4ClassDataset(Dataset):
 
     def _process_subject(self, subj: int, data_dir: str):
         runs = sorted(RUN_TASK_MAP.keys())
-        files = eegbci.load_data(subj, runs, path=data_dir)
-        # files come back ordered by runs we requested
-        # Need to know which file corresponds to which run
-        # eegbci.load_data returns files in same order as runs list passed
-        for fpath, run_id in zip(files, runs):
+        # Prefer a manual PhysioNet download laid out as
+        # <data_dir>/S001/S001R04.edf. Only fall back to MNE's downloader
+        # (eegbci.load_data, which ignores this layout and re-downloads to its
+        # own cache) if the local files are not present.
+        sdir = Path(data_dir) / f"S{subj:03d}"
+        local = {r: sdir / f"S{subj:03d}R{r:02d}.edf" for r in runs}
+        if all(p.exists() for p in local.values()):
+            run_files = [(str(local[r]), r) for r in runs]
+        else:
+            files = eegbci.load_data(subj, runs, path=data_dir)
+            run_files = list(zip(files, runs))
+        for fpath, run_id in run_files:
             try:
                 self._extract_events_from_file(fpath, run_id, subj)
             except Exception as e:
@@ -178,14 +193,27 @@ class PhysioNetMI4ClassDataset(Dataset):
         self, fpath: str, run_id: int, subj: int,
     ):
         raw = read_raw_edf(fpath, preload=True, verbose=False)
+        # eegbci EDFs name channels 'Fc5.', 'C3..', 'Fp1.' etc. Standardize to
+        # proper 10-05 names ('FC5','C3','Fp1',...) so we can pick our 10-20
+        # subset BY NAME below.
+        eegbci.standardize(raw)
         if raw.info["sfreq"] != self.sample_rate:
             raw.resample(self.sample_rate, verbose=False)
         raw.filter(0.1, 75.0, verbose=False)
 
+        # Pick the 19 canonical 10-20 channels BY NAME (alias-aware), NOT by
+        # positional slicing. PhysioNet MI is 64ch and its first 19 are
+        # fronto-central (Fc*/C*/Cp*), which would misalign with the pretrained
+        # 10-20 spatial layout — the old eval did X[..., :19] which was WRONG.
+        ch_indices, ch_names = pick_common_channels(raw.ch_names)
+        if len(ch_indices) < 19:
+            raise ValueError(
+                f"matched only {len(ch_indices)}/19 10-20 channels "
+                f"(have {raw.ch_names[:8]}...)")
         if self.electrode_names is None:
-            self.electrode_names = raw.ch_names
+            self.electrode_names = ch_names
 
-        data = raw.get_data().T.astype(np.float32)   # [T_total, C]
+        data = raw.get_data()[ch_indices].T.astype(np.float32)   # [T_total, 19]
 
         # Per-recording robust scaling BEFORE event extraction
         if self.normalization == "per_recording_robust":

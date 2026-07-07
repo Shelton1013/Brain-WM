@@ -56,7 +56,14 @@ def _pad_or_trim_channels(X: np.ndarray, target_n_ch: int) -> np.ndarray:
     if n_ch == target_n_ch:
         return X
     if n_ch > target_n_ch:
-        return X[..., :target_n_ch]
+        # Positional trimming here is a BUG: the dataset must already deliver
+        # the correct 19 channels in canonical 10-20 order (name-based pick).
+        # If we ever see more channels than the model expects, fail loudly
+        # rather than silently slicing the wrong (fronto-central) subset.
+        raise ValueError(
+            f"got {n_ch} channels but model expects {target_n_ch}; the "
+            f"dataset should pick the canonical 10-20 channels by name "
+            f"(see dataset_physionet_mi_4class._extract_events_from_file)")
     return np.pad(X, ((0, 0), (0, 0), (0, target_n_ch - n_ch)))
 
 
