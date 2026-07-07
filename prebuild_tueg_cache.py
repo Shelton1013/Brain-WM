@@ -134,6 +134,14 @@ def _process_patient(args_tuple):
 
     eeg = np.vstack(subj_recordings)
 
+    # Amplitude-reject reference: capture BEFORE Euclidean Alignment and BEFORE
+    # normalization. EA (X @ R^-1/2) whitens the spatial covariance to identity,
+    # which destroys the physical amplitude scale — a µV threshold checked on
+    # post-EA data (O(1) magnitude) would never fire. This `eeg` is MNE's native
+    # Volts (get_data() applies no unit conversion); the per-trial check below
+    # scales the µV threshold to Volts accordingly.
+    eeg_unnormed_for_amp_check = eeg
+
     if use_ea:
         # Euclidean Alignment per-patient
         try:
@@ -141,10 +149,6 @@ def _process_patient(args_tuple):
             eeg = euclidean_alignment(eeg)
         except Exception:
             pass  # if EA not available / fails, fall through
-
-    # Amplitude reject check is done BEFORE normalization, on µV-scale data
-    # after EA. EA preserves µV scale (it's a linear projection).
-    eeg_unnormed_for_amp_check = eeg
 
     # Recording-level robust normalization BEFORE segmentation (Laya-style)
     if normalization == "per_recording_robust":
@@ -160,10 +164,11 @@ def _process_patient(args_tuple):
         start = t * trial_samples
         trial = eeg[start:start + trial_samples]
 
-        # Amplitude reject (on pre-normalization µV data)
+        # Amplitude reject (on pre-EA, pre-normalization data). Data is in
+        # Volts (MNE native), so convert the µV threshold to Volts (×1e-6).
         if reject_abs_uv and reject_abs_uv > 0:
             raw_trial = eeg_unnormed_for_amp_check[start:start + trial_samples]
-            if np.abs(raw_trial).max() > reject_abs_uv:
+            if np.abs(raw_trial).max() > reject_abs_uv * 1e-6:
                 continue
 
         if normalization == "per_trial_zscore":
