@@ -283,6 +283,11 @@ class EEGLeJEPA_v2(nn.Module):
             for _ in range(encoder_layers)
         ])
         self.encoder_norm = nn.LayerNorm(d_model)
+        # Learnable encoder-input mask token: hides masked-patch CONTENT from
+        # the encoder to create a REAL MAE/JEPA bottleneck. Position embeds are
+        # re-added at masked positions so the encoder still knows WHERE they are.
+        self.enc_mask_token = nn.Parameter(torch.zeros(1, 1, 1, d_model))
+        nn.init.normal_(self.enc_mask_token, std=0.02)
 
         # ─── JEPA predictor (latent → latent) ───────────────────────
         self.jepa_predictor = nn.Sequential(
@@ -446,17 +451,28 @@ class EEGLeJEPA_v2(nn.Module):
         # 2) JEPA target = encoder output at masked positions (stop-grad).
         # 3) JEPA prediction = encoder output at same positions (with grad).
         # This mimics LeJEPA (no EMA) — same encoder path.
-        enc_all = self._encode_4d(tokens_all)    # [B, C, T_p, D]
+        # ─── Masked-encoder BOTTLENECK (fixes trivial JEPA / full-info MAE) ─
+        # Hide masked-patch CONTENT from the encoder by substituting a learnable
+        # mask token (position embed re-added so location is still known).
+        # Previously the encoder saw ALL tokens, so JEPA's predictor received
+        # its own target → loss≈0, and MAE had no real bottleneck.
+        Bt, Ct, Tpt, Dt = tokens_all.shape
+        pos = (self.pos_time[:, :, :Tpt, :]
+               + self.pos_channel[:, :Ct, :, :])          # [1, C, Tp, D]
+        masked_fill = (self.enc_mask_token + pos).expand(Bt, -1, -1, -1)
+        tokens_ctx = torch.where(mask[..., None], masked_fill, tokens_all)
+        enc_ctx = self._encode_4d(tokens_ctx)             # encoder sees ONLY visible
 
-        # ─── JEPA loss (main structure) ────────────────────────────
-        # target: encoded (detached at masked positions),
-        # pred: predictor(encoded) at masked positions.
-        # Here we simplify: predict all positions from encoder output.
-        pred_all = self.jepa_predictor(enc_all)
-        target_all = enc_all.detach()
-        # JEPA loss only on masked positions
+        # ─── JEPA loss (predict masked-region repr from visible context) ────
+        # Target = encoding of the FULL input (stop-grad): a real, non-trivial
+        # prediction task instead of the predictor copying its own input.
+        with torch.no_grad():
+            enc_tgt = self._encode_4d(tokens_all)
         loss_jepa = F.mse_loss(
-            pred_all[mask], target_all[mask])
+            self.jepa_predictor(enc_ctx)[mask], enc_tgt.detach()[mask])
+
+        # Downstream objectives (MAE / CF / SIGReg) use the bottlenecked repr.
+        enc_all = enc_ctx
 
         # ─── MAE reconstruction (NEW in v2) ────────────────────────
         # Substitute masked positions with mask_token, then decode.

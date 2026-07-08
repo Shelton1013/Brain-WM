@@ -369,7 +369,14 @@ def main():
                     "loss": avg_loss,
                     "args": args_to_save,
                 }, output_dir / "best_model.pt")
-                pprint(f"  → new best_model.pt saved (loss {avg_loss:.4f})")
+                # ⚠ best_model.pt = LOWEST PRETRAIN LOSS (MAE-dominated). For
+                # this SSL, lower loss = more-trained ≠ better downstream —
+                # over-training collapses transfer. DO NOT pick best_model.pt
+                # for downstream; sweep checkpoint_ep*.pt and select the epoch
+                # by a downstream proxy (early epochs usually win).
+                pprint(f"  → best_model.pt saved (min-loss {avg_loss:.4f}); "
+                       f"NOTE: pick downstream ckpt from checkpoint_ep*.pt, "
+                       f"NOT best_model.pt")
 
     if is_dist():
         dist.destroy_process_group()
