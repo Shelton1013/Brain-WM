@@ -76,19 +76,16 @@ def list_hmc_recordings(data_dir):
     return sorted(set(ids)), rec_dir
 
 
-def make_hmc_split(data_dir, train_frac=0.7, val_frac=0.15, seed=42):
-    """Deterministic subject-disjoint split over recording ids."""
+def make_hmc_split(data_dir, seed=42):
+    """CSBrain/CBraMod HMC split: subjects sorted by ID, first 100 train,
+    next 25 val, remaining test (deterministic — NOT random). Matches CSBrain
+    (100/25/26 over their 151) so numbers are directly comparable."""
     ids, _ = list_hmc_recordings(data_dir)
-    rng = np.random.RandomState(seed)
-    ids = list(ids)
-    rng.shuffle(ids)
-    n = len(ids)
-    n_tr = int(n * train_frac)
-    n_val = int(n * val_frac)
+    ids = sorted(ids)   # SN001, SN002, ... by ID
     return {
-        "train": sorted(ids[:n_tr]),
-        "val":   sorted(ids[n_tr:n_tr + n_val]),
-        "test":  sorted(ids[n_tr + n_val:]),
+        "train": ids[:100],
+        "val":   ids[100:125],
+        "test":  ids[125:],
     }
 
 
