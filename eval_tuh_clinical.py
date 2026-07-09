@@ -814,7 +814,9 @@ def run_finetune(
         if train_sampler is not None:
             train_sampler.set_epoch(ep)
         model.train(); head.train()
-        for bx, by in train_loader:
+        n_steps = len(train_loader)
+        t_ep = time.time()
+        for step_i, (bx, by) in enumerate(train_loader):
             bx, by = bx.to(device, non_blocking=True), by.to(device, non_blocking=True)
             feats = core_model._encode(core_model._tokenize(bx)).mean(1)
             logits = head(feats)
@@ -825,6 +827,13 @@ def run_finetune(
                 list(core_model.parameters()) + list(core_head.parameters()), 3.0)
             optimizer.step()
             scheduler.step()
+            # Intra-epoch heartbeat so "slow" is distinguishable from "hung".
+            if step_i % 100 == 0:
+                el = time.time() - t_ep
+                eta = el / max(1, step_i) * (n_steps - step_i) if step_i else 0
+                _rank0_print(f"      ep{ep+1} step {step_i}/{n_steps} "
+                             f"loss={loss.item():.4f} {el:.0f}s "
+                             f"eta_ep~{eta/60:.1f}m", flush=True)
 
         model.eval(); head.eval()
         val_preds, val_labels = [], []
