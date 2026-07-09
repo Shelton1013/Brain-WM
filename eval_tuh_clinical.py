@@ -1005,6 +1005,12 @@ def main():
                         "worker forks COW-share it cheaply, so workers are safe "
                         "AND needed to keep the GPU fed (num_workers=0 starves "
                         "the GPU → SM util ~0%). Lower if CPU-contended.")
+    p.add_argument("--ft_max_trials_per_rec", type=int, default=0,
+                   help="Subsample TRAIN to at most N trials per recording "
+                        "(0 = use all). TUAB has ~150 windows/recording; N=30 "
+                        "cuts epoch time ~5x with little FT loss — good for "
+                        "epoch sweeps. Test set is never subsampled. Use full "
+                        "data (0) for final headline numbers.")
     p.add_argument("--ft_monitor_test_every", type=int, default=0,
                    help="If > 0, compute test_ba every N epochs and log it "
                         "(along with an 'oracle_best_test_ba' upper bound). "
@@ -1081,6 +1087,26 @@ def main():
     need_stacked_xy = args.mode in ("frozen", "both")
     train_stream, y_tr, rec_tr, pat_tr = dataset_to_streaming(train_ds, n_channels)
     test_stream,  y_te, rec_te, pat_te = dataset_to_streaming(eval_ds,  n_channels)
+    # Optional: subsample TRAIN to N trials/recording (speeds epoch sweeps).
+    if args.ft_max_trials_per_rec > 0 and rec_tr is not None:
+        from collections import defaultdict
+        rng = np.random.RandomState(args.seed)
+        by_rec = defaultdict(list)
+        for i, r in enumerate(rec_tr.tolist()):
+            by_rec[r].append(i)
+        keep = []
+        for idxs in by_rec.values():
+            keep.extend(rng.choice(idxs, args.ft_max_trials_per_rec, replace=False).tolist()
+                        if len(idxs) > args.ft_max_trials_per_rec else idxs)
+        keep = np.array(sorted(keep))
+        tr = train_stream.trials
+        sub = tr[keep] if isinstance(tr, np.ndarray) else [tr[i] for i in keep]
+        y_tr = y_tr[keep]
+        rec_tr = rec_tr[keep]
+        pat_tr = pat_tr[keep] if pat_tr is not None else None
+        train_stream = _TrialDataset(sub, y_tr, n_channels)
+        print(f"[main] subsampled train to <={args.ft_max_trials_per_rec}/rec: "
+              f"{len(keep)} trials ({len(by_rec)} recordings)")
     if pat_tr is not None:
         print(f"[main] patient_ids available: train {len(set(pat_tr.tolist()))} unique "
               f"patients (matches LaBraM/CBraMod protocol)")
