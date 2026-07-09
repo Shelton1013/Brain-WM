@@ -114,10 +114,12 @@ def run_finetune_seq(base_model, Xtr, ytr, Xva, yva, Xte, yte, n_classes,
         opt, T_max=max_epochs * steps, eta_min=1e-6)
 
     best_val, best_state, patience, no_imp, ep = 0.0, None, 10, 0, 0
+    print(f"      steps/epoch={steps}  batch={batch_size} seqs "
+          f"(={batch_size*SEQ_LEN} epoch-encodes/step)", flush=True)
     for ep in range(max_epochs):
         model.train(); head.train()
         t0 = time.time()
-        for bx, by in tr:
+        for si, (bx, by) in enumerate(tr):
             bx = bx.to(device, non_blocking=True); by = by.to(device, non_blocking=True)
             logits = head(_encode_epochs(model, bx))      # [B,seq,C]
             loss = crit(logits.reshape(-1, n_classes), by.reshape(-1))
@@ -125,6 +127,11 @@ def run_finetune_seq(base_model, Xtr, ytr, Xva, yva, Xte, yte, n_classes,
             torch.nn.utils.clip_grad_norm_(
                 list(model.parameters()) + list(head.parameters()), 1.0)
             opt.step(); sched.step()
+            if ep == 0 and (si == 0 or (si + 1) % 10 == 0):
+                el = time.time() - t0
+                print(f"        [ep1] step {si+1}/{steps} loss={loss.item():.4f} "
+                      f"{el/(si+1):.2f}s/step (eta_ep {el/(si+1)*steps/60:.1f}min)",
+                      flush=True)
 
         model.eval(); head.eval()
         vp, vl = [], []
