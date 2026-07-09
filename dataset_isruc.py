@@ -173,31 +173,41 @@ def _find_rec_and_labels(subj_dir: Path, subj: int):
     return rec, txt
 
 
+# ISRUC-I montages vary: all subjects have these 4; F3-A2/F4-A1 are missing on
+# some subjects (they only record C3/C4/O1/O2). Require the 4 core; zero-pad the
+# frontal pair when absent instead of dropping the whole subject.
+CORE_ISRUC_CHANNELS = ["C3-A2", "C4-A1", "O1-A2", "O2-A1"]
+
+
 def _pick_isruc_eeg_channels(raw):
-    """Pick the 6 EEG channels from a raw object; handle naming variants."""
-    available = [ch for ch in raw.ch_names]
-    # Try exact match
-    found = {ch: ch for ch in ISRUC_EEG_CHANNELS if ch in available}
-    if len(found) == 6:
-        return [found[ch] for ch in ISRUC_EEG_CHANNELS]
-    # Try with case insensitivity and "M" instead of "A"
+    """Return [(isruc_name, raw_ch_name), ...] for FOUND channels (partial OK).
+
+    Requires the 4 core channels (C3/C4/O1/O2). F3-A2/F4-A1 are optional — some
+    ISRUC-I subjects lack them, so they get zero-padded downstream rather than
+    causing the whole subject to be skipped (name-based, not positional).
+    """
+    available = list(raw.ch_names)
     upper_map = {ch.upper(): ch for ch in available}
     found = []
     for want in ISRUC_EEG_CHANNELS:
         cands = [
-            want.upper(),
+            want, want.upper(),
             want.replace("A2", "M2").upper(),
             want.replace("A1", "M1").upper(),
         ]
         match = None
         for c in cands:
+            if c in available:
+                match = c; break
             if c in upper_map:
-                match = upper_map[c]
-                break
-        if match is None:
-            raise ValueError(
-                f"Could not find ISRUC channel {want} in {available}")
-        found.append(match)
+                match = upper_map[c]; break
+        if match is not None:
+            found.append((want, match))
+    found_names = {w for w, _ in found}
+    missing_core = [c for c in CORE_ISRUC_CHANNELS if c not in found_names]
+    if missing_core:
+        raise ValueError(
+            f"missing core ISRUC channels {missing_core} in {available}")
     return found
 
 
@@ -248,6 +258,9 @@ class ISRUCDataset(Dataset):
                 "sample_rate": sample_rate,
                 "trial_duration_s": trial_duration_s,
                 "normalization": normalization,
+                # Bump when channel handling changes so stale caches don't hit.
+                # v2 = F3/F4-optional (keep 4-channel subjects, zero-pad frontal).
+                "channels": "core4_optfrontal_v2",
             })
             cache_path = Path(cache_dir) / f"isruc_{key}.pt"
             if cache_path.exists():
@@ -297,10 +310,10 @@ class ISRUCDataset(Dataset):
         if raw.info["sfreq"] != self.sample_rate:
             raw.resample(self.sample_rate, verbose=False)
 
-        # ── Pick 6 EEG channels in canonical order ──
-        ch_names = _pick_isruc_eeg_channels(raw)
-        ch_idx = [raw.ch_names.index(ch) for ch in ch_names]
-        sig = raw.get_data()[ch_idx].T.astype(np.float32)   # [T, 6], V
+        # ── Pick available EEG channels (4-6; F3/F4 optional) ──
+        found = _pick_isruc_eeg_channels(raw)   # [(isruc_name, raw_name), ...]
+        ch_idx = [raw.ch_names.index(rn) for _, rn in found]
+        sig = raw.get_data()[ch_idx].T.astype(np.float32)   # [T, k], V
         sig = sig * 1e6     # → µV (matches our other loaders)
 
         if self.electrode_names is None:
@@ -343,19 +356,20 @@ class ISRUCDataset(Dataset):
             mid_end = mid_start + self.trial_samples
             if mid_end > sig.shape[0]:
                 break
-            trial_6ch = sig[mid_start:mid_end]    # [trial_samples, 6]
+            trial_k = sig[mid_start:mid_end]    # [trial_samples, k]
 
             if self.normalization == "per_trial_zscore":
-                mean = trial_6ch.mean(axis=0, keepdims=True)
-                std = trial_6ch.std(axis=0, keepdims=True) + 1e-8
-                trial_6ch = ((trial_6ch - mean) / std).astype(np.float32)
+                mean = trial_k.mean(axis=0, keepdims=True)
+                std = trial_k.std(axis=0, keepdims=True) + 1e-8
+                trial_k = ((trial_k - mean) / std).astype(np.float32)
 
-            # ── Place 6 channels into 19-channel layout, zero-pad rest ──
+            # ── Place found channels into 19-channel layout, zero-pad rest
+            #    (missing F3/F4 stay zero) ──
             trial_19 = np.zeros(
                 (self.trial_samples, 19), dtype=np.float32)
-            for src_idx, src_name in enumerate(ISRUC_EEG_CHANNELS):
-                dst_idx = ISRUC_CH_TO_19CH_IDX[src_name]
-                trial_19[:, dst_idx] = trial_6ch[:, src_idx]
+            for src_idx, (isruc_name, _) in enumerate(found):
+                dst_idx = ISRUC_CH_TO_19CH_IDX[isruc_name]
+                trial_19[:, dst_idx] = trial_k[:, src_idx]
 
             self.trials.append(trial_19)
             self.labels.append(labels_raw[ep])
