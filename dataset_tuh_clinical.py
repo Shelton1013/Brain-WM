@@ -46,26 +46,32 @@ from dataset_multi import (
 )
 
 
-def _try_load_mmap_sidecar(cache_path):
-    """Prefer a mmap-able .npy side-car over the RAM-heavy .pt list cache.
+def _try_load_npy_sidecar(cache_path):
+    """Prefer a single-array .npy side-car over the .pt Python-list cache.
 
-    The .pt cache stores trials as a Python list of ~370k small arrays (~70 GB
-    fully resident in RAM); DataLoader workers fork-copy it → 150 GB+/eval and
-    two concurrent evals exhaust RAM and hang. The side-car stores one stacked
-    [N, T, C] .npy loaded with mmap_mode='r': data stays on disk, is paged in
-    on access, and is SHARED across workers and across concurrent evals.
+    The .pt cache stores trials as a Python list of ~370k small arrays. Under
+    DataLoader num_workers, forking that list is CPU-murder: Python touches the
+    refcount of every one of the 370k objects → copy-on-write duplicates pages,
+    which (×2 concurrent evals + other users' CPU load) grinds to a near-hang
+    and ~1-day runtimes — NOT a RAM or GPU limit (machine has 1.5 TB RAM).
+
+    The side-car stores one contiguous [N, T, C] .npy loaded FULLY into RAM as
+    a single array. A single array has ONE refcount, so worker forks COW-share
+    it cheaply; access is in-RAM (NOT mmap — data lives on NFS, and mmap's
+    random page-faults over the network are pathologically slow for shuffled
+    FT reads). 70 GB/eval is trivial in 1.5 TB, so concurrent evals are fine.
 
     Build it with convert_clinical_cache_to_npy.py. Returns a dict shaped like
-    the .pt cache (trials = mmap array), or None if no side-car present.
+    the .pt cache (trials = single ndarray), or None if no side-car present.
     """
     from pathlib import Path as _P
     stem = str(cache_path)[:-3] if str(cache_path).endswith(".pt") else str(cache_path)
     trials_npy = _P(stem + "_trials.npy")
     meta_pt = _P(stem + "_meta.pt")
     if trials_npy.exists() and meta_pt.exists():
-        print(f"  ↻ mmap side-car: {trials_npy.name}")
+        print(f"  ↻ npy side-car (full RAM load): {trials_npy.name}", flush=True)
         meta = torch.load(str(meta_pt), weights_only=False)
-        meta["trials"] = np.load(str(trials_npy), mmap_mode="r")  # [N,T,C] mmap
+        meta["trials"] = np.load(str(trials_npy))   # single [N,T,C] array in RAM
         return meta
     return None
 
@@ -213,7 +219,7 @@ class TUABDataset(Dataset):
                 "normalization": normalization,
             })
             cache_path = Path(cache_dir) / f"tuab_{split}_{key}.pt"
-            cached = _try_load_mmap_sidecar(cache_path) or _try_load_cache(cache_path)
+            cached = _try_load_npy_sidecar(cache_path) or _try_load_cache(cache_path)
             if cached is not None:
                 self.trials = cached["trials"]   # mmap [N,T,C] array OR list
                 self.labels = cached["labels"]
@@ -376,7 +382,7 @@ class TUEVDataset(Dataset):
                 "normalization": normalization,
             })
             cache_path = Path(cache_dir) / f"tuev_{split}_{key}.pt"
-            cached = _try_load_mmap_sidecar(cache_path) or _try_load_cache(cache_path)
+            cached = _try_load_npy_sidecar(cache_path) or _try_load_cache(cache_path)
             if cached is not None:
                 self.trials = cached["trials"]
                 self.labels = cached["labels"]
