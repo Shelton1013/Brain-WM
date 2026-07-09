@@ -179,30 +179,43 @@ def _find_rec_and_labels(subj_dir: Path, subj: int):
 CORE_ISRUC_CHANNELS = ["C3-A2", "C4-A1", "O1-A2", "O2-A1"]
 
 
-def _pick_isruc_eeg_channels(raw):
-    """Return [(isruc_name, raw_ch_name), ...] for FOUND channels (partial OK).
+def _find_ch(available, upper_map, name):
+    """Find a channel by name, case-insensitive, with A↔M reference variants."""
+    for c in (name, name.upper(),
+              name.replace("A2", "M2").upper(),
+              name.replace("A1", "M1").upper()):
+        if c in available:
+            return c
+        if c in upper_map:
+            return upper_map[c]
+    return None
 
-    Requires the 4 core channels (C3/C4/O1/O2). F3-A2/F4-A1 are optional — some
-    ISRUC-I subjects lack them, so they get zero-padded downstream rather than
-    causing the whole subject to be skipped (name-based, not positional).
+
+def _pick_isruc_eeg_channels(raw):
+    """Return [(isruc_name, spec), ...] for FOUND channels (partial OK).
+
+    Handles ISRUC-I's THREE montage conventions:
+      1. pre-referenced 'C3-A2'          → spec = raw channel name (str)
+      2. bare 'C3' + separate 'A2'        → spec = ('C3','A2') re-reference tuple
+      3. bare 'C3' only                   → spec = 'C3' (unreferenced fallback)
+    Requires the 4 core channels (C3/C4/O1/O2); F3-A2/F4-A1 optional (missing →
+    zero-padded). Name-based, never positional.
     """
     available = list(raw.ch_names)
     upper_map = {ch.upper(): ch for ch in available}
     found = []
-    for want in ISRUC_EEG_CHANNELS:
-        cands = [
-            want, want.upper(),
-            want.replace("A2", "M2").upper(),
-            want.replace("A1", "M1").upper(),
-        ]
-        match = None
-        for c in cands:
-            if c in available:
-                match = c; break
-            if c in upper_map:
-                match = upper_map[c]; break
-        if match is not None:
-            found.append((want, match))
+    for want in ISRUC_EEG_CHANNELS:          # e.g. "C3-A2"
+        pos, ref = want.split("-")           # "C3", "A2"
+        direct = _find_ch(available, upper_map, want)
+        if direct is not None:
+            found.append((want, direct)); continue
+        pos_raw = _find_ch(available, upper_map, pos)
+        ref_raw = _find_ch(available, upper_map, ref)
+        if pos_raw is not None and ref_raw is not None:
+            found.append((want, (pos_raw, ref_raw))); continue   # re-reference
+        if pos_raw is not None:
+            found.append((want, pos_raw)); continue              # unreferenced
+        # else: not found → skip (optional frontal; core checked below)
     found_names = {w for w, _ in found}
     missing_core = [c for c in CORE_ISRUC_CHANNELS if c not in found_names]
     if missing_core:
@@ -260,7 +273,7 @@ class ISRUCDataset(Dataset):
                 "normalization": normalization,
                 # Bump when channel handling changes so stale caches don't hit.
                 # v2 = F3/F4-optional (keep 4-channel subjects, zero-pad frontal).
-                "channels": "core4_optfrontal_v2",
+                "channels": "core4_optfrontal_reref_v3",
             })
             cache_path = Path(cache_dir) / f"isruc_{key}.pt"
             if cache_path.exists():
@@ -310,10 +323,19 @@ class ISRUCDataset(Dataset):
         if raw.info["sfreq"] != self.sample_rate:
             raw.resample(self.sample_rate, verbose=False)
 
-        # ── Pick available EEG channels (4-6; F3/F4 optional) ──
-        found = _pick_isruc_eeg_channels(raw)   # [(isruc_name, raw_name), ...]
-        ch_idx = [raw.ch_names.index(rn) for _, rn in found]
-        sig = raw.get_data()[ch_idx].T.astype(np.float32)   # [T, k], V
+        # ── Pick available EEG channels (4-6; F3/F4 optional; re-reference
+        #    bare montages) ──
+        found = _pick_isruc_eeg_channels(raw)   # [(isruc_name, spec), ...]
+        raw_data = raw.get_data()               # [n_ch, T], V
+        cols = []
+        for _, spec in found:
+            if isinstance(spec, tuple):         # re-reference: pos - ref
+                pi = raw.ch_names.index(spec[0])
+                ri = raw.ch_names.index(spec[1])
+                cols.append(raw_data[pi] - raw_data[ri])
+            else:
+                cols.append(raw_data[raw.ch_names.index(spec)])
+        sig = np.stack(cols, axis=1).astype(np.float32)   # [T, k], V
         sig = sig * 1e6     # → µV (matches our other loaders)
 
         if self.electrode_names is None:
