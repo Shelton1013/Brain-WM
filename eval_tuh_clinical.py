@@ -1000,10 +1000,11 @@ def main():
                         "(e.g. 50) to effectively disable when using labram "
                         "protocol.")
     p.add_argument("--ft_batch_size", type=int, default=32)
-    p.add_argument("--num_workers", type=int, default=0,
-                   help="DataLoader workers. 0 = load in-process from the RAM "
-                        "cache array (fast + avoids fork/worker hangs). Only "
-                        "raise if the GPU is data-starved.")
+    p.add_argument("--num_workers", type=int, default=4,
+                   help="DataLoader workers. With the single-array .npy cache, "
+                        "worker forks COW-share it cheaply, so workers are safe "
+                        "AND needed to keep the GPU fed (num_workers=0 starves "
+                        "the GPU → SM util ~0%). Lower if CPU-contended.")
     p.add_argument("--ft_monitor_test_every", type=int, default=0,
                    help="If > 0, compute test_ba every N epochs and log it "
                         "(along with an 'oracle_best_test_ba' upper bound). "
