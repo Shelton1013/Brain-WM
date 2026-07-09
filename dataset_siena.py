@@ -127,21 +127,25 @@ def parse_seizure_list(txt_path: Path) -> dict[str, list[tuple[int, int]]]:
     times (HH.MM.SS); we compute seizure_start - registration_start, handling
     midnight wraparound. Defensive to blank lines / casing / '.' or ':' sep.
     """
+    MAX_SEIZURE_S = 600   # clamp implausibly long parses — Siena has clock-time
+                          # typos (e.g. PN00-3 seizure end 19.29.29 vs 18.29.29,
+                          # which lands AFTER the registration ends).
     seizures: dict[str, list[tuple[int, int]]] = {}
     if not txt_path.exists():
         return seizures
     cur_file = None
-    reg_start = None
-    sz_start = None
+    reg_start = reg_end = sz_start = None
     for raw_line in txt_path.read_text(errors="ignore").splitlines():
         line = raw_line.strip()
         low = line.lower()
         if low.startswith("file name") or low.startswith("registration file"):
             m = re.search(r"(PN\d+[-_]?\d*\.edf)", line, re.IGNORECASE)
             cur_file = m.group(1) if m else None
-            reg_start = sz_start = None
+            reg_start = reg_end = sz_start = None
         elif low.startswith("registration start"):
             reg_start = _clock_to_sec(line)
+        elif low.startswith("registration end"):
+            reg_end = _clock_to_sec(line)
         elif low.startswith("seizure start") or (
                 low.startswith("start time") and "registration" not in low):
             sz_start = _clock_to_sec(line)
@@ -157,7 +161,17 @@ def parse_seizure_list(txt_path: Path) -> dict[str, list[tuple[int, int]]]:
                     b += 24 * 3600
                 if b < a:
                     b += 24 * 3600
-                seizures.setdefault(cur_file, []).append((int(a), int(b)))
+                a = max(0, a)
+                # Sanity clamp: seizure can't outlast the recording or exceed a
+                # sane max (guards against clock-time typos in the source data).
+                b = min(b, a + MAX_SEIZURE_S)
+                if reg_end is not None and reg_start is not None:
+                    reg_dur = reg_end - reg_start
+                    if reg_dur < 0:
+                        reg_dur += 24 * 3600
+                    b = min(b, reg_dur)
+                if b > a:
+                    seizures.setdefault(cur_file, []).append((int(a), int(b)))
             sz_start = None
     return seizures
 
