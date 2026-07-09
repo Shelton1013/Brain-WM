@@ -324,7 +324,14 @@ class SienaDataset(Dataset):
         return pos, neg
 
     def _balance_and_store(self, pos, neg, si, rng):
-        if self.negative_per_positive and self.negative_per_positive > 0 and pos:
+        if not pos:
+            # No ictal windows for this subject (no seizures, or a MISSING
+            # Seizures-list file like PN14). Skip entirely — otherwise it would
+            # flood the dataset with interictal-only negatives and no positives.
+            print(f"    skip subject idx {si}: 0 ictal windows "
+                  f"(no/missing seizure annotation)")
+            return
+        if self.negative_per_positive and self.negative_per_positive > 0:
             cap = int(len(pos) * self.negative_per_positive)
             if len(neg) > cap:
                 idx = rng.choice(len(neg), size=cap, replace=False)
