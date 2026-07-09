@@ -730,7 +730,7 @@ def run_finetune(
     val_loader = DataLoader(
         val_subset,
         batch_size=ft_batch_size * 2, shuffle=False,
-        num_workers=max(1, num_workers // 2), pin_memory=True,
+        num_workers=num_workers // 2, pin_memory=True,
         persistent_workers=num_workers > 0,
     )
 
@@ -783,7 +783,7 @@ def run_finetune(
     # Reported final BA is still the best-val ckpt's test BA.
     monitor_test_loader = DataLoader(
         test_stream, batch_size=ft_batch_size * 2, shuffle=False,
-        num_workers=max(1, num_workers // 2), pin_memory=True,
+        num_workers=num_workers // 2, pin_memory=True,
         persistent_workers=num_workers > 0,
     ) if ft_monitor_test_every > 0 else None
     y_te_tensor = torch.from_numpy(y_te_np)
@@ -903,7 +903,7 @@ def run_finetune(
     # Test — replicated on each rank (small, ~40k trials)
     test_loader = DataLoader(
         test_stream, batch_size=max(64, ft_batch_size), shuffle=False,
-        num_workers=max(1, num_workers // 2), pin_memory=True,
+        num_workers=num_workers // 2, pin_memory=True,
     )
     preds, probas = [], []
     with torch.no_grad():
@@ -991,6 +991,10 @@ def main():
                         "(e.g. 50) to effectively disable when using labram "
                         "protocol.")
     p.add_argument("--ft_batch_size", type=int, default=32)
+    p.add_argument("--num_workers", type=int, default=0,
+                   help="DataLoader workers. 0 = load in-process from the RAM "
+                        "cache array (fast + avoids fork/worker hangs). Only "
+                        "raise if the GPU is data-starved.")
     p.add_argument("--ft_monitor_test_every", type=int, default=0,
                    help="If > 0, compute test_ba every N epochs and log it "
                         "(along with an 'oracle_best_test_ba' upper bound). "
@@ -1181,6 +1185,7 @@ def main():
             train_rec_ids_np=rec_tr,   # Recording-disjoint fallback
             train_patient_ids_np=pat_tr,   # Patient-disjoint preferred (LaBraM/CBraMod)
             ft_monitor_test_every=args.ft_monitor_test_every,
+            num_workers=args.num_workers,
             seed=args.seed,
         )
         print(f"\n{'='*70}\n  Fine-tune ({args.max_epochs} epochs, "
