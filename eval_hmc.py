@@ -60,9 +60,11 @@ def run_finetune(base_model, X_tr_np, y_tr_np, X_val_np, y_val_np,
     X_te  = torch.from_numpy(X_te_np).to(device)
 
     train_loader = DataLoader(TensorDataset(X_tr, y_tr),
-                              batch_size=64, shuffle=True, drop_last=True)
+                              batch_size=128, shuffle=True, drop_last=True,
+                              num_workers=4, pin_memory=True, persistent_workers=True)
     val_loader = DataLoader(TensorDataset(X_val, y_val),
-                            batch_size=128, shuffle=False)
+                            batch_size=256, shuffle=False,
+                            num_workers=2, pin_memory=True, persistent_workers=True)
 
     class_counts = torch.bincount(y_tr, minlength=N_CLASSES)
     class_weights = 1.0 / class_counts.float().clamp(min=1)
