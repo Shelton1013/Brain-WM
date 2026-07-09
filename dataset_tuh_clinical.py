@@ -45,6 +45,30 @@ from dataset_multi import (
     _save_cache,
 )
 
+
+def _try_load_mmap_sidecar(cache_path):
+    """Prefer a mmap-able .npy side-car over the RAM-heavy .pt list cache.
+
+    The .pt cache stores trials as a Python list of ~370k small arrays (~70 GB
+    fully resident in RAM); DataLoader workers fork-copy it → 150 GB+/eval and
+    two concurrent evals exhaust RAM and hang. The side-car stores one stacked
+    [N, T, C] .npy loaded with mmap_mode='r': data stays on disk, is paged in
+    on access, and is SHARED across workers and across concurrent evals.
+
+    Build it with convert_clinical_cache_to_npy.py. Returns a dict shaped like
+    the .pt cache (trials = mmap array), or None if no side-car present.
+    """
+    from pathlib import Path as _P
+    stem = str(cache_path)[:-3] if str(cache_path).endswith(".pt") else str(cache_path)
+    trials_npy = _P(stem + "_trials.npy")
+    meta_pt = _P(stem + "_meta.pt")
+    if trials_npy.exists() and meta_pt.exists():
+        print(f"  ↻ mmap side-car: {trials_npy.name}")
+        meta = torch.load(str(meta_pt), weights_only=False)
+        meta["trials"] = np.load(str(trials_npy), mmap_mode="r")  # [N,T,C] mmap
+        return meta
+    return None
+
 try:
     import mne
     MNE_AVAILABLE = True
@@ -189,9 +213,9 @@ class TUABDataset(Dataset):
                 "normalization": normalization,
             })
             cache_path = Path(cache_dir) / f"tuab_{split}_{key}.pt"
-            cached = _try_load_cache(cache_path)
+            cached = _try_load_mmap_sidecar(cache_path) or _try_load_cache(cache_path)
             if cached is not None:
-                self.trials = cached["trials"]
+                self.trials = cached["trials"]   # mmap [N,T,C] array OR list
                 self.labels = cached["labels"]
                 self.electrode_names = cached["electrode_names"]
                 # Backward-compat: old caches don't have recording_ids / patient_ids
@@ -352,7 +376,7 @@ class TUEVDataset(Dataset):
                 "normalization": normalization,
             })
             cache_path = Path(cache_dir) / f"tuev_{split}_{key}.pt"
-            cached = _try_load_cache(cache_path)
+            cached = _try_load_mmap_sidecar(cache_path) or _try_load_cache(cache_path)
             if cached is not None:
                 self.trials = cached["trials"]
                 self.labels = cached["labels"]
