@@ -761,6 +761,17 @@ def run_finetune(
                      f"warmup={ft_warmup_epochs}ep cosine patience={ft_patience} "
                      f"drop_path={ft_drop_path} head_mult={ft_head_lr_mult} "
                      f"batch={ft_batch_size}×{world}={eff_batch}")
+    elif ft_protocol == "cbramod":
+        # Exact CBraMod Table 6: single LR 1e-4, cosine → 1e-6, wd 5e-2,
+        # AdamW betas (0.9,0.999)/eps 1e-8. Gentle vs onecycle's 4e-3 peak →
+        # stable FT (no val collapse to chance) and protocol-comparable.
+        optimizer = torch.optim.AdamW(
+            list(core_model.parameters()) + list(core_head.parameters()),
+            lr=1e-4, weight_decay=5e-2, betas=(0.9, 0.999), eps=1e-8)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max_epochs * steps_per_epoch, eta_min=1e-6)
+        _rank0_print(f"      [FT] CBraMod protocol: lr=1e-4 cosine→1e-6 "
+                     f"wd=5e-2 label_smoothing=0.1 batch={ft_batch_size}×{world}")
     else:
         optimizer = torch.optim.AdamW([
             {"params": core_model.parameters(), "lr": 1e-6},
@@ -771,7 +782,8 @@ def run_finetune(
             steps_per_epoch=steps_per_epoch,
             epochs=max_epochs, pct_start=0.2,
         )
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    _ls = 0.1 if ft_protocol == "cbramod" else 0.0
+    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=_ls)
 
     best_val_ba = 0.0
     best_state = None
@@ -979,7 +991,7 @@ def main():
                         "Requires fresh-built dataset cache with recording_ids; "
                         "old caches (without recording_ids) fall back to per-trial.")
     # LaBraM-style FT protocol overrides
-    p.add_argument("--ft_protocol", choices=["onecycle", "labram"],
+    p.add_argument("--ft_protocol", choices=["onecycle", "labram", "cbramod"],
                    default="onecycle",
                    help="onecycle: legacy OneCycleLR + wd=0.01 + no layer_decay "
                         "(matches run_eegbench.py). "

@@ -71,14 +71,14 @@ def run_finetune(base_model, X_tr_np, y_tr_np, X_val_np, y_val_np,
     class_weights = (class_weights / class_weights.sum() * N_CLASSES).to(device)
 
     steps_per_epoch = max(1, len(train_loader))
-    optimizer = torch.optim.AdamW([
-        {"params": model.parameters(), "lr": 1e-6},
-        {"params": head.parameters(),  "lr": 1e-6},
-    ], weight_decay=0.01)
-    scheduler = torch.optim.lr_scheduler.OneCycleLR(
-        optimizer, max_lr=[4e-4, 4e-3],
-        steps_per_epoch=steps_per_epoch, epochs=max_epochs, pct_start=0.2)
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
+    # CBraMod Table 6 FT: gentle LR 1e-4 cosine → 1e-6, wd 5e-2, label smoothing
+    # 0.1 (stable vs onecycle 4e-3).
+    optimizer = torch.optim.AdamW(
+        list(model.parameters()) + list(head.parameters()),
+        lr=1e-4, weight_decay=5e-2, betas=(0.9, 0.999), eps=1e-8)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=max_epochs * steps_per_epoch, eta_min=1e-6)
+    criterion = nn.CrossEntropyLoss(weight=class_weights, label_smoothing=0.1)
 
     best_val_ba = 0.0
     best_state = None
