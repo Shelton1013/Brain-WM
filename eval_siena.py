@@ -38,7 +38,8 @@ from sklearn.metrics import (
 )
 
 from dataset_siena import (
-    SienaDataset, make_subject_split, LABEL_NAMES, N_CLASSES,
+    SienaDataset, make_subject_split, make_csbrain_split,
+    stratified_trainval_split, LABEL_NAMES, N_CLASSES,
 )
 from eval_tuh_clinical import (
     load_pretrained, build_random_init,
@@ -314,24 +315,29 @@ def main():
     model, model_cls, model_type_name, n_channels, ckpt_args = \
         load_pretrained(args.checkpoint, device)
 
-    print(f"\n--- Building subject-disjoint split ---")
-    splits = make_subject_split(args.siena_dir, seed=args.seed)
-    print(f"  Train: {splits['train']}")
-    print(f"  Val:   {splits['val']}")
-    print(f"  Test:  {splits['test']}")
-    if not splits["train"] or not splits["test"]:
-        raise SystemExit("Empty split — check --siena_dir layout (need PNxx/).")
+    print(f"\n--- Building CSBrain split (test=PN16/PN17, rest 8:2 per subj/label) ---")
+    splits = make_csbrain_split(args.siena_dir)
+    print(f"  Train+Val pool ({len(splits['trainval'])}): {splits['trainval']}")
+    print(f"  Test  ({len(splits['test'])}): {splits['test']}")
+    if not splits["trainval"] or not splits["test"]:
+        raise SystemExit("Empty split — check --siena_dir layout (need PNxx/, "
+                         "incl. PN16/PN17 for test).")
 
     print(f"\n--- Loading Siena splits ---")
     t0 = time.time()
-    train_ds = _load_split_ds(args, splits["train"])
-    val_ds   = _load_split_ds(args, splits["val"])
-    test_ds  = _load_split_ds(args, splits["test"])
+    trainval_ds = _load_split_ds(args, splits["trainval"])
+    test_ds     = _load_split_ds(args, splits["test"])
     print(f"Data loaded in {(time.time()-t0)/60:.1f} min")
 
-    X_tr,  y_tr  = dataset_to_xy(train_ds)
-    X_val, y_val = dataset_to_xy(val_ds)
+    X_all, y_all = dataset_to_xy(trainval_ds)
+    sids_all = np.asarray(trainval_ds.subject_ids)
+    tr_idx, va_idx = stratified_trainval_split(sids_all, y_all,
+                                               val_frac=0.2, seed=args.seed)
+    X_tr,  y_tr  = X_all[tr_idx],  y_all[tr_idx]
+    X_val, y_val = X_all[va_idx],  y_all[va_idx]
     X_te,  y_te  = dataset_to_xy(test_ds)
+    print(f"  Stratified 8:2 within pool → train {len(y_tr)} / val {len(y_val)} "
+          f"samples across {len(np.unique(sids_all))} subjects")
     print(f"\nShapes: train {X_tr.shape}, val {X_val.shape}, test {X_te.shape}")
     print(f"Class counts (train): inter={int((y_tr==0).sum())} ictal={int((y_tr==1).sum())}")
     print(f"Class counts (test):  inter={int((y_te==0).sum())} ictal={int((y_te==1).sum())}")

@@ -217,6 +217,38 @@ def make_subject_split(data_dir: str, train_frac: float = 0.6,
     }
 
 
+def make_csbrain_split(data_dir: str,
+                       test_subjects=("PN16", "PN17")) -> dict:
+    """CSBrain (NeurIPS 2025) Siena protocol: the LAST two subjects (PN16, PN17)
+    are the held-out subject-disjoint test set; the remaining 12 subjects form a
+    train+val POOL that is split at the SAMPLE level 8:2 per-subject per-label
+    (done in eval, not here — see stratified_trainval_split). Returns
+    {"trainval": [...12], "test": [PN16, PN17]}."""
+    subs = sorted(_list_subjects(data_dir).keys())
+    want = {t.upper() for t in test_subjects}
+    test = [s for s in subs if s.upper() in want]
+    trainval = [s for s in subs if s.upper() not in want]
+    return {"trainval": trainval, "test": test}
+
+
+def stratified_trainval_split(subject_ids, labels, val_frac: float = 0.2,
+                              seed: int = 42):
+    """CSBrain within-pool split: 8:2 train/val holding the ratio for EACH
+    subject AND each label category. Returns (train_idx, val_idx) int arrays."""
+    subject_ids = np.asarray(subject_ids)
+    labels = np.asarray(labels)
+    rng = np.random.RandomState(seed)
+    tr, va = [], []
+    for s in np.unique(subject_ids):
+        for c in np.unique(labels):
+            idx = np.where((subject_ids == s) & (labels == c))[0]
+            rng.shuffle(idx)
+            n_val = int(round(len(idx) * val_frac))
+            va.extend(idx[:n_val].tolist())
+            tr.extend(idx[n_val:].tolist())
+    return np.array(sorted(tr), dtype=np.int64), np.array(sorted(va), dtype=np.int64)
+
+
 class SienaDataset(Dataset):
     """Siena scalp-EEG seizure detection, 2-class (interictal / ictal).
 
