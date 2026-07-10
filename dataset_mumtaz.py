@@ -148,14 +148,22 @@ def _list_subjects(data_dir):
 
 
 def make_subject_split(data_dir: str,
-                       train_frac: float = 0.6,
-                       val_frac: float = 0.2,
-                       seed: int = 42) -> dict:
-    """Deterministic subject-disjoint split matching CBraMod's approach.
+                       seed: int = 42,
+                       val_counts: dict | None = None,
+                       test_counts: dict | None = None) -> dict:
+    """Subject-disjoint split with CSBrain/CBraMod's fixed COUNTS (not fractions).
 
-    We sort subjects within each group and split by fixed fractions;
-    seeding lets us permute the assignment for multi-seed reporting.
+    CSBrain (NeurIPS 2025) Mumtaz2016 protocol: 24 MDD + 19 HC train,
+    5 MDD + 4 HC val, 5 MDD + 5 HC test. We fix val/test to those exact
+    held-out counts (so the evaluation sets are composition-matched to their
+    Table 17) and put every remaining subject into train. `seed` only permutes
+    WHICH subjects land in each bucket (counts stay fixed) for multi-seed
+    robustness; CSBrain report a single split.
     """
+    if val_counts is None:
+        val_counts = {"MDD": 5, "H": 4}
+    if test_counts is None:
+        test_counts = {"MDD": 5, "H": 5}
     subjects = _list_subjects(Path(data_dir))
     grouped = {"H": sorted(sid for grp, sid in subjects if grp == "H"),
                "MDD": sorted(sid for grp, sid in subjects if grp == "MDD")}
@@ -165,12 +173,16 @@ def make_subject_split(data_dir: str,
     for grp, sids in grouped.items():
         sids = list(sids)
         rng.shuffle(sids)
-        n = len(sids)
-        n_tr = int(n * train_frac)
-        n_val = int(n * val_frac)
-        splits["train"][grp] = sids[:n_tr]
-        splits["val"][grp]   = sids[n_tr:n_tr + n_val]
-        splits["test"][grp]  = sids[n_tr + n_val:]
+        n_te = test_counts.get(grp, 0)
+        n_va = val_counts.get(grp, 0)
+        splits["test"][grp]  = sids[:n_te]
+        splits["val"][grp]   = sids[n_te:n_te + n_va]
+        splits["train"][grp] = sids[n_te + n_va:]
+    # Transparency: print actual vs CSBrain reference counts.
+    print("  [mumtaz split] "
+          + " ".join(f"{s}:MDD{len(splits[s]['MDD'])}/H{len(splits[s]['H'])}"
+                     for s in ("train", "val", "test"))
+          + "  (CSBrain ref: train MDD24/H19 val MDD5/H4 test MDD5/H5)")
     return splits
 
 
