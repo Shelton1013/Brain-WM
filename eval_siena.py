@@ -371,7 +371,8 @@ def main():
             r_te = extract_features(random_model, X_te, device)
             mr = run_frozen_probe(r_tr, y_tr, r_te, y_te, n_reps=args.frozen_reps)
             print(f"  Rand frozen  BA={mr['balanced_accuracy']['mean']:.4f}"
-                  f"±{mr['balanced_accuracy']['std']:.4f}")
+                  f"±{mr['balanced_accuracy']['std']:.4f}  "
+                  f"PR-AUC={mr['pr_auc']['mean']:.4f}")
             results["random_frozen"] = mr
             del random_model; torch.cuda.empty_cache()
 
