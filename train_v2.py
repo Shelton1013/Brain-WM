@@ -42,6 +42,7 @@ from torch.utils.data.distributed import DistributedSampler
 from dataset_multi import MultiDatasetEEG, _sid_before_underscore
 
 from eeg_lejepa_v2 import EEGLeJEPA_v2, count_params
+from eeg_lejepa_v3 import EEGLeJEPA_v3
 
 
 # ============================================================
@@ -196,6 +197,12 @@ def main():
     parser.add_argument("--sigreg_lambda", type=float, default=0.05,
                         help="anti-collapse weight; use 0.0 for no-reg baseline")
     parser.add_argument("--pajr_weight", type=float, default=0.1)
+    parser.add_argument("--arch", type=str, default="v2", choices=["v2", "v3"],
+                        help="v3 = frequency-native (filterbank tokenizer + real "
+                             "cross-frequency spectral prediction, no MAE)")
+    parser.add_argument("--n_bands", type=int, default=5)
+    parser.add_argument("--band_mask_ratio", type=float, default=0.30)
+    parser.add_argument("--filt_kernel", type=int, default=65)
     parser.add_argument("--reg_type", type=str, default="sigreg",
                         choices=["sigreg", "vicreg"],
                         help="sigreg is SAFE (v1 confirmed); vicreg DESTROYS features")
@@ -306,7 +313,18 @@ def main():
         max_time_patches=args.max_time_patches,
         max_channels=args.max_channels,
     )
-    model = EEGLeJEPA_v2(**model_kwargs).to(device)
+    if args.arch == "v3":
+        model = EEGLeJEPA_v3(
+            d_model=args.d_model, encoder_layers=args.encoder_layers, n_heads=8,
+            patch_len=args.patch_len, max_time_patches=args.max_time_patches,
+            max_channels=args.max_channels, n_bands=args.n_bands,
+            d_band=args.cf_d_band, filt_kernel=args.filt_kernel,
+            sample_rate=256, band_mask_ratio=args.band_mask_ratio,
+            jepa_weight=args.jepa_weight, cf_weight=args.cf_weight,
+            sigreg_lambda=args.sigreg_lambda, reg_type=args.reg_type,
+        ).to(device)
+    else:
+        model = EEGLeJEPA_v2(**model_kwargs).to(device)
     raw_model = model
     if distributed:
         model = DDP(model, device_ids=[int(os.environ["LOCAL_RANK"])],
@@ -352,7 +370,7 @@ def main():
 
             # Save checkpoint
             args_to_save = vars(args).copy()
-            args_to_save["model"] = "lejepa_v2"   # for eval load_pretrained
+            args_to_save["model"] = "lejepa_v3" if args.arch == "v3" else "lejepa_v2"
             torch.save({
                 "epoch": epoch,
                 "model_state_dict": raw_model.state_dict(),

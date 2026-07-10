@@ -97,6 +97,7 @@ from eeg_lejepa_multistream import EEGLeJEPAMultiStream
 from eeg_lejepa_outputcf import EEGLeJEPAOutputCF
 from eeg_lejepa_outputcf_pajr import EEGLeJEPAOutputCFPAJR
 from eeg_lejepa_v2 import EEGLeJEPA_v2
+from eeg_lejepa_v3 import EEGLeJEPA_v3
 
 from dataset_tuh_clinical import TUABDataset, TUEVDataset, TUEV_LABEL_NAMES
 
@@ -113,6 +114,7 @@ TYPE_MAP = {
     "lejepa_outputcf":    (EEGLeJEPAOutputCF,     "EEG-LeJEPA+OutputCF"),
     "lejepa_outputcf_pajr": (EEGLeJEPAOutputCFPAJR, "EEG-LeJEPA+OutputCF+PAJR"),
     "lejepa_v2":          (EEGLeJEPA_v2,          "EEG-LeJEPA v2"),
+    "lejepa_v3":          (EEGLeJEPA_v3,          "EEG-LeJEPA v3"),
     "lejepa_spectral":    (EEGLeJEPASpectral,     "EEG-LeJEPA+Spectral"),
     "lejepa_region":      (EEGLeJEPARegion,       "EEG-LeJEPA+Region"),
     "lejepa":             (EEGLeJEPA,             "EEG-LeJEPA"),
@@ -150,6 +152,30 @@ def load_pretrained(checkpoint_path: str, device: torch.device):
             model_cls, model_type_name = EEGLeJEPACrossFreq, "EEG-LeJEPA+CrossFreq"
         else:
             model_cls, model_type_name = EEGLeJEPA, "EEG-LeJEPA"
+
+    # v3 (frequency-native) — filterbank tokenizer, different constructor
+    if model_type == "lejepa_v3":
+        model = EEGLeJEPA_v3(
+            d_model=ckpt_args.get("d_model", 512),
+            encoder_layers=ckpt_args.get("encoder_layers", 12), n_heads=8,
+            patch_len=ckpt_args.get("patch_len", 200),
+            max_time_patches=ckpt_args.get("max_time_patches", 64),
+            max_channels=ckpt_args.get("max_channels", 32),
+            n_bands=ckpt_args.get("n_bands", 5),
+            d_band=ckpt_args.get("cf_d_band", 64),
+            filt_kernel=ckpt_args.get("filt_kernel", 65),
+            sample_rate=256,
+            band_mask_ratio=ckpt_args.get("band_mask_ratio", 0.30),
+            jepa_weight=ckpt_args.get("jepa_weight", 0.3),
+            cf_weight=ckpt_args.get("cf_weight", 1.0),
+            sigreg_lambda=ckpt_args.get("sigreg_lambda", 0.05),
+            reg_type=ckpt_args.get("reg_type", "sigreg"),
+        ).to(device)
+        model.load_state_dict(ckpt["model_state_dict"])
+        model.eval()
+        print(f"Model: {model_type_name}, d={ckpt_args.get('d_model', 512)}, "
+              f"{ckpt_args.get('n_bands', 5)} bands")
+        return model, model_cls, model_type_name, n_channels, ckpt_args
 
     # v2 has a totally different constructor — handle separately
     if model_type == "lejepa_v2":
@@ -238,6 +264,25 @@ def load_pretrained(checkpoint_path: str, device: torch.device):
 def build_random_init(model_cls, n_channels, ckpt_args, device):
     """Build an UNTRAINED model with the same config for the random baseline."""
     model_type = ckpt_args.get("model", "jepa")
+
+    # v3 (frequency-native)
+    if model_type == "lejepa_v3":
+        return EEGLeJEPA_v3(
+            d_model=ckpt_args.get("d_model", 512),
+            encoder_layers=ckpt_args.get("encoder_layers", 12), n_heads=8,
+            patch_len=ckpt_args.get("patch_len", 200),
+            max_time_patches=ckpt_args.get("max_time_patches", 64),
+            max_channels=ckpt_args.get("max_channels", 32),
+            n_bands=ckpt_args.get("n_bands", 5),
+            d_band=ckpt_args.get("cf_d_band", 64),
+            filt_kernel=ckpt_args.get("filt_kernel", 65),
+            sample_rate=256,
+            band_mask_ratio=ckpt_args.get("band_mask_ratio", 0.30),
+            jepa_weight=ckpt_args.get("jepa_weight", 0.3),
+            cf_weight=ckpt_args.get("cf_weight", 1.0),
+            sigreg_lambda=ckpt_args.get("sigreg_lambda", 0.05),
+            reg_type=ckpt_args.get("reg_type", "sigreg"),
+        ).to(device)
 
     # v2 uses different constructor
     if model_type == "lejepa_v2":
