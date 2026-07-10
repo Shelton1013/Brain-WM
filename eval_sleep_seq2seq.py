@@ -92,7 +92,13 @@ def _encode_epochs(model, x_seq):
 
 
 def run_finetune_seq(base_model, Xtr, ytr, Xva, yva, Xte, yte, n_classes,
-                     device, max_epochs=50, batch_size=16, freeze_encoder=False):
+                     device, max_epochs=50, batch_size=16, freeze_encoder=False,
+                     lp_ft_warmup=0, encoder_lr_mult=1.0):
+    """Full-FT (or LP-FT). lp_ft_warmup>0: freeze encoder for the first K epochs
+    (linear-probe the head), then unfreeze with encoder LR = base_lr *
+    encoder_lr_mult. This tests whether the frozen-good / FT-worse reversal is
+    feature-distortion (Kumar et al. 2022) — if LP-FT recovers JEPA>Random, the
+    pretrain is fine and full-FT was distorting it."""
     model = copy.deepcopy(base_model)
     head = SeqHead(model.d_model, n_classes).to(device)
     if freeze_encoder:
@@ -113,25 +119,36 @@ def run_finetune_seq(base_model, Xtr, ytr, Xva, yva, Xte, yte, n_classes,
     crit = nn.CrossEntropyLoss(weight=cw, label_smoothing=0.1)
 
     steps = max(1, len(tr))
-    # frozen probe: only head trains, so a slightly higher LR converges faster
-    lr = 5e-4 if freeze_encoder else 1e-4
-    opt = torch.optim.AdamW(trainable, lr=lr, weight_decay=5e-2,
-                            betas=(0.9, 0.999), eps=1e-8)
+    base_lr = 1e-4
+    # Two param groups so the encoder can fine-tune at a gentler LR than the head.
+    opt = torch.optim.AdamW(
+        [{"params": list(model.parameters()), "lr": base_lr * encoder_lr_mult},
+         {"params": list(head.parameters()),  "lr": base_lr}],
+        weight_decay=5e-2, betas=(0.9, 0.999), eps=1e-8)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(
         opt, T_max=max_epochs * steps, eta_min=1e-6)
 
+    mode = ("FROZEN-encoder" if freeze_encoder
+            else f"LP-FT(warmup={lp_ft_warmup},enc_lr×{encoder_lr_mult})"
+            if lp_ft_warmup > 0 else "full-FT")
     best_val, best_state, patience, no_imp, ep = 0.0, None, 10, 0, 0
     print(f"      steps/epoch={steps}  batch={batch_size} seqs "
-          f"(={batch_size*SEQ_LEN} epoch-encodes/step) "
-          f"{'FROZEN-encoder' if freeze_encoder else 'full-FT'}", flush=True)
+          f"(={batch_size*SEQ_LEN} epoch-encodes/step) {mode}", flush=True)
     for ep in range(max_epochs):
-        if not freeze_encoder:
+        # encoder frozen this epoch if full-freeze, or still inside LP warmup
+        enc_frozen = freeze_encoder or (ep < lp_ft_warmup)
+        if enc_frozen:
+            model.eval()
+        else:
             model.train()
         head.train()
+        if ep == lp_ft_warmup and lp_ft_warmup > 0 and not freeze_encoder:
+            print(f"      >>> LP warmup done — unfreezing encoder at "
+                  f"lr={base_lr*encoder_lr_mult:.1e}", flush=True)
         t0 = time.time()
         for si, (bx, by) in enumerate(tr):
             bx = bx.to(device, non_blocking=True); by = by.to(device, non_blocking=True)
-            if freeze_encoder:
+            if enc_frozen:
                 with torch.no_grad():
                     feats = _encode_epochs(model, bx)
                 logits = head(feats)
@@ -268,6 +285,12 @@ def main():
                         "head (tests pretrained feature quality directly)")
     p.add_argument("--max_train_seqs", type=int, default=None,
                    help="cap #train sequences (low-data regime; seeded subsample)")
+    p.add_argument("--lp_ft_warmup", type=int, default=0,
+                   help="LP-FT: freeze encoder for the first K epochs (linear-"
+                        "probe the head), then unfreeze. 0 = plain full-FT.")
+    p.add_argument("--encoder_lr_mult", type=float, default=1.0,
+                   help="encoder LR = base_lr * this (head keeps base_lr). "
+                        "Use <1 (e.g. 0.1) with --lp_ft_warmup for gentle FT.")
     p.add_argument("--device", default="auto")
     p.add_argument("--output", default=None)
     args = p.parse_args()
@@ -349,7 +372,9 @@ def main():
                               device, args.max_epochs)
         else:
             m = run_finetune_seq(model, Xtr, ytr, Xva, yva, Xte, yte, N_CLASSES,
-                                 device, args.max_epochs, args.batch_size)
+                                 device, args.max_epochs, args.batch_size,
+                                 lp_ft_warmup=args.lp_ft_warmup,
+                                 encoder_lr_mult=args.encoder_lr_mult)
         print(f"    BA={m['balanced_accuracy']:.4f} κ={m['cohen_kappa']:.4f} "
               f"wF1={m['weighted_f1']:.4f}")
         jr.append(m)
@@ -372,7 +397,9 @@ def main():
                                   rm.d_model, device, args.max_epochs)
             else:
                 m = run_finetune_seq(rm, Xtr, ytr, Xva, yva, Xte, yte, N_CLASSES,
-                                     device, args.max_epochs, args.batch_size)
+                                     device, args.max_epochs, args.batch_size,
+                                     lp_ft_warmup=args.lp_ft_warmup,
+                                     encoder_lr_mult=args.encoder_lr_mult)
             print(f"    BA={m['balanced_accuracy']:.4f} κ={m['cohen_kappa']:.4f} "
                   f"wF1={m['weighted_f1']:.4f}")
             rr.append(m)
