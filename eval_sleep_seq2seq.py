@@ -185,6 +185,71 @@ def run_finetune_seq(base_model, Xtr, ytr, Xva, yva, Xte, yte, n_classes,
     return m
 
 
+def precompute_seq_features(model, X, device, batch_size=16):
+    """Encode every sequence's 20 epochs once -> pooled features [N,20,d] (CPU).
+    For frozen probe: encoder is fixed, so features are computed a single time
+    and the head trains on them cheaply."""
+    model.eval()
+    Xt = torch.from_numpy(X)
+    out = []
+    with torch.no_grad():
+        for i in range(0, len(Xt), batch_size):
+            bx = Xt[i:i + batch_size].to(device)
+            out.append(_encode_epochs(model, bx).cpu())
+    return torch.cat(out)          # [N, 20, d]
+
+
+def run_head_only(Ftr, ytr, Fva, yva, Fte, yte, n_classes, d_model, device,
+                  max_epochs=50, batch_size=256):
+    """Train ONLY the 1-layer seq transformer + head on precomputed frozen
+    features. Epochs are trivial (no encoder) so this runs in seconds."""
+    head = SeqHead(d_model, n_classes).to(device)
+    tr = DataLoader(TensorDataset(Ftr, torch.from_numpy(ytr)),
+                    batch_size=batch_size, shuffle=True, drop_last=True)
+    va = DataLoader(TensorDataset(Fva, torch.from_numpy(yva)),
+                    batch_size=batch_size, shuffle=False)
+    cw = torch.bincount(torch.from_numpy(ytr).reshape(-1).long(),
+                        minlength=n_classes).float()
+    cw = (1.0 / cw.clamp(min=1)); cw = (cw / cw.sum() * n_classes).to(device)
+    crit = nn.CrossEntropyLoss(weight=cw, label_smoothing=0.1)
+    steps = max(1, len(tr))
+    opt = torch.optim.AdamW(head.parameters(), lr=5e-4, weight_decay=5e-2)
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+        opt, T_max=max_epochs * steps, eta_min=1e-6)
+    best_val, best_state, patience, no_imp, ep = 0.0, None, 15, 0, 0
+    for ep in range(max_epochs):
+        head.train()
+        for bf, by in tr:
+            bf = bf.to(device); by = by.to(device)
+            loss = crit(head(bf).reshape(-1, n_classes), by.reshape(-1))
+            opt.zero_grad(); loss.backward(); opt.step(); sched.step()
+        head.eval(); vp, vl = [], []
+        with torch.no_grad():
+            for bf, by in va:
+                vp.append(head(bf.to(device)).argmax(-1).cpu().reshape(-1))
+                vl.append(by.reshape(-1))
+        val_ba = balanced_accuracy_score(torch.cat(vl).numpy(), torch.cat(vp).numpy())
+        if val_ba > best_val:
+            best_val = val_ba
+            best_state = {k: v.cpu().clone() for k, v in head.state_dict().items()}
+            no_imp = 0
+        else:
+            no_imp += 1
+        if no_imp >= patience:
+            break
+    if best_state:
+        head.load_state_dict(best_state); head.to(device)
+    head.eval(); preds = []
+    with torch.no_grad():
+        for i in range(0, len(Fte), batch_size):
+            preds.append(head(Fte[i:i + batch_size].to(device))
+                         .argmax(-1).cpu().numpy().reshape(-1))
+    preds = np.concatenate(preds)
+    m = compute_metrics(yte.reshape(-1), preds)
+    m["best_val_ba"] = float(best_val); m["epochs"] = int(ep + 1)
+    return m
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--dataset", choices=["isruc", "hmc"], required=True)
@@ -262,29 +327,52 @@ def main():
         agg["_per_rep"] = reps
         return agg
 
-    print(f"\n  JEPA seq2seq FT ({args.n_reps} reps × {args.max_epochs} ep)")
+    # Frozen probe: encode JEPA features ONCE (encoder fixed), reuse across reps.
+    jepa_feats = None
+    if args.freeze_encoder:
+        t = time.time()
+        jepa_feats = (precompute_seq_features(model, Xtr, device, args.batch_size),
+                      precompute_seq_features(model, Xva, device, args.batch_size),
+                      precompute_seq_features(model, Xte, device, args.batch_size))
+        print(f"  [frozen] JEPA features {tuple(jepa_feats[0].shape)} encoded once "
+              f"in {(time.time()-t)/60:.1f} min", flush=True)
+
+    print(f"\n  JEPA seq2seq {'FROZEN-probe' if args.freeze_encoder else 'FT'} "
+          f"({args.n_reps} reps × {args.max_epochs} ep)")
     jr = []
     for rep in range(args.n_reps):
         torch.manual_seed(42 + rep); np.random.seed(42 + rep)
         print(f"  Rep {rep+1}/{args.n_reps}")
-        m = run_finetune_seq(model, Xtr, ytr, Xva, yva, Xte, yte, N_CLASSES,
-                             device, args.max_epochs, args.batch_size,
-                             freeze_encoder=args.freeze_encoder)
+        if args.freeze_encoder:
+            m = run_head_only(jepa_feats[0], ytr, jepa_feats[1], yva,
+                              jepa_feats[2], yte, N_CLASSES, model.d_model,
+                              device, args.max_epochs)
+        else:
+            m = run_finetune_seq(model, Xtr, ytr, Xva, yva, Xte, yte, N_CLASSES,
+                                 device, args.max_epochs, args.batch_size)
         print(f"    BA={m['balanced_accuracy']:.4f} κ={m['cohen_kappa']:.4f} "
               f"wF1={m['weighted_f1']:.4f}")
         jr.append(m)
     results["jepa_finetune"] = _agg(jr)
 
     if args.include_random_baseline:
-        print(f"\n  Random-init seq2seq FT ({args.n_reps} reps)")
+        print(f"\n  Random-init seq2seq {'FROZEN-probe' if args.freeze_encoder else 'FT'} "
+              f"({args.n_reps} reps)")
         rr = []
         for rep in range(args.n_reps):
             torch.manual_seed(42 + rep); np.random.seed(42 + rep)
             print(f"  Rep {rep+1}/{args.n_reps}")
             rm = build_random_init(model_cls, n_ch, ckpt_args, device)
-            m = run_finetune_seq(rm, Xtr, ytr, Xva, yva, Xte, yte, N_CLASSES,
-                                 device, args.max_epochs, args.batch_size,
-                                 freeze_encoder=args.freeze_encoder)
+            if args.freeze_encoder:
+                # random encoder differs each rep -> re-encode features per rep
+                Rtr = precompute_seq_features(rm, Xtr, device, args.batch_size)
+                Rva = precompute_seq_features(rm, Xva, device, args.batch_size)
+                Rte = precompute_seq_features(rm, Xte, device, args.batch_size)
+                m = run_head_only(Rtr, ytr, Rva, yva, Rte, yte, N_CLASSES,
+                                  rm.d_model, device, args.max_epochs)
+            else:
+                m = run_finetune_seq(rm, Xtr, ytr, Xva, yva, Xte, yte, N_CLASSES,
+                                     device, args.max_epochs, args.batch_size)
             print(f"    BA={m['balanced_accuracy']:.4f} κ={m['cohen_kappa']:.4f} "
                   f"wF1={m['weighted_f1']:.4f}")
             rr.append(m)
