@@ -17,11 +17,14 @@ from pathlib import Path
 import numpy as np
 
 
-def main(chunk_dir: str):
+def main(chunk_dir: str, max_chunks: int = 0):
     d = Path(chunk_dir)
     npzs = sorted(d.glob("chunk_*.npz"))
     if not npzs:
         raise SystemExit(f"no chunk_*.npz under {d}")
+    if max_chunks > 0:
+        npzs = npzs[:max_chunks]
+        print(f"converting FIRST {len(npzs)} chunks only (--max_chunks)")
     print(f"{len(npzs)} chunks in {d}")
     for i, npz in enumerate(npzs):
         stem = npz.stem                       # chunk_0000
@@ -48,6 +51,7 @@ def main(chunk_dir: str):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        raise SystemExit("usage: python convert_npz_to_npy_sidecars.py <chunk_dir>")
-    main(sys.argv[1])
+    if len(sys.argv) not in (2, 3):
+        raise SystemExit("usage: python convert_npz_to_npy_sidecars.py "
+                         "<chunk_dir> [max_chunks]")
+    main(sys.argv[1], int(sys.argv[2]) if len(sys.argv) == 3 else 0)
