@@ -176,6 +176,33 @@ def parse_seizure_list(txt_path: Path) -> dict[str, list[tuple[int, int]]]:
     return seizures
 
 
+def _resolve_edf_name(list_name: str, disk_names: list[str]) -> Optional[str]:
+    """Map a seizure-list 'File name' to the actual disk EDF, tolerant to Siena's
+    inconsistent naming (list 'PN01.edf' vs disk 'PN01-1.edf'; list 'PN11-.edf'
+    vs disk 'PN11-1.edf'). Exact → canonical → single-EDF-subject fallback."""
+    if list_name in disk_names:
+        return list_name
+    canon = lambda n: n.upper().replace(".EDF", "").rstrip("-_ ")
+    cl = canon(list_name)
+    for d in disk_names:
+        if canon(d) == cl:
+            return d
+    m = re.match(r"(PN\d+)", list_name, re.IGNORECASE)
+    if m:
+        subj = m.group(1).upper()
+        cands = [d for d in disk_names if d.upper().startswith(subj)]
+        if len(cands) == 1:            # single recording → unambiguous
+            return cands[0]
+        mi = re.search(r"PN\d+[-_](\d+)", list_name, re.IGNORECASE)
+        if mi:                          # match recording index if the list has one
+            idx = int(mi.group(1))
+            for d in cands:
+                md = re.search(r"PN\d+[-_](\d+)", d, re.IGNORECASE)
+                if md and int(md.group(1)) == idx:
+                    return d
+    return None
+
+
 def _list_subjects(data_dir) -> dict[str, dict]:
     """Return {PNxx: {'edfs': [Path,...], 'seizures': {edf_name:[(s,e)]}}}."""
     data_dir = Path(data_dir)
@@ -198,6 +225,18 @@ def _list_subjects(data_dir) -> dict[str, dict]:
         out.setdefault(sid, {"edfs": [], "seizures": {}})
         out[sid]["edfs"].extend(edfs)
         out[sid]["seizures"].update(seiz)
+    # Remap seizure keys (list filenames) to actual disk EDF names.
+    for sid, info in out.items():
+        disk_names = [e.name for e in info["edfs"]]
+        remapped: dict[str, list] = {}
+        for lname, ivs in info["seizures"].items():
+            tgt = _resolve_edf_name(lname, disk_names)
+            if tgt is None:
+                print(f"  [siena] WARN {sid}: seizure file '{lname}' unmatched "
+                      f"to disk {disk_names}")
+                continue
+            remapped.setdefault(tgt, []).extend(ivs)
+        info["seizures"] = remapped
     return out
 
 
