@@ -92,9 +92,14 @@ def _encode_epochs(model, x_seq):
 
 
 def run_finetune_seq(base_model, Xtr, ytr, Xva, yva, Xte, yte, n_classes,
-                     device, max_epochs=50, batch_size=16):
+                     device, max_epochs=50, batch_size=16, freeze_encoder=False):
     model = copy.deepcopy(base_model)
     head = SeqHead(model.d_model, n_classes).to(device)
+    if freeze_encoder:
+        for p in model.parameters():
+            p.requires_grad_(False)
+        model.eval()
+    trainable = ([] if freeze_encoder else list(model.parameters())) + list(head.parameters())
 
     tr = DataLoader(TensorDataset(torch.from_numpy(Xtr), torch.from_numpy(ytr)),
                     batch_size=batch_size, shuffle=True, drop_last=True,
@@ -108,24 +113,33 @@ def run_finetune_seq(base_model, Xtr, ytr, Xva, yva, Xte, yte, n_classes,
     crit = nn.CrossEntropyLoss(weight=cw, label_smoothing=0.1)
 
     steps = max(1, len(tr))
-    opt = torch.optim.AdamW(list(model.parameters()) + list(head.parameters()),
-                            lr=1e-4, weight_decay=5e-2, betas=(0.9, 0.999), eps=1e-8)
+    # frozen probe: only head trains, so a slightly higher LR converges faster
+    lr = 5e-4 if freeze_encoder else 1e-4
+    opt = torch.optim.AdamW(trainable, lr=lr, weight_decay=5e-2,
+                            betas=(0.9, 0.999), eps=1e-8)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(
         opt, T_max=max_epochs * steps, eta_min=1e-6)
 
     best_val, best_state, patience, no_imp, ep = 0.0, None, 10, 0, 0
     print(f"      steps/epoch={steps}  batch={batch_size} seqs "
-          f"(={batch_size*SEQ_LEN} epoch-encodes/step)", flush=True)
+          f"(={batch_size*SEQ_LEN} epoch-encodes/step) "
+          f"{'FROZEN-encoder' if freeze_encoder else 'full-FT'}", flush=True)
     for ep in range(max_epochs):
-        model.train(); head.train()
+        if not freeze_encoder:
+            model.train()
+        head.train()
         t0 = time.time()
         for si, (bx, by) in enumerate(tr):
             bx = bx.to(device, non_blocking=True); by = by.to(device, non_blocking=True)
-            logits = head(_encode_epochs(model, bx))      # [B,seq,C]
+            if freeze_encoder:
+                with torch.no_grad():
+                    feats = _encode_epochs(model, bx)
+                logits = head(feats)
+            else:
+                logits = head(_encode_epochs(model, bx))      # [B,seq,C]
             loss = crit(logits.reshape(-1, n_classes), by.reshape(-1))
             opt.zero_grad(); loss.backward()
-            torch.nn.utils.clip_grad_norm_(
-                list(model.parameters()) + list(head.parameters()), 1.0)
+            torch.nn.utils.clip_grad_norm_(trainable, 1.0)
             opt.step(); sched.step()
             if ep == 0 and (si == 0 or (si + 1) % 10 == 0):
                 el = time.time() - t0
@@ -184,6 +198,11 @@ def main():
     p.add_argument("--batch_size", type=int, default=16)
     p.add_argument("--n_reps", type=int, default=3)
     p.add_argument("--include_random_baseline", action="store_true")
+    p.add_argument("--freeze_encoder", action="store_true",
+                   help="frozen probe: only train the 1-layer seq transformer + "
+                        "head (tests pretrained feature quality directly)")
+    p.add_argument("--max_train_seqs", type=int, default=None,
+                   help="cap #train sequences (low-data regime; seeded subsample)")
     p.add_argument("--device", default="auto")
     p.add_argument("--output", default=None)
     args = p.parse_args()
@@ -217,8 +236,21 @@ def main():
     print(f"Sequences: train {Xtr.shape}, val {Xva.shape}, test {Xte.shape} "
           f"({(time.time()-t0)/60:.1f} min)")
 
+    if args.max_train_seqs and args.max_train_seqs < len(Xtr):
+        rng = np.random.RandomState(42)
+        sel = rng.choice(len(Xtr), args.max_train_seqs, replace=False)
+        Xtr, ytr = Xtr[sel], ytr[sel]
+        print(f"Low-data: subsampled train -> {Xtr.shape[0]} sequences "
+              f"(~{Xtr.shape[0]*SEQ_LEN} epochs)")
+
+    mode = ("FROZEN-probe" if args.freeze_encoder else "full-FT") + \
+           (f" | low-data {args.max_train_seqs}seq" if args.max_train_seqs else "")
+    print(f"  Regime: {mode}")
+
     results = {"checkpoint": args.checkpoint, "dataset": args.dataset,
                "model_type": mtype, "seq_len": SEQ_LEN, "n_classes": N_CLASSES,
+               "regime": mode, "freeze_encoder": bool(args.freeze_encoder),
+               "max_train_seqs": args.max_train_seqs,
                "split": {k: list(v) for k, v in SP.items()}}
 
     def _agg(reps):
@@ -236,7 +268,8 @@ def main():
         torch.manual_seed(42 + rep); np.random.seed(42 + rep)
         print(f"  Rep {rep+1}/{args.n_reps}")
         m = run_finetune_seq(model, Xtr, ytr, Xva, yva, Xte, yte, N_CLASSES,
-                             device, args.max_epochs, args.batch_size)
+                             device, args.max_epochs, args.batch_size,
+                             freeze_encoder=args.freeze_encoder)
         print(f"    BA={m['balanced_accuracy']:.4f} κ={m['cohen_kappa']:.4f} "
               f"wF1={m['weighted_f1']:.4f}")
         jr.append(m)
@@ -250,7 +283,8 @@ def main():
             print(f"  Rep {rep+1}/{args.n_reps}")
             rm = build_random_init(model_cls, n_ch, ckpt_args, device)
             m = run_finetune_seq(rm, Xtr, ytr, Xva, yva, Xte, yte, N_CLASSES,
-                                 device, args.max_epochs, args.batch_size)
+                                 device, args.max_epochs, args.batch_size,
+                                 freeze_encoder=args.freeze_encoder)
             print(f"    BA={m['balanced_accuracy']:.4f} κ={m['cohen_kappa']:.4f} "
                   f"wF1={m['weighted_f1']:.4f}")
             rr.append(m)
