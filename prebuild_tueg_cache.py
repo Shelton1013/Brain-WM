@@ -372,19 +372,32 @@ def main():
     chunk_files: list[Path] = []
 
     def _flush_chunk():
-        """Stack chunk_trials into one numpy array and save to disk."""
+        """Stack chunk_trials and write mmap-ready .npy sidecars directly.
+
+        We save <stem>_trials.npy / <stem>_sids.npy (uncompressed, mmap-friendly)
+        instead of a compressed .npz — the loader mmaps the sidecars and never
+        needs the .npz, so this removes the separate convert_npz_to_npy step.
+        The manifest still lists the logical 'chunk_XXXX.npz' name (loader uses
+        it only to derive the stem). Writes are atomic (.tmp then rename) so an
+        interrupted build never leaves a half-written sidecar to be mmap'd.
+        """
         nonlocal chunk_trials, chunk_subject_ids, chunk_idx
         if not chunk_trials:
             return
         # Stack (incurs 2× memory briefly, ok per chunk = ~38 GB for 500 patients)
         stacked = np.stack(chunk_trials).astype(np.float32)
         chunk_subj_ids_arr = np.array(chunk_subject_ids, dtype=np.int64)
-        chunk_file = chunk_dir / f"chunk_{chunk_idx:04d}.npz"
-        np.savez(str(chunk_file), trials=stacked, subject_ids=chunk_subj_ids_arr)
-        chunk_files.append(chunk_file)
-        size_gb = chunk_file.stat().st_size / 1e9
+        stem = f"chunk_{chunk_idx:04d}"
+        t_npy = chunk_dir / f"{stem}_trials.npy"
+        s_npy = chunk_dir / f"{stem}_sids.npy"
+        np.save(str(t_npy) + ".tmp.npy", stacked)
+        np.save(str(s_npy) + ".tmp.npy", chunk_subj_ids_arr)
+        Path(str(t_npy) + ".tmp.npy").rename(t_npy)
+        Path(str(s_npy) + ".tmp.npy").rename(s_npy)
+        chunk_files.append(chunk_dir / f"{stem}.npz")   # logical name for manifest
+        size_gb = t_npy.stat().st_size / 1e9
         print(f"    ↑ chunk {chunk_idx:04d}: {len(chunk_trials)} trials "
-              f"({size_gb:.2f} GB) saved", flush=True)
+              f"({size_gb:.2f} GB npy sidecar) saved", flush=True)
         chunk_idx += 1
         # Free Python objects (helps GC reclaim memory)
         chunk_trials.clear()
@@ -466,7 +479,8 @@ def main():
     _save_cache(cache_path, manifest)
 
     elapsed_total = time.time() - t_proc
-    total_chunk_gb = sum(f.stat().st_size for f in chunk_files) / 1e9
+    total_chunk_gb = sum((f.with_name(f.stem + "_trials.npy")).stat().st_size
+                         for f in chunk_files) / 1e9
     print(f"\n[prebuild] Done in {elapsed_total/60:.1f} min", flush=True)
     print(f"[prebuild] Trials: {total_trials}", flush=True)
     print(f"[prebuild] Subjects: {all_subject_count}", flush=True)
