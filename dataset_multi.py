@@ -56,6 +56,7 @@ Usage:
 
 import hashlib
 import json
+import os
 import time
 import numpy as np
 import torch
@@ -660,20 +661,30 @@ class EDFDirectoryDataset(Dataset):
                         # Materialize only a small block at a time for the check;
                         # the stored trials stay zero-copy mmap views.
                         n_rows = len(trials_arr)
-                        _BLK = 4096
-                        n_good_chunk = 0
-                        for b0 in range(0, n_rows, _BLK):
-                            b1 = min(b0 + _BLK, n_rows)
-                            block = np.asarray(trials_arr[b0:b1])  # RAM: BLK×T×C
-                            fm = np.isfinite(block).all(axis=(1, 2))
-                            for j in np.nonzero(fm)[0]:
-                                gi = b0 + int(j)
-                                # zero-copy mmap view (block itself is freed next iter)
-                                self.trials.append(trials_arr[gi])
-                                self.subject_ids.append(int(sids[gi]))
-                            n_good_chunk += int(fm.sum())
-                        n_dropped_bad += n_rows - n_good_chunk
-                        n_loaded += n_good_chunk
+                        if os.environ.get("SKIP_FINITE_CHECK") == "1":
+                            # Skip the per-block isfinite READ (the NFS-heavy part
+                            # that makes startup take hours on a huge cache). Store
+                            # all rows as lazy mmap views — no data read here. Any
+                            # rare NaN (EA ill-conditioning) is caught by the
+                            # per-batch guard in train_one_epoch.
+                            self.trials.extend(trials_arr)          # lazy views
+                            self.subject_ids.extend(sids.tolist())
+                            n_loaded += n_rows
+                        else:
+                            _BLK = 4096
+                            n_good_chunk = 0
+                            for b0 in range(0, n_rows, _BLK):
+                                b1 = min(b0 + _BLK, n_rows)
+                                block = np.asarray(trials_arr[b0:b1])  # RAM: BLK×T×C
+                                fm = np.isfinite(block).all(axis=(1, 2))
+                                for j in np.nonzero(fm)[0]:
+                                    gi = b0 + int(j)
+                                    # zero-copy mmap view (block freed next iter)
+                                    self.trials.append(trials_arr[gi])
+                                    self.subject_ids.append(int(sids[gi]))
+                                n_good_chunk += int(fm.sum())
+                            n_dropped_bad += n_rows - n_good_chunk
+                            n_loaded += n_good_chunk
                     self.electrode_names = cached["electrode_names"]
                     self.n_subjects = cached["n_subjects"]
                     if n_dropped_bad:

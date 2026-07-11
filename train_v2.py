@@ -121,6 +121,13 @@ def train_one_epoch(model, loader, optimizer, scheduler, device, epoch,
         loss_dict = model(eeg, subject_ids)
         loss = loss_dict["total"]
 
+        # NaN/Inf guard (safety net when SKIP_FINITE_CHECK bypasses the cache
+        # scan, or on a rare EA-ill-conditioned trial): drop this batch.
+        if not torch.isfinite(loss):
+            optimizer.zero_grad(set_to_none=True)
+            scheduler.step()
+            continue
+
         optimizer.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
