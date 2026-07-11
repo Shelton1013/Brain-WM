@@ -200,6 +200,10 @@ def main():
     parser.add_argument("--arch", type=str, default="v2", choices=["v2", "v3"],
                         help="v3 = frequency-native (filterbank tokenizer + real "
                              "cross-frequency spectral prediction, no MAE)")
+    parser.add_argument("--drop_short_recording_min", type=float, default=0.0)
+    parser.add_argument("--trim_start_end_sec", type=int, default=0)
+    parser.add_argument("--notch_freq", type=float, default=0.0)
+    parser.add_argument("--reject_abs_uv", type=float, default=0.0)
     parser.add_argument("--n_bands", type=int, default=5)
     parser.add_argument("--band_mask_ratio", type=float, default=0.30)
     parser.add_argument("--filt_kernel", type=int, default=65)
@@ -274,6 +278,11 @@ def main():
         cache_dir=args.data_cache_dir if args.data_cache_dir else None,
         trial_duration_s=args.trial_duration_s,
         normalization=args.normalization,
+        # CBraMod-style artifact filters — must match prebuild for cache-hit.
+        drop_short_recording_min=args.drop_short_recording_min,
+        trim_start_end_sec=args.trim_start_end_sec,
+        notch_freq=args.notch_freq,
+        reject_abs_uv=args.reject_abs_uv,
     )
     pprint(f"Dataset: {len(dataset)} trials, {dataset.n_subjects} subjects, "
            f"{len(dataset.electrode_names)} channels")
