@@ -53,38 +53,50 @@ class FilterbankTokenizer(nn.Module):
         self.patch_len = patch_len
         self.n_bands = n_bands
         self.d_band = d_band
-        # depthwise-over-band conv: 1 -> N filters, applied per channel
+        # LEARNABLE bank — used only for the encoder INPUT (tokenization).
         self.filters = nn.Conv1d(1, n_bands, kernel_size=filt_kernel,
                                  padding=filt_kernel // 2, bias=False)
-        self._init_bandpass(filt_kernel, sample_rate)
+        self._init_bandpass(self.filters.weight.data, filt_kernel, sample_rate)
+        # FIXED bank — used only for the CF TARGET (non-learnable buffer). Keeps
+        # the spectral target stable so the model can't collapse it to a trivial
+        # constant by degenerating the learnable filters.
+        tgt = torch.zeros(n_bands, 1, filt_kernel)
+        self._init_bandpass(tgt, filt_kernel, sample_rate)
+        self.register_buffer("target_filters", tgt)
+        self.tgt_pad = filt_kernel // 2
+
         self.band_proj = nn.Linear(patch_len, d_band)       # per-band patch -> d_band
         self.combine = nn.Linear(n_bands * d_band, d_model)  # bands -> token
         self.norm = nn.LayerNorm(d_model)
 
-    def _init_bandpass(self, K: int, fs: int):
-        """Init each filter as a Hann-windowed sinusoid at its band centre so the
-        bank starts frequency-selective (still fully learnable)."""
+    @staticmethod
+    def _init_bandpass(weight: torch.Tensor, K: int, fs: int):
+        """Fill `weight` [N,1,K] with Hann-windowed sinusoids at band centres."""
         n = torch.arange(K) - K // 2
         win = torch.hann_window(K, periodic=False)
         with torch.no_grad():
-            for b in range(self.n_bands):
+            for b in range(weight.shape[0]):
                 fc = _BAND_CENTERS_HZ[b % len(_BAND_CENTERS_HZ)]
                 kernel = win * torch.cos(2 * math.pi * fc * n / fs)
                 kernel = kernel - kernel.mean()               # zero-DC
                 kernel = kernel / (kernel.norm() + 1e-6)
-                self.filters.weight[b, 0].copy_(kernel)
+                weight[b, 0].copy_(kernel)
 
     def forward(self, eeg: torch.Tensor):
         B, T, C = eeg.shape
         Tp = T // self.patch_len
         T_use = Tp * self.patch_len
         x = eeg[:, :T_use, :].permute(0, 2, 1).reshape(B * C, 1, T_use)  # [B*C,1,T]
-        bands = self.filters(x)                                # [B*C, N, T_use]
-        bands = bands.reshape(B, C, self.n_bands, Tp, self.patch_len)   # [B,C,N,Tp,P]
-        # per-band log-power target (from the real band-filtered patch)
-        logpow = torch.log1p((bands ** 2).mean(dim=-1))        # [B,C,N,Tp]
-        band_logpow = logpow.permute(0, 1, 3, 2).contiguous()  # [B,C,Tp,N]
-        # per-band patch embedding
+
+        # ── CF TARGET: fixed bank, no grad → stable, ungameable ──
+        with torch.no_grad():
+            tbands = F.conv1d(x, self.target_filters, padding=self.tgt_pad)
+            tbands = tbands.reshape(B, C, self.n_bands, Tp, self.patch_len)
+            tlogpow = torch.log1p((tbands ** 2).mean(dim=-1))  # [B,C,N,Tp]
+            band_logpow = tlogpow.permute(0, 1, 3, 2).contiguous()  # [B,C,Tp,N]
+
+        # ── INPUT: learnable bank ──
+        bands = self.filters(x).reshape(B, C, self.n_bands, Tp, self.patch_len)
         band_emb = self.band_proj(bands)                       # [B,C,N,Tp,d_band]
         band_emb = band_emb.permute(0, 1, 3, 2, 4).contiguous()  # [B,C,Tp,N,d_band]
         token = self._combine(band_emb)                        # [B,C,Tp,D]
