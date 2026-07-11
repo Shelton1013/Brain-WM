@@ -79,7 +79,7 @@ def _process_patient(args_tuple):
     (patient_id, edf_paths, sample_rate, trial_duration_s,
      use_ea, min_channels, normalization,
      drop_short_recording_min, trim_start_end_sec,
-     notch_freq, reject_abs_uv) = args_tuple
+     notch_freq, reject_abs_uv, highpass_hz, lowpass_hz) = args_tuple
     trial_samples = sample_rate * trial_duration_s
     min_samples_for_filter = int(40 * sample_rate)
 
@@ -104,7 +104,7 @@ def _process_patient(args_tuple):
                 continue
 
             # Bandpass + optional notch (MNE requires array-like for freqs)
-            raw.filter(0.1, 75.0, verbose=False)
+            raw.filter(highpass_hz, lowpass_hz, verbose=False)
             if notch_freq and notch_freq > 0:
                 raw.notch_filter([float(notch_freq)], verbose=False)
 
@@ -245,6 +245,12 @@ def main():
                     help="Discard first/last N seconds of each recording "
                          "(start/end artifacts). CBraMod uses 60. "
                          "Default 0 = no trim.")
+    ap.add_argument("--highpass_hz", type=float, default=0.1,
+                    help="bandpass high-pass cutoff (0.5 recommended for v3 to "
+                         "clean sub-delta drift while keeping delta)")
+    ap.add_argument("--lowpass_hz", type=float, default=75.0,
+                    help="bandpass low-pass cutoff (45 recommended for v3 to kill "
+                         "EMG/powerline that pollute beta/gamma band targets)")
     ap.add_argument("--notch_freq", type=float, default=0.0,
                     help="Notch filter at given Hz (60 for US/TUH data, "
                          "50 for EU). Default 0 = no notch.")
@@ -345,7 +351,7 @@ def main():
         (p, patient_files[p], args.sample_rate, args.trial_duration_s,
          args.use_ea, args.min_channels, args.normalization,
          args.drop_short_recording_min, args.trim_start_end_sec,
-         args.notch_freq, args.reject_abs_uv)
+         args.notch_freq, args.reject_abs_uv, args.highpass_hz, args.lowpass_hz)
         for p in patients
     ]
 
