@@ -13,7 +13,7 @@ set -u
 
 # ---- EDIT THESE ----------------------------------------------------------
 CKPT=${CKPT:-/home/pxieaf/home2/model/lejepa_v3_filter_full_e15/checkpoint_ep2.pt}
-GPU=${GPU:-8}                     # a FREE gpu (training uses 0-7)
+GPU=${GPU:-8}                     # 10 GPUs (0-9); training uses 0-7, so 8 or 9 are free for eval
 # --------------------------------------------------------------------------
 OUT=$(dirname "$CKPT"); LOG=/home/pxieaf/home2/logs_2
 COMMON="--sample_rate 256 --trial_duration_s 10 --normalization per_recording_robust"
