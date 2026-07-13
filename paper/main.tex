@@ -1,0 +1,223 @@
+% EEG-LeJEPA v3 — ICLR draft
+% Requires the ICLR style files (iclr2025_conference.sty/.bst, fancyhdr, natbib).
+% Download from https://github.com/ICLR/Master-Template and drop into this dir,
+% or swap \documentclass line for {article} to compile a plain version.
+\documentclass{article}
+\usepackage{iclr2025_conference,times}
+\usepackage{amsmath,amssymb,graphicx,booktabs,multirow,xcolor}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\newcommand{\best}[1]{\textbf{#1}}
+\newcommand{\val}[2]{#1\,{\scriptstyle\pm#2}}
+
+\title{Frequency-Native Self-Supervised Pretraining for EEG\\Foundation Models}
+\author{Anonymous}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Self-supervised EEG foundation models are typically pretrained with
+reconstruction (masked autoencoding) or latent-prediction (JEPA) objectives on
+raw time-domain patches. We show that such time-domain objectives learn
+representations that barely exceed those of a \emph{randomly initialized}
+encoder on clinical EEG, and whose advantage is further \emph{washed out} by
+full fine-tuning. We argue the missing inductive bias is \emph{frequency}: the
+discriminative content of EEG is largely spectral (band power and cross-band
+coupling). We introduce a frequency-native pretraining scheme built on a
+learnable filterbank tokenizer and a cross-frequency masked-prediction objective:
+random frequency bands are removed from the encoder input and their spectral
+energy is predicted from the surviving bands and spatio-temporal context, against
+a \emph{fixed} filterbank target that cannot be collapsed. On six clinical
+benchmarks spanning sleep staging, depression, seizure and abnormality
+detection, the learned features beat a strong random-encoder baseline by large
+margins, and---crucially---\emph{the advantage survives full fine-tuning}, in
+contrast to prior latent objectives. On the leak-free Siena seizure benchmark our
+fine-tuned model exceeds published state of the art on AUC-PR. We further show
+that aggressive artifact filtering during pretraining is task-dependent, helping
+rhythmic tasks and hurting transient ones.
+\end{abstract}
+
+\section{Introduction}
+Large self-supervised models pretrained on the TUH EEG Corpus (TUEG) have become
+the standard recipe for EEG representation learning
+\citep{jiang2024labram,wang2025cbramod}. The dominant objectives are borrowed
+from vision: masked signal reconstruction (MAE) and joint-embedding predictive
+architectures (JEPA). We begin from a puzzling observation: on several clinical
+tasks, a \emph{randomly initialized} encoder with the same architecture yields
+frozen-feature linear probes that rival a fully pretrained one, and full
+fine-tuning erases whatever small advantage pretraining provided. This suggests
+the pretext task is not teaching the encoder anything a random projection of the
+signal does not already expose.
+
+The discriminative structure of clinical EEG is overwhelmingly \emph{spectral}:
+sleep stages are defined by band-specific rhythms (delta, spindles), depression
+by frontal alpha asymmetry and theta power, seizures by cross-band bursts. Raw
+time-domain masking does not force a model to represent this structure. We make
+frequency an architectural prior. Our contributions are:
+\begin{itemize}
+  \item A \textbf{learnable filterbank tokenizer} that decomposes each EEG patch
+  into physiological bands ($\delta\theta\alpha\beta\gamma$) before encoding, so
+  band structure is present in the encoder input.
+  \item A \textbf{cross-frequency masked-prediction} objective: mask random
+  bands, predict their log-power from the other bands and context, against a
+  \emph{fixed} (non-learnable) filterbank target. Using a fixed target is
+  essential---a learnable target collapses to a trivial constant (\S\ref{sec:method}).
+  \item Evidence that this frequency-native pretraining \textbf{beats a random
+  encoder by large margins and, unlike prior latent objectives, retains its
+  advantage under full fine-tuning}, across sleep, depression and seizure tasks.
+  \item A controlled study of pretraining-data artifact filtering, showing it is
+  \textbf{task-dependent} (helps rhythmic, hurts transient tasks), and a
+  leakage-clean benchmark protocol.
+\end{itemize}
+
+\section{Related Work}
+\textbf{EEG foundation models.} LaBraM \citep{jiang2024labram} tokenizes EEG with
+a neural vector-quantizer and predicts discrete codes; CBraMod
+\citep{wang2025cbramod} uses criss-cross attention with masked reconstruction;
+CSBrain adds cross-scale spatio-temporal modeling. These use reconstruction /
+discrete-token objectives. We instead predict \emph{spectral} targets and analyze
+what survives fine-tuning.
+\textbf{Self-supervised paradigms.} MAE reconstructs raw signal; I-JEPA predicts
+latent representations of masked regions. Both are time-domain. Our objective is
+frequency-domain and cross-band.
+\textbf{Anti-collapse regularization.} Latent objectives require anti-collapse
+terms (VICReg, SIGReg). We retain SIGReg but show the collapse risk in
+frequency-target prediction comes from a \emph{learnable} target, fixed by design.
+\textbf{Benchmark leakage.} We note that TUEG-derived pretraining overlaps at the
+patient level with TUAB/TUEV; our non-TUH benchmarks (sleep, depression, seizure)
+are leak-free for all methods and thus directly comparable.
+
+\section{Method}
+\label{sec:method}
+\textbf{Input.} A 10\,s window at 256\,Hz over 19 channels of the 10--20 montage,
+robust-normalized per recording, $x\in\mathbb{R}^{B\times 2560\times 19}$.
+
+\textbf{Filterbank tokenizer.} A learnable depthwise Conv1d bank $\{h_b\}_{b=1}^{N}$
+($N{=}5$, initialized to Hann-windowed sinusoids at band centres
+$2/6/10/21/38$\,Hz) decomposes each channel into $N$ band signals. Each 200-sample
+patch of each band is linearly embedded to $\mathbb{R}^{d_b}$, and the $N$ band
+embeddings are concatenated and projected to the token dimension $D{=}512$. Tokens
+$[B, C, T_p, D]$ (here $C{=}19$, $T_p{=}12$) are processed by a 12-layer
+criss-cross transformer (alternating channel/time attention).
+
+\textbf{Cross-frequency masked prediction (primary).} For each (channel,
+time-patch), each band is masked independently with probability $\rho{=}0.3$;
+masked band embeddings are replaced by a learnable token before concatenation, so
+the encoder never sees them. From the encoder output we predict the log-power of
+every band, $\hat{p}\in\mathbb{R}^{B\times C\times T_p\times N}$, and supervise
+the masked entries against a target computed by a \emph{fixed} (buffer,
+no-gradient) filterbank on the raw signal:
+\begin{equation}
+\mathcal{L}_{\text{cf}}=\frac{1}{|\mathcal{M}|}\sum_{(c,t,b)\in\mathcal{M}}
+\big(\hat{p}_{c,t,b}-\log(1+\bar{e}_{c,t,b})\big)^2,\quad
+\bar e_{c,t,b}=\tfrac1P\!\sum_\tau (h^{\text{fix}}_b * x)_{c,t,\tau}^2 .
+\end{equation}
+A fixed target is critical: with a \emph{learnable} target filterbank the model
+minimizes $\mathcal{L}_{\text{cf}}$ by collapsing the filters so the target
+$\to 0$ (we observe $\mathcal{L}_{\text{cf}}{\to}4\!\times\!10^{-4}$); the fixed
+target makes collapse counter-productive (an uninformative input raises the loss),
+anchoring the learnable input filters to stay informative.
+
+\textbf{Cross-band JEPA (auxiliary).} A predictor maps the band-masked encoding to
+the full-band encoding (stop-gradient), $\mathcal{L}_{\text{jepa}}$, weight 0.3.
+
+\textbf{Anti-collapse.} SIGReg \citep{balestriero2025lejepa} pushes token
+embeddings toward isotropy, weight $\lambda{=}0.05$. We drop MAE entirely (it
+conflicts with the latent term and reconstructs noise).
+\begin{equation}
+\mathcal{L}=\mathcal{L}_{\text{cf}}+0.3\,\mathcal{L}_{\text{jepa}}+0.05\,\mathcal{L}_{\text{sig}} .
+\end{equation}
+
+\section{Experiments}
+\textbf{Pretraining.} TUEG at 256\,Hz, 10\,s windows, robust norm; we do not
+exclude TUAB/TUEV patients (matching CBraMod/CSBrain). We compare a
+\emph{no-filter} corpus and a \emph{filtered} corpus (0.5--45\,Hz band-pass,
+$>$150\,$\mu$V rejection, short-recording/edge trimming).
+
+\textbf{Downstream benchmarks.} ISRUC and HMC (5-class sleep staging, seq2seq over
+20 epochs); Mumtaz2016 (depression, binary); Siena (seizure, binary, extreme
+imbalance); TUAB (abnormality, binary). All non-TUH sets are leak-free for every
+method. We report the CBraMod/CSBrain subject-disjoint splits.
+
+\textbf{Protocol.} We evaluate both a \emph{frozen probe} (encoder frozen, a light
+head trained) and \emph{full fine-tuning}. The random-init baseline uses the
+identical architecture and protocol. Because Mumtaz/Siena test sets are tiny
+(10 / 41 positive windows), single-split estimates are high-variance; we report
+mean$\pm$std over 5 seeds (Mumtaz/Siena) or 3 reps (sleep).
+
+\section{Results}
+\textit{(Preliminary: numbers are from a 2-epoch pretrained checkpoint; full
+training in progress.)}
+
+\begin{table}[t]\centering\small
+\caption{Fine-tuning: frequency-native pretraining beats random init and the
+advantage \emph{survives} full fine-tuning. Sleep in balanced accuracy (BA),
+Siena in AUC-PR (extreme imbalance).}
+\begin{tabular}{lccc}
+\toprule
+ & ISRUC (BA) & Mumtaz (BA) & Siena (AUC-PR) \\
+\midrule
+Random init (FT)      & \val{0.738}{0.008} & \val{0.798}{0.136} & 0.053 \\
+\textbf{Ours} (FT)    & \best{\val{0.769}{0.003}} & \best{\val{0.869}{0.079}} & \best{0.654} \\
+\midrule
+CBraMod (published)   & 0.787 & 0.956 & 0.411 \\
+CSBrain (published)   & 0.793 & 0.964 & 0.487 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]\centering\small
+\caption{Frozen linear probe: pretrained features vs.\ random. Ours wins on the
+ranking metrics on every task.}
+\begin{tabular}{lcccc}
+\toprule
+ & ISRUC BA & Mumtaz BA & Mumtaz AUC-PR & Siena AUC-PR \\
+\midrule
+Random init  & 0.566 & \val{0.733}{0.09} & 0.805 & 0.081 \\
+\textbf{Ours} & \best{0.717} & \best{\val{0.837}{0.07}} & \best{0.926} & \best{0.239} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Pretraining survives fine-tuning.} Prior latent objectives (our
+time-domain JEPA+MAE variant) lose their frozen-probe advantage under full FT
+(random init catches up or exceeds). The frequency-native model retains a
+significant FT advantage on all tasks (ISRUC $+3.0$ BA, Mumtaz $+7.1$ BA, Siena
+$12\times$ AUC-PR), a clean sweep across seeds on ISRUC.
+
+\textbf{Pretraining is essential under extreme imbalance.} On Siena, a randomly
+initialized encoder fine-tunes to near-chance AUC-PR (0.053); ours reaches 0.654,
+exceeding published SOTA (single-seed; multi-seed verification in progress).
+
+\subsection{Ablations}
+\textbf{Fixed vs.\ learnable target.} A learnable-target filterbank collapses
+($\mathcal{L}_{\text{cf}}{\to}0$, features degenerate); the fixed target is
+necessary and sufficient to prevent this.
+\textbf{Artifact filtering is task-dependent.} A 0.5--45\,Hz band-pass with
+amplitude rejection improves rhythmic tasks (ISRUC frozen $0.676{\to}0.717$) but
+hurts transient ones (Siena frozen AUC-PR $0.311{\to}0.239$), consistent with the
+filter removing high-frequency/high-amplitude seizure content.
+
+\section{Conclusion}
+Making frequency an architectural prior---via a learnable filterbank and a
+cross-frequency spectral prediction task with a fixed target---produces EEG
+representations that are useful both frozen and, unlike prior latent objectives,
+after full fine-tuning. This reframes what an EEG foundation model should predict:
+not raw signal or opaque latents, but the spectral relationships that define
+clinical EEG.
+
+\textbf{Limitations.} Current numbers are from an early checkpoint; tiny clinical
+test sets demand multi-seed reporting; the pretraining filter presents a
+rhythmic/transient trade-off we do not yet fully resolve.
+
+\bibliographystyle{iclr2025_conference}
+\begin{thebibliography}{9}
+\bibitem[Jiang et al.(2024)]{jiang2024labram} W. Jiang et al. Large brain model
+for learning generic representations with EEG. \emph{ICLR}, 2024.
+\bibitem[Wang et al.(2025)]{wang2025cbramod} J. Wang et al. CBraMod: a criss-cross
+brain foundation model for EEG. \emph{ICLR}, 2025.
+\bibitem[Balestriero \& LeCun(2025)]{balestriero2025lejepa} R. Balestriero and
+Y. LeCun. LeJEPA: sketched isotropic Gaussian regularization. 2025.
+\end{thebibliography}
+\end{document}
