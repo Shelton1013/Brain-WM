@@ -67,10 +67,10 @@ hmc_ft)
     --output "$OUT/hmc_ft.json" 2>&1 | tee $LOG/eval_hmc_ft.log ;;
 
 # ---------------- TUAB (abnormal, optional, TUH-derived) ----------------
-tuab)
+tuab)  # --mode both = frozen + FT
   run "tuab" python eval_tuh_clinical.py --checkpoint "$CKPT" \
-    --data_dir /home/pxieaf/home2/tuh/tuh_eeg_abnormal/v3.0.1/edf \
-    --cache_dir $CACHE $COMMON --kind tuab --n_reps 3 --include_random_baseline \
+    --dataset tuab --tuh_dir /home/pxieaf/home2/tuh/tuh_eeg_abnormal/v3.0.1/edf \
+    --cache_dir $CACHE $COMMON --mode both --n_reps 3 --include_random_baseline \
     --output "$OUT/tuab.json" 2>&1 | tee $LOG/eval_tuab.log ;;
 
 help|*)
