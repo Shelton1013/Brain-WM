@@ -20,8 +20,8 @@
 
 % helpers
 \newcommand{\best}[1]{\textbf{#1}}
-\newcommand{\val}[2]{#1\,{\scriptstyle\pm#2}}
-\newcommand{\na}{\text{--}}
+\newcommand{\val}[2]{#1\,{\scriptsize$\pm$#2}}
+\newcommand{\na}{--}
 
 % band colors
 \definecolor{cdelta}{HTML}{3B5BD0}\definecolor{ctheta}{HTML}{6741C9}
@@ -175,11 +175,12 @@ the log-power of every band and supervise the masked entries against a target
 computed by a \emph{fixed} (buffer, no-gradient) filterbank $h^{\mathrm{fix}}$ on
 the raw signal:
 \begin{equation}
-\mathcal{L}_{\mathrm{cf}}=\!\!\frac{1}{|\mathcal{M}|}\!\!\sum_{(c,t,b)\in\mathcal{M}}\!\!
-\big(\hat p_{c,t,b}-\log(1+\bar e_{c,t,b})\big)^2,\;
-\bar e_{c,t,b}=\tfrac1P\!\sum_\tau\!\big(h^{\mathrm{fix}}_b* x\big)^2_{c,t,\tau}.
+\mathcal{L}_{\mathrm{cf}}=\frac{1}{|\mathcal{M}|}\!\!\sum_{(c,t,b)\in\mathcal{M}}\!\!
+\big(\hat p_{c,t,b}-\log(1+\bar e_{c,t,b})\big)^2,
 \end{equation}
-A fixed target is critical. With a \emph{learnable} target filterbank the model
+where the target band power is $\bar e_{c,t,b}=\tfrac1P\sum_\tau(h^{\mathrm{fix}}_b*
+x)^2_{c,t,\tau}$ and $\mathcal{M}$ is the set of masked (channel, patch, band)
+triples. A fixed target is critical. With a \emph{learnable} target filterbank the model
 minimizes $\mathcal{L}_{\mathrm{cf}}$ by collapsing the filters so the target
 $\to0$ (we observe $\mathcal{L}_{\mathrm{cf}}{\to}4{\times}10^{-4}$ and degenerate
 features). The fixed target makes collapse counter-productive: an uninformative
