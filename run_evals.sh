@@ -10,6 +10,7 @@
 #   Paths are fixed to the server layout. Swap CKPT only.
 # ==========================================================================
 set -u
+export PYTHONUNBUFFERED=1          # live progress through `tee` (else python block-buffers)
 
 # ---- EDIT THESE ----------------------------------------------------------
 CKPT=${CKPT:-/home/pxieaf/home2/model/lejepa_v3_filter_full_e15/checkpoint_ep2.pt}
