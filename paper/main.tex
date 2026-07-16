@@ -262,10 +262,30 @@ their frozen-probe edge under FT), ours keeps a significant advantage after FT.}
 \end{figure}
 
 \noindent\textbf{Pretraining survives fine-tuning.} Our earlier time-domain
-JEPA+MAE variant loses its frozen advantage under full FT (random catches up or
-exceeds). The frequency-native model keeps a significant FT advantage on every
+JEPA+MAE variant (v2) loses its frozen advantage under full FT (random catches up
+or exceeds). The frequency-native model keeps a significant FT advantage on every
 task (ISRUC $+3.0$ BA, Mumtaz $+7.1$ BA, Siena $12\times$ AUC-PR;
 Fig.~\ref{fig:survives}), a clean per-seed sweep on ISRUC.
+Table~\ref{tab:survive} isolates this contrast on ISRUC under an identical
+evaluation pipeline: the pretraining gap $\Delta{=}$JEPA$-$Random is positive
+frozen for both variants, but under FT the time-domain variant's gap turns
+\emph{negative} (washout) while the frequency-native gap stays positive.
+
+\begin{table}[t]\centering\small
+\setlength{\tabcolsep}{6pt}
+\caption{\textbf{Time-domain vs.\ frequency-native pretraining} on ISRUC (BA),
+same eval pipeline. $\Delta$ = JEPA $-$ Random. The time-domain gap collapses
+(and flips sign) under fine-tuning; the frequency-native gap survives.}
+\label{tab:survive}
+\begin{tabular}{lcc}
+\toprule
+Pretraining & $\Delta$ frozen & $\Delta$ fine-tuned\\
+\midrule
+Time-domain (JEPA+MAE, v2)      & $+0.026$ & $-0.025$\\
+\best{Frequency-native (ours)}  & \best{$+0.151$} & \best{$+0.031$}\\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \noindent\textbf{Pretraining is essential under extreme imbalance.} On Siena a
 random encoder fine-tunes to near-chance AUC-PR ($0.053$); ours reaches $0.654$,
