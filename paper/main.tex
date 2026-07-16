@@ -2,25 +2,21 @@
 %% Needs the official AAAI style: aaai2027.sty + aaai2027.bst (from the AAAI
 %% author kit). Drop them in this directory. Figures: figures/*.pdf (run
 %% figures/make_figures.py) and the inline TikZ Figure 1.
-\documentclass[letterpaper]{article}
-\usepackage{aaai2027}
-\usepackage{times}
-\usepackage{helvet}
-\usepackage{courier}
-\usepackage[hyphens]{url}
-\usepackage{graphicx}
+\documentclass[letterpaper]{article} % DO NOT CHANGE THIS
+\usepackage[submission]{aaai2027}    % DO NOT CHANGE THIS
+% Fonts (times/helvet/courier) are loaded by aaai2027.sty — do NOT add them.
+\usepackage[hyphens]{url}  % DO NOT CHANGE THIS
+\usepackage{graphicx}      % DO NOT CHANGE THIS
+\urlstyle{rm}              % DO NOT CHANGE THIS
+\def\UrlFont{\rm}          % DO NOT CHANGE THIS
+\usepackage{natbib}        % DO NOT CHANGE THIS
+\usepackage{caption}       % DO NOT CHANGE THIS
+\frenchspacing             % DO NOT CHANGE THIS
 \usepackage{booktabs}
 \usepackage{amsmath,amssymb}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,backgrounds,fit}
-\usepackage[caption=false]{subfig}
-\urlstyle{rm}
-\def\UrlFont{\rm}
-\frenchspacing
-\setlength{\pdfpagewidth}{8.5in}
-\setlength{\pdfpageheight}{11in}
 \pdfinfo{/TemplateVersion (2027.1)}
-\setcounter{secnumdepth}{1}
 
 % helpers
 \newcommand{\best}[1]{\textbf{#1}}
@@ -33,8 +29,8 @@
 \definecolor{cgamma}{HTML}{D1541F}\definecolor{cacc}{HTML}{0A8F9E}
 
 \title{Frequency-Native Self-Supervised Pretraining for EEG Foundation Models}
-\author{Anonymous submission}
-\affiliations{}
+\author{Anonymous Submission}
+\affiliations{Paper under double-blind review}
 
 \begin{document}
 \maketitle
@@ -305,15 +301,24 @@ EEG.
 test sets demand multi-seed reporting; the pretraining filter presents a
 rhythmic/transient trade-off we do not yet fully resolve.
 
-\bibliographystyle{aaai2027}
-\begin{thebibliography}{9}
-\bibitem{jiang2024labram} W.~Jiang et al. Large brain model for generic EEG
-representations. \emph{ICLR}, 2024.
-\bibitem{wang2025cbramod} J.~Wang et al. CBraMod: a criss-cross brain foundation
-model for EEG. \emph{ICLR}, 2025.
-\bibitem{csbrain} Y.~Chen et al. CSBrain: cross-scale spatiotemporal brain
-foundation model. \emph{NeurIPS}, 2025.
-\bibitem{balestriero2025lejepa} R.~Balestriero and Y.~LeCun. LeJEPA: sketched
-isotropic Gaussian regularization. 2025.
+% Manual author-year bibliography (works with natbib without bibtex). To use the
+% AAAI .bst instead: \bibliographystyle{aaai2027}\bibliography{yourrefs}.
+\begin{thebibliography}{}
+\bibitem[Balestriero and LeCun(2025)]{balestriero2025lejepa}
+Balestriero, R.; and LeCun, Y. 2025.
+LeJEPA: sketched isotropic Gaussian regularization for joint-embedding predictive
+architectures.
+\bibitem[Chen et al.(2025)]{csbrain}
+Chen, Y.; et al. 2025.
+CSBrain: a cross-scale spatiotemporal brain foundation model for EEG.
+In \emph{NeurIPS}.
+\bibitem[Jiang et al.(2024)]{jiang2024labram}
+Jiang, W.; et al. 2024.
+Large brain model for learning generic representations with EEG.
+In \emph{ICLR}.
+\bibitem[Wang et al.(2025)]{wang2025cbramod}
+Wang, J.; et al. 2025.
+CBraMod: a criss-cross brain foundation model for EEG.
+In \emph{ICLR}.
 \end{thebibliography}
 \end{document}

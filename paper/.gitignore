@@ -1,0 +1,8 @@
+AuthorKit27.zip
+AuthorKit27/
+.DS_Store
+*.aux
+*.log
+*.out
+*.bbl
+*.blg
