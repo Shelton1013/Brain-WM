@@ -214,6 +214,10 @@ def main():
     parser.add_argument("--n_bands", type=int, default=5)
     parser.add_argument("--band_mask_ratio", type=float, default=0.30)
     parser.add_argument("--filt_kernel", type=int, default=65)
+    parser.add_argument("--cf_learnable_target", action="store_true",
+                        help="ablation: use the LEARNABLE filterbank as the CF "
+                             "target (collapse-prone; demonstrates why a fixed "
+                             "target is needed)")
     parser.add_argument("--reg_type", type=str, default="sigreg",
                         choices=["sigreg", "vicreg"],
                         help="sigreg is SAFE (v1 confirmed); vicreg DESTROYS features")
@@ -338,6 +342,7 @@ def main():
             sample_rate=256, band_mask_ratio=args.band_mask_ratio,
             jepa_weight=args.jepa_weight, cf_weight=args.cf_weight,
             sigreg_lambda=args.sigreg_lambda, reg_type=args.reg_type,
+            cf_learnable_target=args.cf_learnable_target,
         ).to(device)
     else:
         model = EEGLeJEPA_v2(**model_kwargs).to(device)

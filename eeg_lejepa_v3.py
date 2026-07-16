@@ -48,7 +48,8 @@ class FilterbankTokenizer(nn.Module):
     """
 
     def __init__(self, patch_len: int, d_model: int, n_bands: int = 5,
-                 d_band: int = 64, filt_kernel: int = 65, sample_rate: int = 256):
+                 d_band: int = 64, filt_kernel: int = 65, sample_rate: int = 256,
+                 learnable_target: bool = False):
         super().__init__()
         self.patch_len = patch_len
         self.n_bands = n_bands
@@ -65,6 +66,7 @@ class FilterbankTokenizer(nn.Module):
         self.register_buffer("target_filters", tgt)
         self.tgt_pad = filt_kernel // 2
 
+        self.learnable_target = learnable_target   # ablation: collapse-prone target
         self.band_proj = nn.Linear(patch_len, d_band)       # per-band patch -> d_band
         self.combine = nn.Linear(n_bands * d_band, d_model)  # bands -> token
         self.norm = nn.LayerNorm(d_model)
@@ -88,15 +90,23 @@ class FilterbankTokenizer(nn.Module):
         T_use = Tp * self.patch_len
         x = eeg[:, :T_use, :].permute(0, 2, 1).reshape(B * C, 1, T_use)  # [B*C,1,T]
 
-        # ── CF TARGET: fixed bank, no grad → stable, ungameable ──
-        with torch.no_grad():
-            tbands = F.conv1d(x, self.target_filters, padding=self.tgt_pad)
-            tbands = tbands.reshape(B, C, self.n_bands, Tp, self.patch_len)
-            tlogpow = torch.log1p((tbands ** 2).mean(dim=-1))  # [B,C,N,Tp]
-            band_logpow = tlogpow.permute(0, 1, 3, 2).contiguous()  # [B,C,Tp,N]
-
         # ── INPUT: learnable bank ──
         bands = self.filters(x).reshape(B, C, self.n_bands, Tp, self.patch_len)
+
+        # ── CF TARGET ──
+        if self.learnable_target:
+            # ABLATION: target from the LEARNABLE bank, WITH gradient. The model
+            # can then game it by collapsing the filters so the target -> 0.
+            logpow = torch.log1p((bands ** 2).mean(dim=-1))
+            band_logpow = logpow.permute(0, 1, 3, 2).contiguous()
+        else:
+            # DEFAULT: fixed bank, no grad -> stable, ungameable.
+            with torch.no_grad():
+                tbands = F.conv1d(x, self.target_filters, padding=self.tgt_pad)
+                tbands = tbands.reshape(B, C, self.n_bands, Tp, self.patch_len)
+                band_logpow = torch.log1p((tbands ** 2).mean(dim=-1)) \
+                    .permute(0, 1, 3, 2).contiguous()
+
         band_emb = self.band_proj(bands)                       # [B,C,N,Tp,d_band]
         band_emb = band_emb.permute(0, 1, 3, 2, 4).contiguous()  # [B,C,Tp,N,d_band]
         token = self._combine(band_emb)                        # [B,C,Tp,D]
@@ -126,6 +136,7 @@ class EEGLeJEPA_v3(nn.Module):
         cf_weight: float = 1.0,
         sigreg_lambda: float = 0.05,
         reg_type: str = "sigreg",
+        cf_learnable_target: bool = False,   # ablation: collapse-prone CF target
         **_ignored,          # tolerate extra ckpt args
     ):
         super().__init__()
@@ -140,7 +151,8 @@ class EEGLeJEPA_v3(nn.Module):
         self.reg_type = reg_type
 
         self.tokenizer = FilterbankTokenizer(
-            patch_len, d_model, n_bands, d_band, filt_kernel, sample_rate)
+            patch_len, d_model, n_bands, d_band, filt_kernel, sample_rate,
+            learnable_target=cf_learnable_target)
 
         self.pos_time = nn.Parameter(torch.zeros(1, 1, max_time_patches, d_model))
         self.pos_channel = nn.Parameter(torch.zeros(1, max_channels, 1, d_model))
