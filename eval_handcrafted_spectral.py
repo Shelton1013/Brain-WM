@@ -154,7 +154,27 @@ def load_siena(args):
     return X_tr, y_tr, X_te, y_te, meta
 
 
-LOADERS = {"mumtaz": load_mumtaz, "siena": load_siena}
+def load_schizophrenia(args):
+    from dataset_schizophrenia import SchizophreniaDataset, make_subject_split
+    splits = make_subject_split(args.data_dir, seed=args.seed)
+    print(f"  Train: H {splits['train']['H']}  SZ {splits['train']['SZ']}")
+    print(f"  Test:  H {splits['test']['H']}  SZ {splits['test']['SZ']}")
+
+    def _ds(subjects):
+        return SchizophreniaDataset(
+            data_dir=args.data_dir, subjects=subjects,
+            sample_rate=args.sample_rate, trial_duration_s=args.trial_duration_s,
+            normalization=args.normalization, cache_dir=args.cache_dir)
+
+    X_tr, y_tr = dataset_to_xy(_ds(splits["train"]))
+    X_te, y_te = dataset_to_xy(_ds(splits["test"]))
+    meta = {"split": {k: {g: list(v) for g, v in d.items()}
+                      for k, d in splits.items()}}
+    return X_tr, y_tr, X_te, y_te, meta
+
+
+LOADERS = {"mumtaz": load_mumtaz, "siena": load_siena,
+           "schizophrenia": load_schizophrenia}
 
 
 def main():
