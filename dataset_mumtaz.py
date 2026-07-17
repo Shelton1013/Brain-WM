@@ -186,6 +186,51 @@ def make_subject_split(data_dir: str,
     return splits
 
 
+def make_cbramod_split(data_dir: str) -> dict:
+    """Replicate CBraMod/CSBrain's EXACT deterministic Mumtaz split (no seed).
+
+    Verified from wjq-learning/CBraMod preprocessing_mumtaz.py:
+      drop TASK files; files_H = names without 'MDD', files_MDD = names with
+      'MDD'; sorted() each lexicographically; slice
+        H[:40]/[40:48]/[48:]  and  MDD[:42]/[42:52]/[52:]  -> train/val/test.
+    Each subject contributes exactly 2 files (EC+EO) that sort adjacently and
+    every cut index is even -> effectively subject-disjoint. CSBrain loads the
+    same LMDB, so this matches BOTH papers' test set:
+      test HC {S4-S9}, MDD {S33,S34,S4-S9}  (14 subjects, given clean inventory).
+    """
+    data_dir = Path(data_dir)
+    names = [p.name for p in data_dir.glob("*.edf")]
+    valid = [n for n in names if _FNAME_RE.match(n)
+             and _FNAME_RE.match(n).group("cond").upper() != "TASK"]
+    files_H = sorted(n for n in valid if "MDD" not in n.upper())
+    files_MDD = sorted(n for n in valid if "MDD" in n.upper())
+    print(f"  [mumtaz CBraMod split] inventory: {len(files_H)} H files "
+          f"(expect 60), {len(files_MDD)} MDD files (expect 68)")
+    slices = {"train": (files_H[:40], files_MDD[:42]),
+              "val":   (files_H[40:48], files_MDD[42:52]),
+              "test":  (files_H[48:], files_MDD[52:])}
+
+    def _sids(flist):
+        return sorted({int(_FNAME_RE.match(f).group("subj")) for f in flist})
+
+    split = {k: {"H": _sids(h), "MDD": _sids(m)} for k, (h, m) in slices.items()}
+    # sanity: subject-disjoint across splits
+    seen = {}
+    for k in ("train", "val", "test"):
+        for grp in ("H", "MDD"):
+            for sid in split[k][grp]:
+                key = (grp, sid)
+                if key in seen:
+                    print(f"  ⚠ subject {grp} S{sid} spans {seen[key]} & {k} "
+                          f"(missing EC/EO file?) — split not clean")
+                seen[key] = k
+    print("  [mumtaz CBraMod split] "
+          + " ".join(f"{s}:H{len(split[s]['H'])}/MDD{len(split[s]['MDD'])}"
+                     for s in ("train", "val", "test")))
+    print(f"    test HC {split['test']['H']}  MDD {split['test']['MDD']}")
+    return split
+
+
 class MumtazDataset(Dataset):
     """Mumtaz2016 depression EEG dataset, 2-class (MDD/Healthy).
 

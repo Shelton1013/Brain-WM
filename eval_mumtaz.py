@@ -36,7 +36,7 @@ from sklearn.metrics import (
 )
 
 from dataset_mumtaz import (
-    MumtazDataset, make_subject_split, LABEL_NAMES, N_CLASSES,
+    MumtazDataset, make_subject_split, make_cbramod_split, LABEL_NAMES, N_CLASSES,
 )
 from eval_tuh_clinical import (
     load_pretrained, build_random_init,
@@ -284,6 +284,10 @@ def main():
     p.add_argument("--ft_drop_path", type=float, default=0.0)
     p.add_argument("--ft_head_lr_mult", type=float, default=1.0)
     p.add_argument("--n_reps", type=int, default=1)
+    p.add_argument("--split_mode", choices=["cbramod", "counts"], default="cbramod",
+                   help="cbramod: exact CBraMod/CSBrain deterministic split "
+                        "(test=14 subj, --seed only varies training). "
+                        "counts: old seed-randomized subject split.")
     p.add_argument("--include_random_baseline", action="store_true")
     p.add_argument("--device", default="auto")
     p.add_argument("--output", default=None)
@@ -311,8 +315,13 @@ def main():
     model, model_cls, model_type_name, n_channels, ckpt_args = \
         load_pretrained(args.checkpoint, device)
 
-    print(f"\n--- Building splits ---")
-    splits = make_subject_split(args.mumtaz_dir, seed=args.seed)
+    print(f"\n--- Building splits ({args.split_mode}) ---")
+    if args.split_mode == "cbramod":
+        # exact CBraMod/CSBrain deterministic split (no seed); --seed only
+        # affects TRAINING (init/data order) for honest mean±std reporting.
+        splits = make_cbramod_split(args.mumtaz_dir)
+    else:
+        splits = make_subject_split(args.mumtaz_dir, seed=args.seed)
     print(f"  Train: H {splits['train']['H']}  MDD {splits['train']['MDD']}")
     print(f"  Val:   H {splits['val']['H']}  MDD {splits['val']['MDD']}")
     print(f"  Test:  H {splits['test']['H']}  MDD {splits['test']['MDD']}")
