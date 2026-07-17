@@ -114,38 +114,7 @@ are leak-free for every method and thus directly comparable; we report on the
 same subject-disjoint splits as CBraMod/CSBrain.
 
 \begin{figure*}[t]\centering
-\begin{tikzpicture}[font=\small,>=Latex,node distance=6mm,
-  box/.style={draw,rounded corners=2pt,minimum height=8mm,align=center,fill=white},
-  band/.style={minimum width=7mm,minimum height=6mm,rounded corners=1pt,text=white}]
- % input
- \node[box,minimum width=16mm] (x) {Raw EEG\\$[2560,19]$};
- % learnable filterbank -> bands
- \node[right=10mm of x] (fb) {};
- \node[band,fill=cdelta,above=1pt of fb] (bd) {$\delta$};
- \node[band,fill=ctheta,below=1pt of bd] (bt) {$\theta$};
- \node[band,fill=calpha,below=1pt of bt] (ba) {$\alpha$};
- \node[band,fill=cbeta,below=1pt of ba,draw,dashed,text=black] (bb) {$\beta$?};
- \node[band,fill=cgamma,below=1pt of bb] (bg) {$\gamma$};
- \node[above=1pt of bd,font=\scriptsize] {learnable filterbank};
- \draw[->] (x) -- (bd.west|-x);
- % mask + encoder
- \node[box,right=12mm of ba,minimum width=20mm] (enc) {criss-cross\\encoder\\(12 layers)};
- \node[above=0.5pt of enc,font=\scriptsize] {mask $\beta$ $\to$ mask token};
- \draw[->] (bd.east) -- (enc.west|-bd);
- \draw[->] (bt.east) -- (enc.west|-bt);
- \draw[->] (ba.east) -- (enc);
- \draw[->,dashed] (bb.east) -- (enc.west|-bb);
- \draw[->] (bg.east) -- (enc.west|-bg);
- % heads
- \node[box,right=12mm of enc,fill=cacc!12] (cf) {\textbf{cross-freq}\\predict $\log$-power\\of masked $\beta$};
- \node[box,below=8mm of cf] (jepa) {JEPA (aux)\\+ SIGReg};
- \draw[->] (enc) -- (cf);
- \draw[->] (enc) -- (jepa);
- % fixed target
- \node[box,right=10mm of cf,fill=black!5] (tgt) {\emph{fixed}\\filterbank\\target};
- \draw[->,densely dotted] (x.south) to[out=-40,in=-160] node[below,font=\scriptsize]{no grad} (tgt.south);
- \draw[<->,cacc,thick] (cf) -- node[above,font=\scriptsize]{MSE} (tgt);
-\end{tikzpicture}
+\includegraphics[width=\textwidth]{figures/pipeline.pdf}
 \caption{\textbf{Frequency-native pretraining.} A learnable filterbank splits each
 patch into $\delta\theta\alpha\beta\gamma$ bands; random bands are masked out of
 the encoder input. The model predicts the masked band's log-power (primary,
