@@ -198,22 +198,36 @@ def make_cbramod_split(data_dir: str) -> dict:
     same LMDB, so this matches BOTH papers' test set:
       test HC {S4-S9}, MDD {S33,S34,S4-S9}  (14 subjects, given clean inventory).
     """
+    # Mirror CBraMod's os.listdir logic EXACTLY: take ALL .edf where 'TASK' not
+    # in name (NO regex filter, so figshare's hash-prefixed duplicate files are
+    # kept just as their os.listdir would keep them), split by 'MDD' substring,
+    # sorted() each, slice by FILE index. The figshare source is incomplete
+    # (MDD8 no resting, ~8 subjects missing a condition, H15 EO only as hash
+    # duplicates) — CBraMod used this same source, so replicating their code on
+    # it reproduces their real split, not an idealized clean-inventory one.
     data_dir = Path(data_dir)
-    names = [p.name for p in data_dir.glob("*.edf")]
-    valid = [n for n in names if _FNAME_RE.match(n)
-             and _FNAME_RE.match(n).group("cond").upper() != "TASK"]
-    files_H = sorted(n for n in valid if "MDD" not in n.upper())
-    files_MDD = sorted(n for n in valid if "MDD" in n.upper())
-    print(f"  [mumtaz CBraMod split] inventory: {len(files_H)} H files "
-          f"(expect 60), {len(files_MDD)} MDD files (expect 68)")
+    allf = [p.name for p in data_dir.glob("*.edf")]
+    nontask = [f for f in allf if "TASK" not in f.upper()]
+    files_H = sorted(f for f in nontask if "MDD" not in f.upper())
+    files_MDD = sorted(f for f in nontask if "MDD" in f.upper())
+    print(f"  [mumtaz CBraMod split] non-TASK files: H={len(files_H)} "
+          f"MDD={len(files_MDD)}")
     slices = {"train": (files_H[:40], files_MDD[:42]),
               "val":   (files_H[40:48], files_MDD[42:52]),
               "test":  (files_H[48:], files_MDD[52:])}
 
-    def _sids(flist):
-        return sorted({int(_FNAME_RE.match(f).group("subj")) for f in flist})
+    _sub = re.compile(r"(MDD|H)\s*S\s*(\d+)", re.I)   # tolerant (matches hash files)
 
-    split = {k: {"H": _sids(h), "MDD": _sids(m)} for k, (h, m) in slices.items()}
+    def _sids(flist, grp):
+        out = set()
+        for f in flist:
+            m = _sub.search(f)
+            if m and m.group(1).upper() == grp:
+                out.add(int(m.group(2)))
+        return sorted(out)
+
+    split = {k: {"H": _sids(h, "H"), "MDD": _sids(m, "MDD")}
+             for k, (h, m) in slices.items()}
     # sanity: subject-disjoint across splits
     seen = {}
     for k in ("train", "val", "test"):
