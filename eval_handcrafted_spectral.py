@@ -48,24 +48,33 @@ def dataset_to_xy(ds):
     return X, y
 
 
-def bandpower_features(X, fs):
+def bandpower_features(X, fs, chunk=20000, verbose=True):
     """X (N, T, C) -> handcrafted spectral features (N, 2*n_bands*C).
 
     Per channel per band: log absolute power and relative power (fraction of
-    total in-band power). Concatenated across channels+bands.
+    total in-band power). Welch is computed in CHUNKS over the flattened
+    (epoch x channel) signals so the intermediate never blows up memory, with
+    progress prints (a single monolithic welch on ~1e5 epochs stalls).
     """
-    # Welch PSD along time axis. nperseg ~ 1 s window for stable low-freq bins.
-    nperseg = min(X.shape[1], int(fs))
-    freqs, psd = welch(X, fs=fs, nperseg=nperseg, axis=1)   # psd (N, F, C)
-    band_pow = []
-    for _, lo, hi in BANDS:
-        m = (freqs >= lo) & (freqs < hi)
-        band_pow.append(psd[:, m, :].sum(axis=1))           # (N, C)
-    bp = np.stack(band_pow, axis=1)                          # (N, n_bands, C)
-    total = bp.sum(axis=1, keepdims=True) + 1e-10            # (N, 1, C)
-    log_abs = np.log(bp + 1e-10)                             # (N, n_bands, C)
-    rel = bp / total                                        # (N, n_bands, C)
-    N = X.shape[0]
+    N, T, C = X.shape
+    nperseg = min(T, int(fs))                               # ~1 s window
+    sig = np.ascontiguousarray(X.transpose(0, 2, 1)).reshape(N * C, T)  # [N*C, T]
+    M = sig.shape[0]
+    freqs = welch(sig[:1], fs=fs, nperseg=nperseg, axis=1)[0]
+    masks = [((freqs >= lo) & (freqs < hi)) for _, lo, hi in BANDS]
+    bp = np.empty((M, len(BANDS)), dtype=np.float32)        # [N*C, n_bands]
+    t0 = time.time()
+    for ci, s in enumerate(range(0, M, chunk)):
+        e = min(M, s + chunk)
+        _, psd = welch(sig[s:e], fs=fs, nperseg=nperseg, axis=1)   # [chunk, F]
+        for bi, m in enumerate(masks):
+            bp[s:e, bi] = psd[:, m].sum(axis=1)
+        if verbose and ci % 5 == 0:
+            print(f"    bandpower {e}/{M} signals ({time.time()-t0:.0f}s)", flush=True)
+    bp = bp.reshape(N, C, len(BANDS))                       # [N, C, n_bands]
+    total = bp.sum(axis=2, keepdims=True) + 1e-10           # [N, C, 1]
+    log_abs = np.log(bp + 1e-10)
+    rel = bp / total
     return np.concatenate([log_abs.reshape(N, -1), rel.reshape(N, -1)],
                           axis=1).astype(np.float32)
 
