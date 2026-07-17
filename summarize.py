@@ -74,7 +74,7 @@ def aggregate(files, key, metrics, multiseed):
     return res
 
 
-def fmt(mu, sd):
+def fmt(mu, sd, n=None):
     if mu != mu:
         return "  -  "
     return f"{mu:.3f}±{sd:.3f}" if sd == sd else f"{mu:.3f}"
