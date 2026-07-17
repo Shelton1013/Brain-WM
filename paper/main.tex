@@ -93,6 +93,17 @@ published SOTA on AUC-PR.
 \textbf{task-dependent}, plus a leakage-clean evaluation protocol.
 \end{itemize}
 
+\begin{figure*}[t]\centering
+\includegraphics[width=\textwidth]{figures/contrast.pdf}
+\caption{\textbf{Our framework vs.\ prior EEG foundation models.} Prior methods
+(LaBraM, CBraMod, CSBrain) mask \emph{time} patches and predict the raw signal or
+a discrete token of it---a target a random projection already exposes, so the
+pretraining advantage washes out under fine-tuning. We mask \emph{frequency}
+bands and predict cross-band spectral power against a fixed target; the advantage
+survives fine-tuning.}
+\label{fig:contrast}
+\end{figure*}
+
 \section{Related Work}
 \noindent\textbf{EEG foundation models.} LaBraM \cite{jiang2024labram} learns a
 neural vector-quantized tokenizer and predicts discrete codes; CBraMod
