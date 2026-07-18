@@ -28,12 +28,16 @@ run(){ echo -e "\n### $1"; shift; CUDA_VISIBLE_DEVICES=$GPU "$@"; }
 task=${1:-help}
 case "$task" in
 
-# ---------------- MUMTAZ (depression, LogReg, 5 seed) --------------------
+# ---------------- MUMTAZ (depression, LogReg) ---------------------------
+# EXACT CBraMod/CSBrain split (--split_mode cbramod, deterministic, no seed) on
+# the COMPLETE figshare source (mumtaz2016_full — the old mumtaz2016 was an
+# incomplete download that mis-sliced the split). --seed ONLY varies training
+# (init/data order) -> 3 seeds for honest mean±std on the fixed test set.
 mumtaz)
-  for S in 42 43 44 45 46; do
+  for S in 0 1 2; do
     run "mumtaz seed $S" python eval_mumtaz.py --mode both --checkpoint "$CKPT" \
-      --mumtaz_dir /home/pxieaf/home2/datasets/mumtaz2016 --cache_dir $CACHE $COMMON \
-      --frozen_reps 5 --ft_protocol onecycle --max_epochs 50 --n_reps 3 \
+      --mumtaz_dir /home/pxieaf/home2/datasets/mumtaz2016_full --cache_dir $CACHE $COMMON \
+      --split_mode cbramod --frozen_reps 5 --ft_protocol onecycle --max_epochs 50 \
       $RANDFLAG --seed $S \
       --output "$OUT/${TAG}_mumtaz_seed${S}.json"
   done 2>&1 | tee $LOG/${TAG}_eval_mumtaz.log ;;
