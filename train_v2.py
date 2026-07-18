@@ -214,6 +214,11 @@ def main():
     parser.add_argument("--n_bands", type=int, default=5)
     parser.add_argument("--band_mask_ratio", type=float, default=0.30)
     parser.add_argument("--filt_kernel", type=int, default=65)
+    parser.add_argument("--mask_axis", type=str, default="frequency",
+                        choices=["frequency", "time"],
+                        help="v3 ablation: 'frequency' masks bands (cross-freq, "
+                             "our model) vs 'time' masks whole time-patches "
+                             "(cross-time). Only the mask axis differs.")
     parser.add_argument("--cf_learnable_target", action="store_true",
                         help="ablation: use the LEARNABLE filterbank as the CF "
                              "target (collapse-prone; demonstrates why a fixed "
@@ -343,6 +348,7 @@ def main():
             jepa_weight=args.jepa_weight, cf_weight=args.cf_weight,
             sigreg_lambda=args.sigreg_lambda, reg_type=args.reg_type,
             cf_learnable_target=args.cf_learnable_target,
+            mask_axis=args.mask_axis,
         ).to(device)
     else:
         model = EEGLeJEPA_v2(**model_kwargs).to(device)

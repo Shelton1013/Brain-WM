@@ -137,6 +137,11 @@ class EEGLeJEPA_v3(nn.Module):
         sigreg_lambda: float = 0.05,
         reg_type: str = "sigreg",
         cf_learnable_target: bool = False,   # ablation: collapse-prone CF target
+        mask_axis: str = "frequency",        # ablation: "frequency" (mask bands,
+                                             # cross-freq) vs "time" (mask whole
+                                             # time-patches, cross-time). Only the
+                                             # MASK AXIS differs — isolates the
+                                             # frequency-vs-time-masking claim.
         **_ignored,          # tolerate extra ckpt args
     ):
         super().__init__()
@@ -145,6 +150,8 @@ class EEGLeJEPA_v3(nn.Module):
         self.n_bands = n_bands
         self.d_band = d_band
         self.band_mask_ratio = band_mask_ratio
+        assert mask_axis in ("frequency", "time")
+        self.mask_axis = mask_axis
         self.jepa_weight = jepa_weight
         self.cf_weight = cf_weight
         self.sigreg_lambda = sigreg_lambda
@@ -196,11 +203,19 @@ class EEGLeJEPA_v3(nn.Module):
         band_logpow = band_logpow[:, :Cc, :Tpp]
         B, C, Tp, N, d = band_emb.shape
 
-        # band mask: [B,C,Tp,N] True = masked (predict it)
-        bmask = torch.rand(B, C, Tp, N, device=eeg.device) < self.band_mask_ratio
-        # guarantee ≥1 visible band per position: force band 0 visible where all masked
-        all_masked = bmask.all(dim=-1)                        # [B,C,Tp]
-        bmask[..., 0] = bmask[..., 0] & ~all_masked
+        # mask: [B,C,Tp,N] True = masked (predict it). Two axes (ablation):
+        if self.mask_axis == "time":
+            # mask WHOLE time-patches (all bands) -> predict their band-power
+            # from OTHER time-patches = cross-TIME. Guarantee ≥1 visible patch.
+            tmask = torch.rand(B, C, Tp, device=eeg.device) < self.band_mask_ratio
+            all_t_masked = tmask.all(dim=-1)                  # [B,C]
+            tmask[..., 0] = tmask[..., 0] & ~all_t_masked
+            bmask = tmask.unsqueeze(-1).expand(B, C, Tp, N).clone()
+        else:
+            # mask random BANDS per position -> predict from OTHER bands = cross-FREQ
+            bmask = torch.rand(B, C, Tp, N, device=eeg.device) < self.band_mask_ratio
+            all_masked = bmask.all(dim=-1)                    # [B,C,Tp]
+            bmask[..., 0] = bmask[..., 0] & ~all_masked
 
         mask_tok = self.cf_mask_token.expand(B, C, Tp, N, d)
         band_ctx = torch.where(bmask.unsqueeze(-1), mask_tok, band_emb)
