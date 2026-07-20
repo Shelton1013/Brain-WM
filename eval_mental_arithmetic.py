@@ -17,7 +17,7 @@ import numpy as np
 import torch
 
 from dataset_mental_arithmetic import (
-    MentalArithmeticDataset, make_subject_split, N_CLASSES,
+    MentalArithmeticDataset, make_subject_split, make_csbrain_split, N_CLASSES,
 )
 from eval_tuh_clinical import load_pretrained, build_random_init
 from eval_mumtaz import (
@@ -53,6 +53,9 @@ def main():
     p.add_argument("--ft_drop_path", type=float, default=0.0)
     p.add_argument("--ft_head_lr_mult", type=float, default=1.0)
     p.add_argument("--include_random_baseline", action="store_true")
+    p.add_argument("--split_mode", choices=["csbrain", "random"], default="csbrain",
+                   help="csbrain: fixed 1-28/29-32/33-36 subject split (comparable "
+                        "to CSBrain/CBraMod, deterministic). random: seeded split.")
     p.add_argument("--device", default="auto")
     p.add_argument("--output", default=None)
     p.add_argument("--seed", type=int, default=42)
@@ -68,7 +71,8 @@ def main():
     print(f"  Checkpoint: {args.checkpoint}  seed {args.seed}\n{'='*72}")
     model, model_cls, mtype, n_channels, ckpt_args = load_pretrained(args.checkpoint, device)
 
-    splits = make_subject_split(args.data_dir, seed=args.seed)
+    splits = (make_csbrain_split(args.data_dir) if args.split_mode == "csbrain"
+              else make_subject_split(args.data_dir, seed=args.seed))
     X_tr, y_tr = dataset_to_xy(_load(args, splits["train"]))
     X_val, y_val = dataset_to_xy(_load(args, splits["val"]))
     X_te, y_te = dataset_to_xy(_load(args, splits["test"]))

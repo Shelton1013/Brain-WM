@@ -46,6 +46,23 @@ def _list_subjects(data_dir):
     return out
 
 
+def make_csbrain_split(data_dir):
+    """CSBrain / CBraMod fixed split (Table 16): subjects 1-28 train, 29-32 val,
+    33-36 test (1-indexed). Our files are Subject00..Subject35 (0-indexed), so
+    1-indexed subject N == our sid (N-1): train 0-27, val 28-31, test 32-35.
+    Deterministic (no seed) -> comparable to their reported numbers.
+    Task = rest ('no stress', 0) vs arithmetic ('mental stress', 1).
+    Ref: CSBrain BA 0.7558 / AUROC 0.8478 / AUC-PR 0.6696 ; CBraMod BA 0.7256.
+    """
+    sids = sorted(_list_subjects(data_dir).keys())
+    split = {"train": [s for s in sids if 0 <= s <= 27],
+             "val":   [s for s in sids if 28 <= s <= 31],
+             "test":  [s for s in sids if 32 <= s <= 35]}
+    print(f"  [MA CSBrain split] train {len(split['train'])} / val {len(split['val'])} "
+          f"/ test {len(split['test'])} subjects  (test sids {split['test']})")
+    return split
+
+
 def make_subject_split(data_dir, seed=42, n_test=8, n_val=4):
     """Subject-disjoint fixed-count split (seed permutes which subjects)."""
     sids = sorted(_list_subjects(data_dir).keys())
