@@ -309,20 +309,41 @@ def main():
            f"{len(dataset.electrode_names)} channels")
 
     # ─── Data-efficiency subset: keep a random subset of subjects ──
-    # In-place (preserves dataset attrs). Rank-independent RandomState(seed)
-    # so every DDP rank selects the IDENTICAL subject set.
+    # MultiDatasetEEG is a ConcatDataset-style wrapper: per-trial subject_ids/
+    # trials live on the SUB-datasets (dataset.datasets[i]), not the wrapper.
+    # Rank-independent RandomState(seed) so every DDP rank picks the IDENTICAL
+    # subjects. Kept subject ids are REMAPPED to a contiguous [0, n_keep) range
+    # (PAJR discriminator is sized n_subjects — original ids would overflow it).
     if args.pretrain_n_subjects > 0:
-        uniq = sorted(set(int(s) for s in dataset.subject_ids))
-        n_keep = min(args.pretrain_n_subjects, len(uniq))
+        subs = getattr(dataset, "datasets", None) or [dataset]
+        all_sids = sorted({int(s) for d in subs
+                           for s in getattr(d, "subject_ids", [])})
+        n_keep = min(args.pretrain_n_subjects, len(all_sids))
         rng = np.random.RandomState(args.seed)
-        keep = set(rng.choice(np.asarray(uniq), size=n_keep, replace=False).tolist())
-        idx = [i for i, s in enumerate(dataset.subject_ids) if int(s) in keep]
-        dataset.trials = [dataset.trials[i] for i in idx]
-        dataset.subject_ids = [dataset.subject_ids[i] for i in idx]
-        dataset.n_subjects = len(keep)
-        hrs = len(idx) * args.trial_duration_s / 3600.0
-        pprint(f"[subset] kept {len(keep)}/{len(uniq)} subjects, "
-               f"{len(idx)} trials (~{hrs:,.0f} h) for data-efficiency pretrain")
+        keep = sorted(int(x) for x in
+                      rng.choice(np.asarray(all_sids), size=n_keep, replace=False))
+        remap = {old: new for new, old in enumerate(keep)}   # → [0, n_keep)
+        kept_trials = 0
+        for d in subs:
+            sids = getattr(d, "subject_ids", None)
+            if sids is None:
+                continue
+            idx = [i for i, s in enumerate(sids) if int(s) in remap]
+            d.trials = [d.trials[i] for i in idx]
+            d.subject_ids = [remap[int(sids[i])] for i in idx]
+            d.n_subjects = len(set(d.subject_ids))
+            kept_trials += len(idx)
+        # Recompute wrapper indexing/attrs (used by __getitem__ / sampler / model).
+        if hasattr(dataset, "datasets"):
+            dataset._lengths = [len(d) for d in dataset.datasets]
+            dataset._cumulative, cum = [], 0
+            for l in dataset._lengths:
+                dataset._cumulative.append(cum); cum += l
+            dataset.total_trials = cum
+        dataset.n_subjects = n_keep
+        hrs = kept_trials * args.trial_duration_s / 3600.0
+        pprint(f"[subset] kept {n_keep}/{len(all_sids)} subjects, "
+               f"{kept_trials} trials (~{hrs:,.0f} h) for data-efficiency pretrain")
 
     sampler = DistributedSampler(dataset, shuffle=True, seed=args.seed) \
         if distributed else None
