@@ -168,6 +168,11 @@ def main():
     parser.add_argument("--n_subjects", type=int, default=109,
                         help="physionet MI subjects (for PAJR discriminator "
                              "size). 0 = skip physionet entirely (TUEG-only).")
+    parser.add_argument("--pretrain_n_subjects", type=int, default=0,
+                        help="If >0, after building the (cached) dataset, keep "
+                             "only a random subset of this many subjects "
+                             "(seeded by --seed, identical across DDP ranks). "
+                             "Data-efficiency ablation: pretrain on less data.")
     parser.add_argument("--multi_dataset", action="store_true")
     parser.add_argument("--moabb_datasets", type=str, nargs="*",
                         default=["Cho2017", "Lee2019_MI"])
@@ -302,6 +307,22 @@ def main():
     )
     pprint(f"Dataset: {len(dataset)} trials, {dataset.n_subjects} subjects, "
            f"{len(dataset.electrode_names)} channels")
+
+    # ─── Data-efficiency subset: keep a random subset of subjects ──
+    # In-place (preserves dataset attrs). Rank-independent RandomState(seed)
+    # so every DDP rank selects the IDENTICAL subject set.
+    if args.pretrain_n_subjects > 0:
+        uniq = sorted(set(int(s) for s in dataset.subject_ids))
+        n_keep = min(args.pretrain_n_subjects, len(uniq))
+        rng = np.random.RandomState(args.seed)
+        keep = set(rng.choice(np.asarray(uniq), size=n_keep, replace=False).tolist())
+        idx = [i for i, s in enumerate(dataset.subject_ids) if int(s) in keep]
+        dataset.trials = [dataset.trials[i] for i in idx]
+        dataset.subject_ids = [dataset.subject_ids[i] for i in idx]
+        dataset.n_subjects = len(keep)
+        hrs = len(idx) * args.trial_duration_s / 3600.0
+        pprint(f"[subset] kept {len(keep)}/{len(uniq)} subjects, "
+               f"{len(idx)} trials (~{hrs:,.0f} h) for data-efficiency pretrain")
 
     sampler = DistributedSampler(dataset, shuffle=True, seed=args.seed) \
         if distributed else None
