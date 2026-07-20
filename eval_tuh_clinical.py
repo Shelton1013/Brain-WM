@@ -528,21 +528,20 @@ def _build_labram_optimizer(model, head, base_lr: float, weight_decay: float,
     leaves the classifier undertrained.
     """
     param_groups = []
-    # v2 uses `encoder_blocks` + `patch_embed`; v1 uses `encoder` + `tokenizer`
-    is_v2 = hasattr(model, "encoder_blocks")
-    encoder_module = model.encoder_blocks if is_v2 else model.encoder
+    # encoder: v2/v3 use `encoder_blocks`; v1 uses `encoder`
+    encoder_module = model.encoder_blocks if hasattr(model, "encoder_blocks") else model.encoder
     n_layers = len(encoder_module)
 
-    # Deepest: tokenizer/patch_embed + pos embeds
+    # Deepest: embedding/tokenizer + pos embeds. v2=patch_embed, v3=tokenizer,
+    # v1=tokenizer; pos is pos_time/pos_channel (v2/v3) or pos_embed (v1).
     deepest = []
-    if is_v2:
+    if hasattr(model, "patch_embed"):
         deepest.extend(model.patch_embed.parameters())
-        deepest.append(model.pos_time)
-        deepest.append(model.pos_channel)
-    else:
+    elif hasattr(model, "tokenizer"):
         deepest.extend(model.tokenizer.parameters())
-        if hasattr(model, "pos_embed"):
-            deepest.append(model.pos_embed)
+    for pname in ("pos_time", "pos_channel", "pos_embed"):
+        if hasattr(model, pname):
+            deepest.append(getattr(model, pname))
     param_groups.append({
         "params": deepest,
         "lr": base_lr * (layer_decay ** (n_layers + 1)),
@@ -563,6 +562,7 @@ def _build_labram_optimizer(model, head, base_lr: float, weight_decay: float,
     # Shallow (near output): encoder_norm + pred_head + any CF apparatus
     shallow = list(model.encoder_norm.parameters())
     for attr in ("pred_head", "jepa_predictor", "band_head", "cf_predictor",
+                 "cf_head", "cf_mask_token",          # v3 pretraining heads
                  "band_embed_view", "cf_band_mask_tokens",
                  # v2-specific: decoder is auxiliary MAE branch (frozen at FT)
                  ):
