@@ -17,6 +17,9 @@ BLACKLIST = {
     "n_dataset", "n_subjects_actual", "local_rank", "rank", "world_size",
     "output_dir", "pretrain_n_subjects", "resume", "resume_from",
     "epochs", "warmup_epochs",
+    # Runtime-derived fields saved into args but NOT argparse CLI flags —
+    # emitting them crashes argparse with "unrecognized arguments".
+    "n_params", "effective_batch_size", "model",
 }
 
 
