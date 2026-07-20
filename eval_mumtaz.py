@@ -113,7 +113,8 @@ def run_finetune(base_model, X_tr_np, y_tr_np, X_val_np, y_val_np,
                  ft_layer_decay: float = 0.65,
                  ft_warmup_epochs: int = 5,
                  ft_drop_path: float = 0.0,
-                 ft_head_lr_mult: float = 1.0) -> dict:
+                 ft_head_lr_mult: float = 1.0,
+                 ft_select: str = "ba") -> dict:
     model = copy.deepcopy(base_model)
     # Inject drop_path if requested
     if ft_drop_path > 0:
@@ -173,7 +174,8 @@ def run_finetune(base_model, X_tr_np, y_tr_np, X_val_np, y_val_np,
         )
     criterion = nn.CrossEntropyLoss(weight=class_weights)
 
-    best_val_ba = 0.0
+    best_score = 0.0            # selection score (val BA or val AUROC)
+    best_val_ba = 0.0           # val BA at the selected checkpoint (for logging)
     best_state = None
     no_improve = 0
     ep = 0
@@ -193,19 +195,27 @@ def run_finetune(base_model, X_tr_np, y_tr_np, X_val_np, y_val_np,
             scheduler.step()
 
         model.eval(); head.eval()
-        val_preds, val_labels = [], []
+        val_preds, val_proba, val_labels = [], [], []
         with torch.no_grad():
             for bx, by in val_loader:
                 bx = bx.to(device)
-                feats = model._encode(model._tokenize(bx)).mean(1)
-                val_preds.append(head(feats).argmax(-1).cpu())
+                logits = head(model._encode(model._tokenize(bx)).mean(1))
+                val_preds.append(logits.argmax(-1).cpu())
+                val_proba.append(torch.softmax(logits, -1)[:, 1].cpu())
                 val_labels.append(by)
-        val_ba = balanced_accuracy_score(
-            torch.cat(val_labels).numpy(),
-            torch.cat(val_preds).numpy(),
-        )
-        improved = val_ba > best_val_ba
+        yv = torch.cat(val_labels).numpy()
+        val_ba = balanced_accuracy_score(yv, torch.cat(val_preds).numpy())
+        try:
+            val_auroc = (roc_auc_score(yv, torch.cat(val_proba).numpy())
+                         if len(np.unique(yv)) > 1 else val_ba)
+        except Exception:
+            val_auroc = val_ba
+        # AUROC is a smoother, threshold-independent selection signal than BA on
+        # tiny val sets (matches CBraMod's best-val-AUROC model selection).
+        score = val_auroc if ft_select == "auroc" else val_ba
+        improved = score > best_score
         if improved:
+            best_score = score
             best_val_ba = val_ba
             best_state = {
                 "model": {k: v.cpu().clone() for k, v in model.state_dict().items()},
@@ -215,11 +225,11 @@ def run_finetune(base_model, X_tr_np, y_tr_np, X_val_np, y_val_np,
         else:
             no_improve += 1
         marker = "*" if improved else " "
-        print(f"      ep{ep+1:03d}{marker} val_ba={val_ba:.4f} "
-              f"best={best_val_ba:.4f} no_improve={no_improve}/{patience}",
+        print(f"      ep{ep+1:03d}{marker} val_ba={val_ba:.4f} val_auroc={val_auroc:.4f} "
+              f"best_{ft_select}={best_score:.4f} no_improve={no_improve}/{patience}",
               flush=True)
         if no_improve >= patience:
-            print(f"      early stop at epoch {ep+1} (best_val_ba={best_val_ba:.4f})")
+            print(f"      early stop at epoch {ep+1} (best_{ft_select}={best_score:.4f})")
             break
 
     if best_state is not None:

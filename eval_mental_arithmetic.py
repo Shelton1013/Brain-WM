@@ -52,6 +52,9 @@ def main():
     p.add_argument("--ft_warmup_epochs", type=int, default=5)
     p.add_argument("--ft_drop_path", type=float, default=0.0)
     p.add_argument("--ft_head_lr_mult", type=float, default=1.0)
+    p.add_argument("--ft_select", choices=["ba", "auroc"], default="ba",
+                   help="checkpoint selection metric on val (auroc = CBraMod-style, "
+                        "smoother on tiny val).")
     p.add_argument("--include_random_baseline", action="store_true")
     p.add_argument("--split_mode", choices=["csbrain", "random"], default="csbrain",
                    help="csbrain: fixed 1-28/29-32/33-36 subject split (comparable "
@@ -101,7 +104,7 @@ def main():
         ft = dict(ft_protocol=args.ft_protocol, ft_base_lr=args.ft_base_lr,
                   ft_weight_decay=args.ft_weight_decay, ft_layer_decay=args.ft_layer_decay,
                   ft_warmup_epochs=args.ft_warmup_epochs, ft_drop_path=args.ft_drop_path,
-                  ft_head_lr_mult=args.ft_head_lr_mult)
+                  ft_head_lr_mult=args.ft_head_lr_mult, ft_select=args.ft_select)
         print(f"\n  [JEPA] Fine-tune ({args.ft_protocol})")
         results["jepa_finetune"] = run_finetune(model, X_tr, y_tr, X_val, y_val, X_te, y_te,
                                                 device, args.max_epochs, args.ft_batch_size,
