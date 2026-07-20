@@ -51,6 +51,23 @@ siena)
       --output "$OUT/${TAG}_siena_seed${S}.json"
   done 2>&1 | tee $LOG/${TAG}_eval_siena.log ;;
 
+# ---------------- MENTAL ARITHMETIC (rest vs arithmetic, LogReg) ---------
+# CSBrain/CBraMod FIXED split (subj 1-28/29-32/33-36, deterministic). 5-s windows
+# (matches CBraMod). Tiny 4-subj test -> per-sample high FT variance -> 5 seeds.
+# FT protocol = labram + fixed 50 ep (patience 50) + best-val-BA selection
+# (the consistent paper protocol; NOT auroc). Lead with frozen (deterministic).
+# Ref: CSBrain BA 0.7558 / CBraMod BA 0.7256.
+mental_arith|ma)
+  MACOMMON="--sample_rate 256 --trial_duration_s 5 --normalization per_recording_robust"
+  for S in 0 1 2 3 4; do
+    run "mental_arith seed $S" python eval_mental_arithmetic.py --mode both --checkpoint "$CKPT" \
+      --data_dir /home/pxieaf/home2/datasets/mental_arithmetic/eeg-during-mental-arithmetic-tasks-1.0.0 \
+      --cache_dir $CACHE $MACOMMON --split_mode csbrain --frozen_reps 5 \
+      --ft_protocol labram --ft_layer_decay 0.65 --ft_warmup_epochs 5 \
+      --max_epochs 50 --ft_patience 50 --ft_select ba $RANDFLAG --seed $S \
+      --output "$OUT/${TAG}_mentalarith_seed${S}.json"
+  done 2>&1 | tee $LOG/${TAG}_eval_mentalarith.log ;;
+
 # ---------------- ISRUC (sleep, seq2seq, 3 reps) -------------------------
 isruc_frozen)
   run "isruc frozen" python eval_sleep_seq2seq.py --dataset isruc --checkpoint "$CKPT" \
@@ -87,6 +104,7 @@ help|*)
 Set CKPT and GPU at the top (or export them), then:
   bash run_evals.sh mumtaz        # 5-seed frozen+FT
   bash run_evals.sh siena         # 5-seed frozen+FT
+  bash run_evals.sh mental_arith  # 5-seed frozen+FT (csbrain split, 5s, labram/BA)
   bash run_evals.sh isruc_frozen  # 3-rep
   bash run_evals.sh isruc_ft      # 3-rep
   bash run_evals.sh hmc_frozen
