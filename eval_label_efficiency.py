@@ -46,6 +46,11 @@ def load_split(dataset, args):
         sp = make_subject_split(args.data_dir, seed=42)
         tr = SchizophreniaDataset(data_dir=args.data_dir, subjects=sp["train"], **dsk)
         te = SchizophreniaDataset(data_dir=args.data_dir, subjects=sp["test"], **dsk)
+    elif dataset == "mental_arithmetic":
+        from dataset_mental_arithmetic import MentalArithmeticDataset, make_subject_split
+        sp = make_subject_split(args.data_dir, seed=42)
+        tr = MentalArithmeticDataset(data_dir=args.data_dir, subjects=sp["train"], **dsk)
+        te = MentalArithmeticDataset(data_dir=args.data_dir, subjects=sp["test"], **dsk)
     else:
         raise ValueError(dataset)
     X_tr, y_tr = dataset_to_xy(tr)
@@ -96,7 +101,8 @@ def curve(feat_tr, y_tr, feat_te, y_te, n_reps):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--checkpoint", required=True)
-    p.add_argument("--dataset", default="mumtaz", choices=["mumtaz", "schizophrenia"])
+    p.add_argument("--dataset", default="mumtaz",
+                   choices=["mumtaz", "schizophrenia", "mental_arithmetic"])
     p.add_argument("--data_dir", required=True)
     p.add_argument("--cache_dir", default="/home/pxieaf/home2/dataset_cache")
     p.add_argument("--sample_rate", type=int, default=256)
