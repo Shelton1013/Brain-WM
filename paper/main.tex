@@ -227,31 +227,40 @@ the deterministic frozen probe and report fine-tuning as mean$\pm$std over 5
 seeds. Sleep sets are large; we report 3 reps.
 
 \section{Results}
-\emph{Draft: several cells are pending final-checkpoint / auxiliary runs and are
-marked \tbd; sleep numbers are from the current best checkpoint of the
-${\sim}2{,}500$-hour model and will be fixed to the selected checkpoint.}
+\emph{Draft: all numbers are the ${\sim}2{,}500$-hour model at its single
+converged checkpoint. Cells still marked \tbd\ are pending auxiliary runs
+(objective ablation, sleep frozen probe, random-init fine-tuning, full-corpus HMC
+control).}
 
-\begin{table}[t]\centering\small
-\setlength{\tabcolsep}{4pt}
-\caption{\textbf{Main results (balanced accuracy).} Leak-free benchmarks. Baseline
-rows as reported by their authors (each pretrained on more or comparable data:
-CBraMod/CSBrain ${\sim}9{,}000$\,h, LaBraM ${\sim}2{,}500$\,h). Ours is pretrained
-on only ${\sim}2{,}500$\,h. Mumtaz/MA led by frozen probe (deterministic); see
-Table~\ref{tab:frozen}.}
+\begin{table*}[t]\centering\small
+\setlength{\tabcolsep}{4.5pt}
+\caption{\textbf{Main results on leak-free clinical benchmarks.} Each task reports
+its standard metrics: 5-class sleep staging (ISRUC, HMC) uses balanced accuracy,
+Cohen's $\kappa$, weighted-F1; the binary tasks (Mumtaz depression, Mental
+Arithmetic) use balanced accuracy, AUROC, AUPR. Ours is pretrained on
+${\sim}2{,}500$\,h; baselines on ${\sim}9{,}000$\,h (CBraMod/CSBrain) or
+${\sim}2{,}500$\,h (LaBraM), as reported by their authors (BA only). For the
+tiny-cohort binary tasks the frozen probe is deterministic and is our primary
+number. Best BA per task in \textbf{bold}. Ours BA std: ISRUC/HMC ${\pm}0.005$,
+Mumtaz(FT) ${\pm}0.026$, Mental Arith.(FT) ${\pm}0.073$; frozen is deterministic.}
 \label{tab:main}
-\begin{tabular}{lcccc}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l ccc ccc ccc ccc}
 \toprule
- & ISRUC & HMC & Mumtaz & MentalArith\\
+& \multicolumn{3}{c}{ISRUC (sleep, 5-cls)} & \multicolumn{3}{c}{HMC (sleep, 5-cls)}
+& \multicolumn{3}{c}{Mumtaz (depression)} & \multicolumn{3}{c}{Mental Arithmetic}\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}
+& BA & $\kappa$ & WF1 & BA & $\kappa$ & WF1 & BA & AUROC & AUPR & BA & AUROC & AUPR\\
 \midrule
-LaBraM   & \na   & \na   & 0.941 & \na\\
-CBraMod  & 0.787 & \na   & 0.956 & 0.726\\
-CSBrain  & 0.793 & 0.735 & 0.964 & 0.756\\
+LaBraM  & \na & \na & \na & \na & \na & \na & 0.941 & \na & \na & \na & \na & \na\\
+CBraMod & 0.787 & \na & \na & \na & \na & \na & 0.956 & \na & \na & 0.726 & \na & \na\\
+CSBrain & \best{0.793} & \na & \na & 0.735 & \na & \na & \best{0.964} & \na & \na & 0.756 & \na & \na\\
 \midrule
-Random (FT)      & \val{0.738}{0.008} & \tbd & \tbd & \tbd\\
-\best{Ours} (FT) & \best{\val{0.793}{0.005}} & \best{\val{0.748}{0.005}} & \val{0.913}{0.026} & \val{0.763}{0.073}\\
+Ours (frozen) & \tbd & \tbd & \tbd & \tbd & \tbd & \tbd & 0.917 & 0.983 & 0.983 & 0.708 & 0.759 & 0.624\\
+Ours (FT) & 0.792 & 0.728 & 0.795 & \best{0.748} & 0.674 & 0.746 & 0.913 & 0.981 & 0.982 & \best{0.763} & 0.900 & 0.805\\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{tabular}}
+\end{table*}
 
 \begin{table}[t]\centering\small
 \setlength{\tabcolsep}{5pt}
@@ -269,23 +278,25 @@ CBraMod  & ${\sim}9{,}000$\,h & 0.787 & \na\\
 CSBrain  & ${\sim}9{,}000$\,h & 0.793 & 0.735\\
 \midrule
 Ours (full ctrl) & ${\sim}17{,}666$\,h & 0.798 & \tbd\\
-\best{Ours} & ${\sim}2{,}500$\,h & \best{\val{0.793}{0.005}} & \best{\val{0.748}{0.005}}\\
+\best{Ours} & ${\sim}2{,}500$\,h & \best{\val{0.792}{0.005}} & \best{\val{0.748}{0.005}}\\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \noindent\textbf{Sleep staging at one-seventh the data.} Our ${\sim}2{,}500$-hour
-model reaches ISRUC balanced accuracy $0.793{\pm}0.005$ and HMC $0.748{\pm}0.005$
+model reaches ISRUC balanced accuracy $0.792{\pm}0.005$ and HMC $0.748{\pm}0.005$
 (Table~\ref{tab:main}), matching CSBrain on ISRUC ($0.793$) and \emph{exceeding} it
 on HMC ($0.735$; ${+}0.014$, ${\approx}2.8\sigma$), while CBraMod and CSBrain
 pretrain on ${\sim}9{,}000$ hours. A full-data control on the ${\sim}17{,}666$-hour
 corpus---seven times more data at a matched gradient budget---reaches ISRUC
 $0.798$, statistically indistinguishable from the ${\sim}2{,}500$-hour model
 (Table~\ref{tab:dataeff}). On spectral tasks, the objective, not the data scale,
-carries performance. On the tiny-cohort clinical tasks the model is competitive
-(Mental Arithmetic $0.763$, above CSBrain's $0.756$) but high-variance under
-fine-tuning, so we lead with the deterministic frozen probe there
-(Table~\ref{tab:frozen}).
+carries performance. On the tiny-cohort clinical tasks fine-tuning is
+high-variance, so we lead with the deterministic frozen probe (Table~\ref{tab:main}):
+on Mumtaz it reaches $0.917$ BA / $0.983$ AUROC---\emph{above} its own fine-tuned
+number ($0.913$) and with zero seed variance---and on Mental Arithmetic $0.708$ BA
+/ $0.759$ AUROC. The fine-tuned Mental Arithmetic mean ($0.763$) even exceeds
+CSBrain's $0.756$, but at ${\pm}0.073$ we do not lean on it.
 
 \noindent\textbf{Checkpoint selection.} We report a single converged checkpoint,
 chosen by pretraining loss and used for \emph{all} downstream tasks; we never tune
@@ -295,22 +306,6 @@ data). Earlier checkpoints underfit; much later ones overfit the small subset an
 degrade the tiny-cohort clinical tasks (e.g.\ Mental Arithmetic falls from $0.763$
 to $0.617$), so the converged point is both the principled comparison to the
 control and the natural operating point.
-
-\begin{table}[t]\centering\small
-\setlength{\tabcolsep}{5pt}
-\caption{\textbf{Frozen linear probe} (deterministic). Pretrained features vs.\
-random init on the tiny-cohort clinical tasks, where we lead with the frozen probe
-to avoid fine-tuning variance.}
-\label{tab:frozen}
-\begin{tabular}{lcc}
-\toprule
- & Mumtaz BA & MentalArith BA\\
-\midrule
-Random & \tbd & \tbd\\
-\best{Ours} & \best{\tbd} & \best{0.677}\\
-\bottomrule
-\end{tabular}
-\end{table}
 
 \noindent\textbf{Label efficiency.} A probe on our frozen features reaches high
 accuracy with far fewer downstream labels than a random encoder
@@ -350,7 +345,7 @@ Objective & ISRUC & HMC & Mumtaz\\
 \midrule
 MAE only (reconstruction)          & \tbd & \tbd & \tbd\\
 CF only (spectral prediction)      & \tbd & \tbd & \tbd\\
-\best{CF\,+\,MAE (ours)}           & \best{\val{0.793}{0.005}} & \best{\val{0.748}{0.005}} & \val{0.913}{0.026}\\
+\best{CF\,+\,MAE (ours)}           & \best{0.792} & \best{0.748} & 0.913\\
 \bottomrule
 \end{tabular}
 \end{table}
