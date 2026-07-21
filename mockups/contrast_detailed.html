@@ -1,0 +1,216 @@
+<title>Framework Contrast — detailed</title>
+<style>
+  :root{
+    --ink:#1b2a38; --muted:#5a6b7a; --faint:#8797a5; --line:#c7d2da;
+    --panel:#f5f7f9; --paper:#ffffff; --acc:#0a8f9e; --accfill:#e7f4f5;
+    --gray:#aeb9c4; --code:#6741c9; --codefill:#efeafb;
+    --delta:#3b5bd0; --theta:#6741c9; --alpha:#0f9d76; --beta:#d18a00; --gamma:#d1541f;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#fff;color:var(--ink);font-family:var(--sans);padding:14px 16px}
+  .board{width:1040px;margin:0 auto;background:var(--paper)}
+  .row{display:flex;align-items:center;gap:9px}
+  .row + .divider{height:1px;background:var(--line);margin:16px 0}
+  .rowlabel{width:112px;flex:0 0 112px}
+  .rowlabel .name{font-weight:700;font-size:.95rem}
+  .rowlabel .who{color:var(--muted);font-size:.68rem;font-family:var(--mono);margin-top:2px;line-height:1.4}
+  .panel{border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:7px 9px 5px;
+    display:flex;flex-direction:column;align-items:center;gap:4px}
+  .panel.acc{border-color:var(--acc);background:var(--accfill)}
+  .panel.code{border-color:var(--code);background:var(--codefill)}
+  .ptitle{font-size:.71rem;font-weight:700}
+  .pnote{font-size:.61rem;color:var(--muted);font-family:var(--mono);text-align:center;line-height:1.35}
+  canvas{display:block}
+  .arrow{color:var(--faint);font-size:1.15rem;flex:0 0 auto}
+  .enc{width:60px;height:74px;border:1px solid var(--line);border-radius:9px;background:var(--panel);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;text-align:center;
+    font-size:.66rem;font-weight:700;line-height:1.15}
+  .enc.acc{border-color:var(--acc);background:var(--accfill)}
+  .enc small{font-weight:400;color:var(--muted);font-size:.56rem;font-family:var(--mono)}
+  .badge{flex:0 0 auto;width:120px;border-radius:9px;padding:9px 8px;text-align:center;font-size:.7rem;
+    font-weight:700;line-height:1.3}
+  .badge small{font-weight:400;font-size:.6rem;font-family:var(--mono);display:block;margin-top:3px}
+  .badge.neu{background:var(--panel);color:var(--muted);border:1px solid var(--line)}
+  .badge.cod{background:var(--codefill);color:var(--code);border:1px solid var(--code)}
+  .badge.obj{background:var(--accfill);color:var(--acc);border:1.5px solid var(--acc)}
+  .caption{font-size:.68rem;color:var(--muted);font-style:italic;margin:6px 0 0 121px}
+  .legend{display:flex;gap:13px;justify-content:center;flex-wrap:wrap;margin-top:14px;
+    font-family:var(--mono);font-size:.66rem;color:var(--muted)}
+  .legend span{display:flex;align-items:center;gap:5px}
+  .sw{width:11px;height:11px;border-radius:2px;display:inline-block}
+</style>
+
+<div class="board">
+
+  <!-- ============ ROW 1: LaBraM (VQ codebook) ============ -->
+  <div class="row">
+    <div class="rowlabel"><div class="name">LaBraM</div>
+      <div class="who">VQ codebook<br>(2-stage)</div></div>
+    <div class="panel"><div class="ptitle">Mask <u>time</u> patches</div>
+      <canvas id="mL" width="158" height="72"></canvas>
+      <div class="pnote">whole patches hidden</div></div>
+    <div class="arrow">&rarr;</div>
+    <div class="enc">Transformer<br><small>encoder</small></div>
+    <div class="arrow">&rarr;</div>
+    <div class="panel code"><div class="ptitle">Predict <u>discrete code</u></div>
+      <canvas id="vq" width="176" height="80"></canvas>
+      <div class="pnote"><b>target:</b> index in a learned<br>codebook (trained stage 1)</div></div>
+    <div class="badge cod">Discrete token<small>VQ codebook<br>two-stage</small></div>
+  </div>
+  <div class="caption"><b>Discrete tokenization</b> — a separately trained vector-quantizer maps each patch to a codebook index; the model predicts that index.</div>
+
+  <div class="divider"></div>
+
+  <!-- ============ ROW 2: CBraMod (raw signal) ============ -->
+  <div class="row">
+    <div class="rowlabel"><div class="name">CBraMod</div>
+      <div class="who">masked<br>reconstruction</div></div>
+    <div class="panel"><div class="ptitle">Mask <u>time</u> patches</div>
+      <canvas id="mC" width="158" height="72"></canvas>
+      <div class="pnote">whole patches hidden</div></div>
+    <div class="arrow">&rarr;</div>
+    <div class="enc">Transformer<br><small>encoder</small></div>
+    <div class="arrow">&rarr;</div>
+    <div class="panel"><div class="ptitle">Reconstruct <u>raw signal</u></div>
+      <canvas id="recon" width="176" height="80"></canvas>
+      <div class="pnote"><b>target:</b> raw waveform<br>in the masked patch (L2)</div></div>
+    <div class="badge neu">Raw signal<small>waveform L2<br>(reconstruct noise)</small></div>
+  </div>
+  <div class="caption"><b>Signal reconstruction</b> — predict the raw microvolt waveform of masked patches; the target includes noise the task never uses.</div>
+
+  <div class="divider"></div>
+
+  <!-- ============ ROW 3: OURS (band power) ============ -->
+  <div class="row">
+    <div class="rowlabel"><div class="name" style="color:var(--acc)">Ours</div>
+      <div class="who">codebook-free<br>spectral</div></div>
+    <div class="panel acc"><div class="ptitle">Filterbank + mask <u>time</u></div>
+      <canvas id="grid" width="158" height="80"></canvas>
+      <div class="pnote">&delta;&theta;&alpha;&beta;&gamma; tokens;<br>mask whole time patches</div></div>
+    <div class="arrow">&rarr;</div>
+    <div class="enc acc">Transformer<br><small>encoder</small></div>
+    <div class="arrow">&rarr;</div>
+    <div class="panel acc"><div class="ptitle">Predict band <u>power</u></div>
+      <canvas id="bars" width="176" height="80"></canvas>
+      <div class="pnote"><b>target:</b> <b>fixed</b>-filterbank<br>log band-power (no codebook)</div></div>
+    <div class="badge obj">Band power<small>spectral MSE vs. fixed target<br>+ 0.5&middot;recon + SIGReg</small></div>
+  </div>
+  <div class="caption"><b>Spectral prediction (ours)</b> — a learnable filterbank tokenizes each patch into bands; predict the masked patches' log band-power against a <b>fixed</b> (non-learnable) filterbank target. Single-stage, no codebook; raw-signal reconstruction is a light auxiliary.</div>
+
+  <div class="legend">
+    <span><i class="sw" style="background:var(--delta)"></i>&delta;</span>
+    <span><i class="sw" style="background:var(--theta)"></i>&theta;</span>
+    <span><i class="sw" style="background:var(--alpha)"></i>&alpha;</span>
+    <span><i class="sw" style="background:var(--beta)"></i>&beta;</span>
+    <span><i class="sw" style="background:var(--gamma)"></i>&gamma;</span>
+    <span><i class="sw" style="background:var(--gray)"></i>masked patch</span>
+    <span><i class="sw" style="background:var(--acc)"></i>prediction</span>
+    <span><i class="sw" style="border:1.2px dashed var(--ink);background:#fff"></i>target</span>
+  </div>
+</div>
+
+<script>
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function seededNoise(seed){let s=seed;return()=>{s=(s*9301+49297)%233280;return s/233280;};}
+
+// multichannel EEG trace with masked time patches
+function drawEEG(id, mask){
+  const c=document.getElementById(id), x=c.getContext('2d'), W=c.width,H=c.height;
+  x.clearRect(0,0,W,H); const rnd=seededNoise(7); const chs=3, pad=8, n=6, pw=W/n;
+  for(let ch=0;ch<chs;ch++){
+    const y0=pad+(H-2*pad)*(ch+0.5)/chs, f=[3,5,8][ch];
+    x.beginPath(); x.lineWidth=1.2; x.strokeStyle=css('--ink');
+    for(let px=0;px<=W;px+=2){const t=px/W;
+      let yy=y0+Math.sin(t*Math.PI*2*f)*(H*0.05)*(0.6+0.4*Math.sin(t*20+ch))+(rnd()-0.5)*3;
+      px===0?x.moveTo(px,yy):x.lineTo(px,yy);}
+    x.stroke();
+  }
+  for(let i=1;i<n;i++){x.strokeStyle=css('--line');x.setLineDash([2,2]);x.lineWidth=1;
+    x.beginPath();x.moveTo(i*pw,2);x.lineTo(i*pw,H-2);x.stroke();}
+  x.setLineDash([]);
+  x.fillStyle='rgba(140,150,160,.45)';
+  mask.forEach(i=>{x.fillRect(i*pw,2,pw,H-4);
+    x.strokeStyle=css('--gray');x.strokeRect(i*pw+.5,2.5,pw-1,H-5);});
+}
+
+// VQ codebook: dictionary grid of code vectors, one selected; a masked patch maps to it
+function drawVQ(id){
+  const c=document.getElementById(id), x=c.getContext('2d'), W=c.width,H=c.height;
+  x.clearRect(0,0,W,H);
+  const cols=4, rows=3, gx=8, gy=8, cw=20, ch=18, sel=6;
+  x.font='7px ui-monospace'; x.fillStyle=css('--muted'); x.fillText('codebook',gx,7);
+  for(let r=0;r<rows;r++)for(let cc=0;cc<cols;cc++){
+    const i=r*cols+cc, xx=gx+cc*(cw+4), yy=12+r*(ch+4);
+    x.strokeStyle= i===sel?css('--code'):css('--line'); x.lineWidth= i===sel?2:1;
+    x.fillStyle= i===sel?css('--codefill'):'#fff'; x.fillRect(xx,yy,cw,ch); x.strokeRect(xx+.5,yy+.5,cw-1,ch-1);
+    // tiny code waveform
+    x.strokeStyle= i===sel?css('--code'):css('--faint'); x.lineWidth=1; x.beginPath();
+    for(let p=0;p<=cw;p+=2){const yv=yy+ch/2+Math.sin(p/cw*Math.PI*2*(1+i%3))*4; p===0?x.moveTo(xx+p,yv):x.lineTo(xx+p,yv);}
+    x.stroke();
+  }
+  x.fillStyle=css('--code'); x.font='bold 8px system-ui';
+  x.fillText('predict: index #'+sel, gx, H-3);
+}
+
+// reconstruct raw signal: visible solid; masked = target (dashed) + prediction (teal)
+function drawRecon(id){
+  const c=document.getElementById(id), x=c.getContext('2d'), W=c.width,H=c.height;
+  x.clearRect(0,0,W,H);
+  const chs=3,pad=10,n=6,pw=W/n,masked=[1,4],rnd=seededNoise(7),rnd2=seededNoise(31);
+  x.fillStyle='rgba(140,150,160,.12)'; masked.forEach(i=>x.fillRect(i*pw,2,pw,H-12));
+  for(let ch=0;ch<chs;ch++){
+    const y0=pad+(H-2*pad-6)*(ch+0.5)/chs,f=[3,5,8][ch];
+    const orig=px=>{const t=px/W;return y0+Math.sin(t*Math.PI*2*f)*H*0.05*(0.6+0.4*Math.sin(t*20+ch))+(rnd()-0.5)*3;};
+    for(let i=0;i<n;i++){ if(masked.includes(i))continue;
+      x.beginPath();x.lineWidth=1.2;x.strokeStyle=css('--ink');
+      for(let px=i*pw;px<=(i+1)*pw;px+=2){const yy=orig(px);px===i*pw?x.moveTo(px,yy):x.lineTo(px,yy);} x.stroke();}
+    x.beginPath();x.lineWidth=1;x.strokeStyle=css('--ink');x.setLineDash([2,2]);
+    masked.forEach(i=>{for(let px=i*pw;px<=(i+1)*pw;px+=2){const yy=orig(px);px===i*pw?x.moveTo(px,yy):x.lineTo(px,yy);}});
+    x.stroke();x.setLineDash([]);
+    x.strokeStyle=css('--acc');x.lineWidth=1.5;
+    masked.forEach(i=>{x.beginPath();for(let px=i*pw;px<=(i+1)*pw;px+=2){const yy=orig(px)+(rnd2()-0.5)*4;px===i*pw?x.moveTo(px,yy):x.lineTo(px,yy);}x.stroke();});
+  }
+}
+
+// filterbank band×time token grid, masked time columns gray (all bands)
+function drawGrid(id){
+  const c=document.getElementById(id), x=c.getContext('2d'), W=c.width,H=c.height;
+  x.clearRect(0,0,W,H);
+  const cols=['--delta','--theta','--alpha','--beta','--gamma'], nB=5, nT=6, padL=12, padB=10;
+  const cw=(W-padL-3)/nT, rh=(H-padB-2)/nB, maskT=[1,4];
+  for(let b=0;b<nB;b++){
+    for(let t=0;t<nT;t++){
+      const xx=padL+t*cw+1, yy=2+b*rh+1, ww=cw-2, hh=rh-2;
+      if(maskT.includes(t)){x.fillStyle='rgba(140,150,160,.42)';x.fillRect(xx,yy,ww,hh);
+        x.strokeStyle=css('--gray');x.setLineDash([2,2]);x.strokeRect(xx+.5,yy+.5,ww-1,hh-1);x.setLineDash([]);}
+      else{x.fillStyle=css(cols[b]);x.globalAlpha=.82;x.fillRect(xx,yy,ww,hh);x.globalAlpha=1;}
+    }
+    x.fillStyle=css(cols[b]);x.font='8px ui-monospace';x.fillText(['δ','θ','α','β','γ'][b],1,2+b*rh+rh*0.72);
+  }
+  x.fillStyle=css('--faint');x.font='7px ui-monospace';x.fillText('time →',padL,H-2);
+}
+
+// band-power: visible bands faded; masked patch -> pred (teal) vs target (hollow) for all 5
+function drawBars(id){
+  const c=document.getElementById(id), x=c.getContext('2d'), W=c.width,H=c.height;
+  x.clearRect(0,0,W,H);
+  const cols=['--delta','--theta','--alpha','--beta','--gamma'];
+  const tgt=[0.90,0.72,0.60,0.62,0.34], pred=[0.82,0.66,0.66,0.52,0.40];
+  const base=H-14, slot=(W-8)/5, lab=['δ','θ','α','β','γ'];
+  for(let i=0;i<5;i++){
+    const cx=6+slot*(i+0.5), bw=8,g=3,ph=(base-8)*pred[i],th=(base-8)*tgt[i],px0=cx-bw-g/2,tx0=cx+g/2;
+    x.fillStyle=css('--acc'); x.fillRect(px0,base-ph,bw,ph);
+    x.strokeStyle=css('--ink'); x.lineWidth=1; x.setLineDash([2,2]);
+    x.strokeRect(tx0+.5,base-th+.5,bw-1,th-1); x.setLineDash([]);
+    x.fillStyle=css(cols[i]); x.font='8px ui-monospace'; x.fillText(lab[i],cx-3,base+11);
+  }
+  x.strokeStyle=css('--line');x.beginPath();x.moveTo(4,base);x.lineTo(W-4,base);x.stroke();
+  x.fillStyle=css('--muted');x.save();x.translate(9,H/2-2);x.rotate(-Math.PI/2);
+  x.font='7px ui-monospace';x.fillText('log-power',-16,0);x.restore();
+}
+
+drawEEG('mL',[1,4]); drawEEG('mC',[1,4]);
+drawVQ('vq'); drawRecon('recon'); drawGrid('grid'); drawBars('bars');
+</script>
