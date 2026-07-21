@@ -27,7 +27,8 @@
 % or not-yet-regenerated figure never breaks compilation).
 \newcommand{\figorbox}[2]{%
   \IfFileExists{#1}{\includegraphics[width=#2]{#1}}%
-  {\fbox{\parbox[c][2.6cm][c]{#2}{\centering\itshape #1\\ (figure pending)}}}}
+  {\fbox{\parbox[c][2.6cm][c]{#2}{\centering\itshape (figure pending)\\[2pt]%
+   \ttfamily\footnotesize\detokenize{#1}}}}}
 
 % band colors
 \definecolor{cdelta}{HTML}{3B5BD0}\definecolor{ctheta}{HTML}{6741C9}
