@@ -23,6 +23,11 @@
 \newcommand{\val}[2]{#1\,{\scriptsize$\pm$#2}}
 \newcommand{\na}{--}
 \newcommand{\tbd}{\textcolor{red}{\small?}}   % number pending; fill before submission
+% Include a figure if it exists, else a labelled placeholder box (so a missing
+% or not-yet-regenerated figure never breaks compilation).
+\newcommand{\figorbox}[2]{%
+  \IfFileExists{#1}{\includegraphics[width=#2]{#1}}%
+  {\fbox{\parbox[c][2.6cm][c]{#2}{\centering\itshape #1\\ (figure pending)}}}}
 
 % band colors
 \definecolor{cdelta}{HTML}{3B5BD0}\definecolor{ctheta}{HTML}{6741C9}
@@ -110,7 +115,7 @@ scoping to spectral/clinical EEG and motor imagery as a stated limitation.
 \end{itemize}
 
 \begin{figure*}[t]\centering
-\includegraphics[width=\textwidth]{figures/contrast.pdf}
+\figorbox{figures/contrast.pdf}{\textwidth}
 \caption{\textbf{Codebook-free spectral prediction vs.\ prior EEG foundation
 models.} LaBraM predicts discrete codes from a separately trained VQ tokenizer;
 CBraMod reconstructs the raw masked signal. We predict the \emph{log band-power}
@@ -149,7 +154,7 @@ patient level with the TUH downstream sets (TUAB/TUEV). Our benchmarks---sleep
 splits as CBraMod/CSBrain.
 
 \begin{figure*}[t]\centering
-\includegraphics[width=\textwidth]{figures/pipeline.pdf}
+\figorbox{figures/pipeline.pdf}{\textwidth}
 \caption{\textbf{Codebook-free spectral-prediction pretraining.} A learnable
 filterbank tokenizer splits each patch into $\delta\theta\alpha\beta\gamma$ bands;
 time patches are masked out of the encoder input. From the encoder output the
@@ -310,7 +315,7 @@ approaches fine-tuned accuracy with a small fraction of downstream labels
 reach far lower accuracy.
 
 \begin{figure}[t]\centering
-\includegraphics[width=\columnwidth]{figures/label_efficiency.pdf}
+\figorbox{figures/label_efficiency.pdf}{\columnwidth}
 \caption{\textbf{Label efficiency.} Balanced accuracy of a frozen linear probe as
 a function of the fraction of downstream training labels, pretrained (ours) vs.\
 random init. Pretrained features are accurate at $1$--$10\%$ labels; the two
