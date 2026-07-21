@@ -447,6 +447,32 @@ def extract_features(model, X_np, device, batch_size=64):
     return np.concatenate(feats)
 
 
+def extract_features_stream(model, stream, device, batch_size=64, num_workers=4):
+    """Streaming feature extraction over a _TrialDataset — no np.stack.
+
+    The frozen probe used to stack ALL trials into one contiguous array via
+    dataset_to_xy (np.stack + fancy-index copy), which peaks at ~200 GB on
+    TUAB (372k trials) and swaps the box to a standstill. Here the trials
+    stay as a list of arrays; a DataLoader batches them and only the small
+    [N, d_model] feature matrix is materialized. Progress is printed so a
+    long run is visibly alive (not "stuck at extracting features").
+    """
+    loader = DataLoader(stream, batch_size=batch_size, shuffle=False,
+                        num_workers=num_workers, pin_memory=True)
+    model.eval()
+    feats = []
+    n_batches = len(loader)
+    with torch.no_grad():
+        for bi, (bx, _) in enumerate(loader):
+            bx = bx.to(device, non_blocking=True)
+            tokens = model._tokenize(bx)
+            encoded = model._encode(tokens)
+            feats.append(encoded.mean(dim=1).cpu().numpy())
+            if bi % 200 == 0 or bi == n_batches - 1:
+                print(f"    extract {bi+1}/{n_batches} batches", flush=True)
+    return np.concatenate(feats)
+
+
 # ============================================================
 # Metrics
 # ============================================================
@@ -1171,16 +1197,12 @@ def main():
         print(f"[main] patient_ids NOT in cache (old cache); will fall back to "
               f"recording-disjoint val split. Rebuild cache to enable "
               f"patient-disjoint split matching LaBraM/CBraMod.")
-    if need_stacked_xy:
-        print(f"\n[main] --mode {args.mode}: also stacking train+eval to np.array "
-              f"for frozen probe (RAM-heavy on TUAB)...")
-        X_tr, _, _ = dataset_to_xy(train_ds, n_channels)
-        X_te, _, _ = dataset_to_xy(eval_ds,  n_channels)
-        print(f"Shapes: train {X_tr.shape}, eval {X_te.shape}")
-    else:
-        X_tr = X_te = None
-        print(f"\nN trials: train {len(train_stream)}, eval {len(test_stream)} "
-              f"(streaming mode, no np.stack)")
+    # Frozen probe now streams features via extract_features_stream (no
+    # np.stack), so we never materialize the ~200 GB contiguous array on TUAB.
+    # X_tr/X_te are obsolete; keep as None for the (now unused) legacy path.
+    X_tr = X_te = None
+    print(f"\nN trials: train {len(train_stream)}, eval {len(test_stream)} "
+          f"(streaming mode, no np.stack — frozen + FT both stream)")
     print(f"Class counts (train): {np.bincount(y_tr, minlength=n_classes)}")
     print(f"Class counts (eval):  {np.bincount(y_te, minlength=n_classes)}")
 
@@ -1228,9 +1250,11 @@ def main():
     # ── Frozen probe ──
     if args.mode in ("frozen", "both"):
         print(f"\n{'='*70}\n  Frozen probe ({args.n_reps} reps)\n{'='*70}")
-        print("  [JEPA] Extracting features...")
-        feat_tr = extract_features(model, X_tr, device)
-        feat_te = extract_features(model, X_te, device)
+        print("  [JEPA] Extracting features (streaming)...")
+        feat_tr = extract_features_stream(model, train_stream, device,
+                                          num_workers=args.num_workers)
+        feat_te = extract_features_stream(model, test_stream, device,
+                                          num_workers=args.num_workers)
         # Recording-level aggregation if enabled
         if aggregate_enabled:
             feat_tr_p, y_tr_p = aggregate_per_recording(feat_tr, y_tr, rec_tr)
@@ -1245,10 +1269,12 @@ def main():
         _print_metric_line("  JEPA frozen ", results["jepa_frozen"], args.dataset)
 
         if args.include_random_baseline:
-            print("  [Random] Extracting features (untrained encoder)...")
+            print("  [Random] Extracting features (untrained encoder, streaming)...")
             random_model = build_random_init(model_cls, n_channels, ckpt_args, device)
-            r_tr = extract_features(random_model, X_tr, device)
-            r_te = extract_features(random_model, X_te, device)
+            r_tr = extract_features_stream(random_model, train_stream, device,
+                                           num_workers=args.num_workers)
+            r_te = extract_features_stream(random_model, test_stream, device,
+                                           num_workers=args.num_workers)
             del random_model; torch.cuda.empty_cache()
             if aggregate_enabled:
                 r_tr_p, ry_tr_p = aggregate_per_recording(r_tr, y_tr, rec_tr)
