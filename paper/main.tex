@@ -312,20 +312,30 @@ Random & \tbd & \tbd\\
 \end{tabular}
 \end{table}
 
-\noindent\textbf{Label efficiency.} A frozen linear probe on our features
-approaches fine-tuned accuracy with a small fraction of downstream labels
-(Fig.~\ref{fig:labeleff}): on Mumtaz, \tbd\,\% of labels already reach within
-\tbd\ BA of the full-label probe, whereas a random encoder needs all labels to
-reach far lower accuracy.
+\noindent\textbf{Label efficiency.} A probe on our frozen features reaches high
+accuracy with far fewer downstream labels than a random encoder
+(Fig.~\ref{fig:labeleff}). On every benchmark, a small fraction of labels with
+pretraining beats \emph{all} labels without it: on Mumtaz, $1\%$ of labels ($23$
+windows) reaches $0.899$ BA, above a random encoder using $100\%$ ($0.820$); on
+ISRUC, $10\%$ of sequences reaches $0.652$, above random at $100\%$ ($0.554$);
+similarly for HMC ($0.556$ at $10\%$ vs.\ $0.492$ at $100\%$) and Mental
+Arithmetic ($0.579$ at $1\%$ vs.\ $0.516$ at $100\%$). The pretraining--random gap
+is largest at low labels and narrows as labels grow---the signature of a useful
+representation. On the sequence tasks the gap emerges at $10\%$: below that, too
+few sequences exist to fit the temporal head at all (both near chance), so
+pretraining lowers the label threshold at which the task becomes learnable by an
+order of magnitude.
 
-\begin{figure}[t]\centering
-\figorbox{figures/label_efficiency.pdf}{\columnwidth}
-\caption{\textbf{Label efficiency.} Balanced accuracy of a frozen linear probe as
-a function of the fraction of downstream training labels, pretrained (ours) vs.\
-random init. Pretrained features are accurate at $1$--$10\%$ labels; the two
-converge only near $100\%$.}
+\begin{figure*}[t]\centering
+\figorbox{figures/label_efficiency.pdf}{0.86\textwidth}
+\caption{\textbf{Label efficiency} of the ${\sim}2{,}500$-hour model. Balanced
+accuracy of a probe trained on a fraction of downstream labels, pretrained (ours,
+solid) vs.\ random init (dashed); dotted line is random at $100\%$ labels, shaded
+band is the pretrained$-$random gap. A small fraction of labels with pretraining
+exceeds all labels without it on every task; on the sequence tasks (ISRUC, HMC)
+the advantage appears once ${\geq}10\%$ of sequences suffice to fit the head.}
 \label{fig:labeleff}
-\end{figure}
+\end{figure*}
 
 \subsection{Ablations}
 \begin{table}[t]\centering\small
