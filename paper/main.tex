@@ -127,32 +127,52 @@ clinical tasks reward.}
 \end{figure*}
 
 \section{Related Work}
-\noindent\textbf{EEG foundation models.} LaBraM \cite{jiang2024labram} learns a
-neural vector-quantized tokenizer and predicts discrete codes; CBraMod
-\cite{wang2025cbramod} pairs criss-cross attention with masked signal
-reconstruction; CSBrain \cite{csbrain} adds cross-scale spatio-temporal modeling.
-All predict either a discrete token or the raw signal. We instead regress a
-continuous \emph{spectral} target (band power) with no codebook and no
-reconstruction head as the primary objective.
+\noindent\textbf{Task-specific EEG decoders.} Before foundation models, EEG
+decoding was dominated by compact task-specific networks: convolutional designs
+such as EEGNet \cite{lawhern2018eegnet} and SPaRCNet \cite{jing2023sparcnet},
+transformer hybrids such as EEG Conformer \cite{song2023conformer},
+CNN-Transformer \cite{peh2022cnntransformer} and ST-Transformer
+\cite{song2021sttransformer}, and self-supervised or contrastive encoders such as
+ContraWR \cite{yang2023contrawr} and FFCL \cite{li2022ffcl}. These are trained per
+task and do not transfer a shared representation across datasets; we compare
+against all of them on the identical splits.
 
-\noindent\textbf{Spectral targets in SSL.} Predicting spectral energy is used in
-speech and audio (log-mel reconstruction) and appears implicitly inside LaBraM's
-VQ tokenizer, which is trained to reconstruct Fourier amplitude/phase. We make the
-spectral target the \emph{explicit, primary, codebook-free} pretext task for the
-foundation model itself, and show a fixed (non-learnable) filterbank target is
-required to avoid collapse.
+\noindent\textbf{EEG foundation models and their pretext targets.} Recent work
+pretrains a single encoder on the large Temple University Hospital EEG corpus
+(TUEG) \cite{obeid2016tuh} and fine-tunes it downstream. They differ chiefly in
+\emph{what the pretext task predicts}. BIOT \cite{yang2023biot} tokenizes
+biosignals and pretrains a cross-data transformer. LaBraM \cite{jiang2024labram}
+first trains a vector-quantized neural tokenizer---itself a spectral autoencoder
+that reconstructs Fourier amplitude and phase---and then predicts its discrete
+codes, a two-stage pipeline in the spirit of BEiT \cite{bao2022beit} and VQ-VAE
+\cite{oord2017vqvae}. CBraMod \cite{wang2025cbramod} drops the codebook and instead
+reconstructs the raw masked signal with a criss-cross transformer, following the
+masked-autoencoder recipe \cite{he2022mae}. CSBrain \cite{csbrain} adds cross-scale
+spatio-temporal modeling on top of masked reconstruction. In every case the target
+is either a discrete token or the raw microvolt waveform. We keep the criss-cross
+backbone but replace the target with a continuous \emph{spectral} one---the log
+band-power of masked patches---eliminating both the codebook and the two-stage
+tokenizer while predicting exactly the quantity clinical tasks read out.
 
-\noindent\textbf{Data scale.} CBraMod reports that scaling cleaned TUEG toward
-${\sim}9{,}000$ hours improves downstream accuracy. LaBraM curates a diverse
-${\sim}2{,}500$-hour corpus. Our data-efficiency study reaches the same
-conclusion from the other direction: on spectral tasks, a random ${\sim}2{,}500$-hour
-subset matches the full corpus at equal compute.
+\noindent\textbf{Latent-predictive SSL and collapse.} Joint-embedding predictive
+architectures (I-JEPA \cite{assran2023ijepa}) predict latent representations of
+masked regions rather than pixels, and require an anti-collapse mechanism; LeJEPA
+\cite{balestriero2025lejepa} provides one (SIGReg) with provable isotropy. Our
+objective is not latent-predictive---its target is a fixed physical quantity
+(band power)---but it shares the collapse concern: we show that a \emph{learnable}
+spectral target collapses to zero and that a \emph{fixed} filterbank target removes
+the failure mode by construction. We retain SIGReg only as a light regularizer.
 
-\noindent\textbf{Benchmark leakage.} TUEG-derived pretraining overlaps at the
-patient level with the TUH downstream sets (TUAB/TUEV). Our benchmarks---sleep
-(ISRUC, HMC), depression (Mumtaz), mental arithmetic---are disjoint from TUEG for
-\emph{every} method and thus directly comparable; we use the same subject-disjoint
-splits as CBraMod/CSBrain.
+\noindent\textbf{Data scale and benchmark leakage.} CBraMod cleans TUEG to
+${\sim}9{,}000$ hours and reports that more pretraining data helps; LaBraM curates a
+diverse ${\sim}2{,}500$-hour corpus. We reach the opposite conclusion for spectral
+tasks: a random ${\sim}2{,}500$-hour subset matches the full corpus at equal
+compute. Finally, TUEG-derived pretraining overlaps at the patient level with the
+in-corpus TUH downstream sets; we therefore evaluate only on benchmarks disjoint
+from TUEG for \emph{every} method---sleep staging (ISRUC \cite{khalighi2016isruc},
+HMC \cite{alvarez2021hmc}), depression (Mumtaz2016 \cite{mumtaz2017mdd}) and mental
+arithmetic \cite{zyma2019mentalarith}---using the subject-disjoint splits of
+CBraMod and CSBrain.
 
 \begin{figure*}[t]\centering
 \figorbox{figures/pipeline.pdf}{\textwidth}
@@ -166,41 +186,81 @@ raw-signal reconstruction term and SIGReg isotropy are auxiliary.}
 \end{figure*}
 
 \section{Method}
-\noindent\textbf{Input.} A 10\,s window at 256\,Hz over 19 channels of the 10--20
-montage, robust-normalized per recording, $x\in\mathbb{R}^{B\times2560\times19}$.
+\noindent\textbf{Design principles.} Three observations drive the design.
+(i)~\emph{The label lives in the spectrum.} Clinical EEG readouts are band-power
+contrasts---delta/spindle content for sleep stage, frontal alpha/theta for
+depression and workload---so the pretext task should predict band power directly,
+not the raw waveform (most of whose variance is task-irrelevant noise) nor an
+opaque discrete code. (ii)~\emph{Make the frequency decomposition explicit and
+learnable.} Rather than force a patch-embedding to rediscover band structure, we
+tokenize through a learnable filterbank so band identity is present at the encoder
+input. (iii)~\emph{Avoid a codebook.} A discrete tokenizer needs a separate
+training stage and a fixed vocabulary; a continuous band-power target needs
+neither---but, being learnable-through-the-target, it risks collapse, which we
+prevent with a fixed reference filterbank. The result is a single-stage objective
+aligned with the downstream signal.
 
-\noindent\textbf{Filterbank tokenizer.} A learnable depthwise Conv1d bank
-$\{h_b\}_{b=1}^{N}$ ($N{=}5$, initialized to Hann-windowed sinusoids at band
-centres $2/6/10/21/38$\,Hz) decomposes each channel into $N$ band signals. Each
-$200$-sample patch of each band is linearly embedded; the $N$ band embeddings are
-combined and projected to the token dimension $D{=}512$. The tokens
-$[B,C,T_p,D]$ ($C{=}19$, $T_p{=}12$) are processed by a 12-layer criss-cross
-transformer that alternates channel and time attention (Fig.~\ref{fig:arch}).
+\noindent\textbf{Input.} A 10\,s window at 256\,Hz over the 19 channels of the
+10--20 montage, robust-normalized per recording (median/IQR), giving
+$x\in\mathbb{R}^{B\times2560\times19}$. Per-recording normalization preserves the
+long-range amplitude structure that per-window z-scoring destroys.
 
-\noindent\textbf{Spectral prediction (primary).} We mask a random fraction of
-\emph{time} patches; masked patch embeddings are replaced by a learnable token so
-the encoder never sees them. From the encoder output we predict the log band-power
-of each masked patch and supervise it against a target computed by a \emph{fixed}
-(buffer, no-gradient) filterbank $h^{\mathrm{fix}}$ on the raw signal:
+\noindent\textbf{Learnable filterbank tokenizer.} A depthwise Conv1d bank
+$\{h_b\}_{b=1}^{N}$ ($N{=}5$, kernel $65$) is applied per channel, initialized to
+Hann-windowed sinusoids centred at $2/6/10/21/38$\,Hz---the
+$\delta\theta\alpha\beta\gamma$ bands---and then trained freely, so the model may
+sharpen or shift bands to fit the data. Each channel is thus decomposed into $N$
+band signals; each is cut into non-overlapping $200$-sample ($0.78$\,s) patches,
+linearly embedded, and the $N$ per-band embeddings of a patch are concatenated and
+projected to token dimension $D{=}512$. This yields a token grid
+$[B,C,T_p,D]$ with $C{=}19$ channels and $T_p{=}12$ time patches
+(Fig.~\ref{fig:arch}).
+
+\noindent\textbf{Criss-cross encoder.} The tokens are processed by a 12-layer
+transformer that, like CBraMod \cite{wang2025cbramod}, alternates attention along
+the channel axis and the time axis within each layer (criss-cross), so spatial
+(montage) and temporal structure are modelled without the quadratic cost of full
+$C{\times}T_p$ attention. Learned positional embeddings are added on both axes.
+
+\noindent\textbf{Masking.} We mask whole \emph{time} patches (all bands of a masked
+patch), replacing their embeddings by a shared learnable mask token so the encoder
+never sees the hidden content. Masking whole patches rather than individual bands
+makes the pretext task predict a masked patch's spectrum from its temporal
+context; an ablation (below) confirms time-patch masking outperforms band masking.
+
+\noindent\textbf{Spectral-prediction objective (primary).} From the encoder output
+at each masked patch we predict the log band-power of all $N$ bands and supervise
+it against a target computed by a \emph{fixed} (registered as a buffer, no
+gradient) reference filterbank $h^{\mathrm{fix}}$ applied to the raw signal:
 \begin{equation}
 \mathcal{L}_{\mathrm{cf}}=\frac{1}{|\mathcal{M}|}\!\!\sum_{(c,t,b)\in\mathcal{M}}\!\!
-\big(\hat p_{c,t,b}-\log(1+\bar e_{c,t,b})\big)^2,
+\big(\hat p_{c,t,b}-\log(1+\bar e_{c,t,b})\big)^2,\quad
+\bar e_{c,t,b}=\tfrac1P\!\sum_\tau (h^{\mathrm{fix}}_b*x)^2_{c,t,\tau},
 \end{equation}
-where the target band power is $\bar e_{c,t,b}=\tfrac1P\sum_\tau(h^{\mathrm{fix}}_b*
-x)^2_{c,t,\tau}$ and $\mathcal{M}$ is the set of masked (channel, patch, band)
-triples. A fixed target is critical: with a \emph{learnable} target filterbank the
-model minimizes $\mathcal{L}_{\mathrm{cf}}$ by collapsing the filters so the target
-$\to0$ (we observe $\mathcal{L}_{\mathrm{cf}}{\to}4{\times}10^{-4}$ and degenerate
-features). A fixed target makes collapse counter-productive: an uninformative
-encoding cannot predict real band energy, which anchors the encoder to stay
-informative.
+where $\mathcal{M}$ is the set of masked (channel, patch, band) triples and $P$ the
+patch length. \emph{Why a fixed target.} If the target filterbank were also
+learnable, the loss admits a trivial optimum: drive the target filters to zero so
+$\bar e\to0$ and predict zero---we observe exactly this collapse
+($\mathcal{L}_{\mathrm{cf}}{\to}4{\times}10^{-4}$ with degenerate, uninformative
+features). Freezing the target inverts the incentive: real band energy cannot be
+predicted from an uninformative encoding, so minimizing $\mathcal{L}_{\mathrm{cf}}$
+\emph{forces} the encoder (and the learnable \emph{input} filterbank) to stay
+informative. This is the crux of a codebook-free spectral objective and is verified
+in the ablations.
 
-\noindent\textbf{Auxiliaries.} A light raw-signal reconstruction term
-(weight $0.5$) regularizes the decoder, and SIGReg \cite{balestriero2025lejepa}
-enforces isotropy (weight $\lambda{=}0.05$). We use \emph{no} latent
-JEPA term (an ablation found it inert here):
-$\mathcal{L}=\mathcal{L}_{\mathrm{cf}}+0.5\,\mathcal{L}_{\mathrm{mae}}
-+0.05\,\mathcal{L}_{\mathrm{sig}}$.
+\noindent\textbf{Auxiliary terms.} A light raw-signal reconstruction head (masked
+patches, L2, weight $0.5$) stabilizes early training, and SIGReg
+\cite{balestriero2025lejepa} adds an isotropy penalty (weight $\lambda{=}0.05$)
+that discourages dimensional collapse of the representation. We use \emph{no}
+latent JEPA term: an ablation found it inert once the spectral target is present.
+The full objective is
+\begin{equation}
+\mathcal{L}=\mathcal{L}_{\mathrm{cf}}+0.5\,\mathcal{L}_{\mathrm{mae}}
++0.05\,\mathcal{L}_{\mathrm{sig}}.
+\end{equation}
+The relative importance of the spectral ($\mathcal{L}_{\mathrm{cf}}$) and
+reconstruction ($\mathcal{L}_{\mathrm{mae}}$) terms is isolated in
+Table~\ref{tab:ablobj}.
 
 \section{Experiments}
 \noindent\textbf{Pretraining.} TUEG at 256\,Hz, 10\,s windows, robust
@@ -447,24 +507,5 @@ is label-efficient downstream, and makes the surprising point that for spectral
 EEG tasks the pretext \emph{objective}, not the data scale, is what matters. We
 argue this reframes what an EEG foundation model should predict.
 
-% Manual author-year bibliography (works with natbib without bibtex). To use the
-% AAAI .bst instead: \bibliographystyle{aaai2027}\bibliography{yourrefs}.
-\begin{thebibliography}{}
-\bibitem[Balestriero and LeCun(2025)]{balestriero2025lejepa}
-Balestriero, R.; and LeCun, Y. 2025.
-LeJEPA: sketched isotropic Gaussian regularization for joint-embedding predictive
-architectures.
-\bibitem[Chen et al.(2025)]{csbrain}
-Chen, Y.; et al. 2025.
-CSBrain: a cross-scale spatiotemporal brain foundation model for EEG.
-In \emph{NeurIPS}.
-\bibitem[Jiang et al.(2024)]{jiang2024labram}
-Jiang, W.; et al. 2024.
-Large brain model for learning generic representations with EEG.
-In \emph{ICLR}.
-\bibitem[Wang et al.(2025)]{wang2025cbramod}
-Wang, J.; et al. 2025.
-CBraMod: a criss-cross brain foundation model for EEG.
-In \emph{ICLR}.
-\end{thebibliography}
+\bibliography{reference}
 \end{document}
