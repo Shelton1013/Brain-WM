@@ -232,33 +232,67 @@ converged checkpoint. Cells still marked \tbd\ are pending auxiliary runs
 (objective ablation, sleep frozen probe, random-init fine-tuning, full-corpus HMC
 control).}
 
-\begin{table*}[t]\centering\small
-\setlength{\tabcolsep}{4.5pt}
-\caption{\textbf{Main results on leak-free clinical benchmarks.} Each task reports
-its standard metrics: 5-class sleep staging (ISRUC, HMC) uses balanced accuracy,
-Cohen's $\kappa$, weighted-F1; the binary tasks (Mumtaz depression, Mental
-Arithmetic) use balanced accuracy, AUROC, AUPR. Ours is pretrained on
-${\sim}2{,}500$\,h; baselines on ${\sim}9{,}000$\,h (CBraMod/CSBrain) or
-${\sim}2{,}500$\,h (LaBraM), as reported by their authors (BA only). For the
-tiny-cohort binary tasks the frozen probe is deterministic and is our primary
-number. Best BA per task in \textbf{bold}. Fine-tuned rows are mean${\pm}$std
-(3 reps for sleep and Mumtaz, 5 seeds for Mental Arithmetic); the frozen probe is
-deterministic (no std). All values to four decimals.}
-\label{tab:main}
-\resizebox{\textwidth}{!}{%
-\begin{tabular}{l ccc ccc ccc ccc}
+\begin{table}[t]\centering\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\caption{\textbf{ISRUC sleep staging (5-class).} Balanced accuracy, Cohen's
+$\kappa$, weighted-F1 (mean${\pm}$std). Baselines as reported by \citet{csbrain}
+on the identical subject-disjoint split; \textbf{bold} = best mean. Ours is
+pretrained on ${\sim}2{,}500$\,h vs.\ ${\sim}9{,}000$\,h (CBraMod/CSBrain).}
+\label{tab:isruc}
+\begin{tabular}{lccc}
 \toprule
-& \multicolumn{3}{c}{ISRUC (sleep, 5-cls)} & \multicolumn{3}{c}{HMC (sleep, 5-cls)}
+Method & BA & $\kappa$ & WF1\\
+\midrule
+EEGNet          & \val{0.7154}{.0121} & \val{0.7040}{.0173} & \val{0.7513}{.0124}\\
+EEGConformer    & \val{0.7400}{.0133} & \val{0.7143}{.0162} & \val{0.7634}{.0151}\\
+SPaRCNet        & \val{0.7487}{.0075} & \val{0.7097}{.0132} & \val{0.7624}{.0092}\\
+ContraWR        & \val{0.7402}{.0126} & \val{0.7178}{.0156} & \val{0.7610}{.0137}\\
+CNN-Transformer & \val{0.7363}{.0087} & \val{0.7129}{.0121} & \val{0.7719}{.0153}\\
+FFCL            & \val{0.7277}{.0182} & \val{0.7016}{.0292} & \val{0.7614}{.0197}\\
+ST-Transformer  & \val{0.7381}{.0205} & \val{0.7013}{.0352} & \val{0.7681}{.0175}\\
+\midrule
+BIOT            & \val{0.7527}{.0121} & \val{0.7291}{.0230} & \val{0.7790}{.0146}\\
+LaBraM-Base     & \val{0.7633}{.0102} & \val{0.7231}{.0182} & \val{0.7810}{.0133}\\
+CBraMod         & \val{0.7865}{.0110} & \best{\val{0.7442}{.0152}} & \best{\val{0.8011}{.0099}}\\
+CSBrain         & \val{0.7925}{.0030} & \val{0.7406}{.0102} & \val{0.7990}{.0091}\\
+\midrule
+\best{Ours} (FT)& \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table*}[t]\centering\small
+\setlength{\tabcolsep}{4pt}
+\caption{\textbf{Binary clinical tasks: Mumtaz depression and Mental Arithmetic
+(mental stress).} Balanced accuracy / AUC-PR / AUROC (mean${\pm}$std) on the
+\citet{csbrain} subject-disjoint splits; baselines as reported there. \textbf{Bold}
+= best \emph{robust} mean. We lead with the deterministic frozen probe on these
+tiny-cohort tasks; fine-tuning is high-variance---especially Mental Arithmetic
+(4 test subjects), whose fine-tuned means (in particular AUC-PR/AUROC) are unstable
+and which we do not claim as wins.}
+\label{tab:binary}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{l ccc ccc}
+\toprule
 & \multicolumn{3}{c}{Mumtaz (depression)} & \multicolumn{3}{c}{Mental Arithmetic}\\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}
-& BA & $\kappa$ & WF1 & BA & $\kappa$ & WF1 & BA & AUROC & AUPR & BA & AUROC & AUPR\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Method & BA & AUC-PR & AUROC & BA & AUC-PR & AUROC\\
 \midrule
-LaBraM  & \na & \na & \na & \na & \na & \na & 0.9410 & \na & \na & \na & \na & \na\\
-CBraMod & 0.7865 & \na & \na & \na & \na & \na & 0.9560 & \na & \na & 0.7256 & \na & \na\\
-CSBrain & 0.7925 & \na & \na & 0.7345 & \na & \na & \best{0.9640} & \na & \na & 0.7558 & \na & \na\\
+EEGNet          & \val{0.9232}{.0104} & \val{0.9626}{.0095} & \val{0.9639}{.0093} & \val{0.6770}{.0116} & \val{0.5763}{.0102} & \val{0.7321}{.0108}\\
+EEGConformer    & \val{0.9308}{.0117} & \val{0.9684}{.0105} & \val{0.9702}{.0101} & \val{0.6805}{.0123} & \val{0.5829}{.0134} & \val{0.7424}{.0128}\\
+SPaRCNet        & \val{0.9316}{.0095} & \val{0.9754}{.0065} & \val{0.9781}{.0063} & \val{0.6879}{.0107} & \val{0.5825}{.0193} & \val{0.7418}{.0132}\\
+ContraWR        & \val{0.9195}{.0115} & \val{0.9589}{.0102} & \val{0.9621}{.0092} & \val{0.6631}{.0097} & \val{0.5787}{.0164} & \val{0.7332}{.0082}\\
+CNN-Transformer & \val{0.9305}{.0068} & \val{0.9757}{.0074} & \val{0.9742}{.0059} & \val{0.6779}{.0268} & \val{0.5777}{.0285} & \val{0.7258}{.0336}\\
+FFCL            & \val{0.9314}{.0083} & \val{0.9717}{.0021} & \val{0.9753}{.0033} & \val{0.6798}{.0142} & \val{0.5786}{.0266} & \val{0.7330}{.0198}\\
+ST-Transformer  & \val{0.9135}{.0103} & \val{0.9578}{.0086} & \val{0.9594}{.0059} & \val{0.6631}{.0173} & \val{0.5672}{.0259} & \val{0.7132}{.0174}\\
 \midrule
-Ours (frozen) & \na & \na & \na & \na & \na & \na & 0.9173 & 0.9833 & 0.9829 & 0.7083 & 0.7590 & 0.6239\\
-\best{Ours} (FT) & \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012} & \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \val{0.7459}{.0131} & \val{0.9129}{.0260} & \val{0.9809}{.0107} & \val{0.9817}{.0106} & \best{\val{0.7625}{.0727}} & \val{0.8995}{.0329} & \val{0.8045}{.0544}\\
+BIOT            & \val{0.9358}{.0052} & \val{0.9736}{.0034} & \val{0.9758}{.0042} & \val{0.6875}{.0186} & \val{0.6004}{.0195} & \val{0.7536}{.0144}\\
+LaBraM-Base     & \val{0.9409}{.0079} & \val{0.9798}{.0093} & \val{0.9782}{.0057} & \val{0.6909}{.0125} & \val{0.5999}{.0155} & \val{0.7721}{.0093}\\
+CBraMod         & \val{0.9560}{.0056} & \val{0.9923}{.0032} & \val{0.9921}{.0025} & \val{0.7256}{.0132} & \val{0.6267}{.0099} & \val{0.7905}{.0073}\\
+CSBrain         & \best{\val{0.9643}{.0155}} & \best{\val{0.9936}{.0034}} & \best{\val{0.9956}{.0020}} & \best{\val{0.7558}{.0106}} & \best{\val{0.6696}{.0221}} & \best{\val{0.8478}{.0297}}\\
+\midrule
+Ours (frozen)   & 0.9173 & 0.9829 & 0.9833 & 0.7083 & 0.6239 & 0.7590\\
+Ours (FT)       & \val{0.9129}{.0260} & \val{0.9817}{.0106} & \val{0.9809}{.0107} & \val{0.7625}{.0727} & \val{0.8045}{.0544} & \val{0.8995}{.0329}\\
 \bottomrule
 \end{tabular}}
 \end{table*}
@@ -286,7 +320,7 @@ Ours (full ctrl) & ${\sim}17{,}666$\,h & 0.7980 & \tbd\\
 
 \noindent\textbf{Sleep staging at one-seventh the data.} Our ${\sim}2{,}500$-hour
 model reaches ISRUC balanced accuracy $0.7934{\pm}0.0051$ and HMC
-$0.7484{\pm}0.0052$ (Table~\ref{tab:main}), on par with CSBrain on ISRUC
+$0.7484{\pm}0.0052$ (Tables~\ref{tab:isruc},~\ref{tab:dataeff}), on par with CSBrain on ISRUC
 ($0.7925$) and \emph{exceeding} it on HMC ($0.7345$; ${+}0.0139$,
 ${\approx}2.7\sigma$), while CBraMod and CSBrain pretrain on ${\sim}9{,}000$ hours.
 A full-data control on the ${\sim}17{,}666$-hour corpus---seven times more data at
@@ -294,7 +328,7 @@ a matched gradient budget---reaches ISRUC $0.7980$, statistically indistinguisha
 from the ${\sim}2{,}500$-hour model (Table~\ref{tab:dataeff}). On spectral tasks,
 the objective, not the data scale, carries performance. On the tiny-cohort clinical
 tasks fine-tuning is high-variance, so we lead with the deterministic frozen probe
-(Table~\ref{tab:main}): on Mumtaz it reaches $0.9173$ BA / $0.9833$
+(Table~\ref{tab:binary}): on Mumtaz it reaches $0.9173$ BA / $0.9833$
 AUROC---\emph{above} its own fine-tuned number ($0.9129$) and with zero seed
 variance---and on Mental Arithmetic $0.7083$ BA / $0.7590$ AUROC. The fine-tuned
 Mental Arithmetic mean ($0.7625$) even exceeds CSBrain's $0.7558$, but at
