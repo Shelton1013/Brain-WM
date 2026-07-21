@@ -261,6 +261,34 @@ CSBrain         & \val{0.7925}{.0030} & \val{0.7406}{.0102} & \val{0.7990}{.0091
 \end{tabular}
 \end{table}
 
+\begin{table}[t]\centering\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\caption{\textbf{HMC sleep staging (5-class).} Balanced accuracy, Cohen's
+$\kappa$, weighted-F1 (mean${\pm}$std); baselines from \citet{csbrain} on the
+identical split. \textbf{Bold} = best mean.}
+\label{tab:hmc}
+\begin{tabular}{lccc}
+\toprule
+Method & BA & $\kappa$ & WF1\\
+\midrule
+EEGNet          & \val{0.6534}{.0122} & \val{0.5886}{.0201} & \val{0.6536}{.0168}\\
+EEGConformer    & \val{0.7149}{.0086} & \val{0.6432}{.0055} & \val{0.7080}{.0039}\\
+SPaRCNet        & \val{0.4756}{.1109} & \val{0.3147}{.1315} & \val{0.4108}{.1310}\\
+ContraWR        & \val{0.4242}{.0541} & \val{0.2340}{.0554} & \val{0.2987}{.0288}\\
+CNN-Transformer & \val{0.6573}{.0141} & \val{0.5961}{.0105} & \val{0.6896}{.0065}\\
+FFCL            & \val{0.4427}{.0702} & \val{0.2542}{.0654} & \val{0.2902}{.0485}\\
+ST-Transformer  & \val{0.2559}{.0141} & \val{0.0503}{.0183} & \val{0.1428}{.0122}\\
+\midrule
+BIOT            & \val{0.6862}{.0041} & \val{0.6295}{.0113} & \val{0.7091}{.0147}\\
+LaBraM-Base     & \val{0.7277}{.0101} & \val{0.6813}{.0053} & \val{0.7454}{.0027}\\
+CBraMod         & \val{0.7269}{.0041} & \val{0.6685}{.0104} & \val{0.7395}{.0089}\\
+CSBrain         & \val{0.7345}{.0047} & \best{\val{0.6818}{.0046}} & \best{\val{0.7506}{.0042}}\\
+\midrule
+\best{Ours} (FT)& \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \val{0.7459}{.0131}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
 \begin{table*}[t]\centering\small
 \setlength{\tabcolsep}{4pt}
 \caption{\textbf{Binary clinical tasks: Mumtaz depression and Mental Arithmetic
@@ -269,7 +297,9 @@ CSBrain         & \val{0.7925}{.0030} & \val{0.7406}{.0102} & \val{0.7990}{.0091
 = best \emph{robust} mean. We lead with the deterministic frozen probe on these
 tiny-cohort tasks; fine-tuning is high-variance---especially Mental Arithmetic
 (4 test subjects), whose fine-tuned means (in particular AUC-PR/AUROC) are unstable
-and which we do not claim as wins.}
+and which we do not claim as wins. $^\dagger$Not comparable to the baselines'
+setup (unstable on 4 test subjects; AUC-PR depends on class prevalence); our
+deterministic frozen probe is the honest number and is below CSBrain here.}
 \label{tab:binary}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{l ccc ccc}
@@ -292,7 +322,7 @@ CBraMod         & \val{0.9560}{.0056} & \val{0.9923}{.0032} & \val{0.9921}{.0025
 CSBrain         & \best{\val{0.9643}{.0155}} & \best{\val{0.9936}{.0034}} & \best{\val{0.9956}{.0020}} & \best{\val{0.7558}{.0106}} & \best{\val{0.6696}{.0221}} & \best{\val{0.8478}{.0297}}\\
 \midrule
 Ours (frozen)   & 0.9173 & 0.9829 & 0.9833 & 0.7083 & 0.6239 & 0.7590\\
-Ours (FT)       & \val{0.9129}{.0260} & \val{0.9817}{.0106} & \val{0.9809}{.0107} & \val{0.7625}{.0727} & \val{0.8045}{.0544} & \val{0.8995}{.0329}\\
+Ours (FT)       & \val{0.9129}{.0260} & \val{0.9817}{.0106} & \val{0.9809}{.0107} & \val{0.7625}{.0727} & \val{0.8045}{.0544}$^\dagger$ & \val{0.8995}{.0329}$^\dagger$\\
 \bottomrule
 \end{tabular}}
 \end{table*}
@@ -308,8 +338,8 @@ vs.\ prior methods with their pretraining budgets. Seven times more data
 \toprule
 Model & Pretrain data & ISRUC & HMC\\
 \midrule
-LaBraM   & ${\sim}2{,}500$\,h & \na   & \na\\
-CBraMod  & ${\sim}9{,}000$\,h & 0.7865 & \na\\
+LaBraM   & ${\sim}2{,}500$\,h & 0.7633 & 0.7277\\
+CBraMod  & ${\sim}9{,}000$\,h & 0.7865 & 0.7269\\
 CSBrain  & ${\sim}9{,}000$\,h & 0.7925 & 0.7345\\
 \midrule
 Ours (full ctrl) & ${\sim}17{,}666$\,h & 0.7980 & \tbd\\
@@ -320,7 +350,7 @@ Ours (full ctrl) & ${\sim}17{,}666$\,h & 0.7980 & \tbd\\
 
 \noindent\textbf{Sleep staging at one-seventh the data.} Our ${\sim}2{,}500$-hour
 model reaches ISRUC balanced accuracy $0.7934{\pm}0.0051$ and HMC
-$0.7484{\pm}0.0052$ (Tables~\ref{tab:isruc},~\ref{tab:dataeff}), on par with CSBrain on ISRUC
+$0.7484{\pm}0.0052$ (Tables~\ref{tab:isruc},~\ref{tab:hmc}), on par with CSBrain on ISRUC
 ($0.7925$) and \emph{exceeding} it on HMC ($0.7345$; ${+}0.0139$,
 ${\approx}2.7\sigma$), while CBraMod and CSBrain pretrain on ${\sim}9{,}000$ hours.
 A full-data control on the ${\sim}17{,}666$-hour corpus---seven times more data at
