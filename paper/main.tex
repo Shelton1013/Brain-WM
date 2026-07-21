@@ -241,8 +241,9 @@ Arithmetic) use balanced accuracy, AUROC, AUPR. Ours is pretrained on
 ${\sim}2{,}500$\,h; baselines on ${\sim}9{,}000$\,h (CBraMod/CSBrain) or
 ${\sim}2{,}500$\,h (LaBraM), as reported by their authors (BA only). For the
 tiny-cohort binary tasks the frozen probe is deterministic and is our primary
-number. Best BA per task in \textbf{bold}. Ours BA std: ISRUC/HMC ${\pm}0.005$,
-Mumtaz(FT) ${\pm}0.026$, Mental Arith.(FT) ${\pm}0.073$; frozen is deterministic.}
+number. Best BA per task in \textbf{bold}. Fine-tuned rows are mean${\pm}$std
+(3 reps for sleep and Mumtaz, 5 seeds for Mental Arithmetic); the frozen probe is
+deterministic (no std). All values to four decimals.}
 \label{tab:main}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{l ccc ccc ccc ccc}
@@ -252,12 +253,12 @@ Mumtaz(FT) ${\pm}0.026$, Mental Arith.(FT) ${\pm}0.073$; frozen is deterministic
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}\cmidrule(lr){11-13}
 & BA & $\kappa$ & WF1 & BA & $\kappa$ & WF1 & BA & AUROC & AUPR & BA & AUROC & AUPR\\
 \midrule
-LaBraM  & \na & \na & \na & \na & \na & \na & 0.941 & \na & \na & \na & \na & \na\\
-CBraMod & 0.787 & \na & \na & \na & \na & \na & 0.956 & \na & \na & 0.726 & \na & \na\\
-CSBrain & \best{0.793} & \na & \na & 0.735 & \na & \na & \best{0.964} & \na & \na & 0.756 & \na & \na\\
+LaBraM  & \na & \na & \na & \na & \na & \na & 0.9410 & \na & \na & \na & \na & \na\\
+CBraMod & 0.7865 & \na & \na & \na & \na & \na & 0.9560 & \na & \na & 0.7256 & \na & \na\\
+CSBrain & 0.7925 & \na & \na & 0.7345 & \na & \na & \best{0.9640} & \na & \na & 0.7558 & \na & \na\\
 \midrule
-Ours (frozen) & \na & \na & \na & \na & \na & \na & 0.917 & 0.983 & 0.983 & 0.708 & 0.759 & 0.624\\
-\best{Ours} (FT) & 0.792 & 0.728 & 0.795 & \best{0.748} & 0.674 & 0.746 & 0.913 & 0.981 & 0.982 & \best{0.763} & 0.900 & 0.805\\
+Ours (frozen) & \na & \na & \na & \na & \na & \na & 0.9173 & 0.9833 & 0.9829 & 0.7083 & 0.7590 & 0.6239\\
+\best{Ours} (FT) & \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012} & \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \val{0.7459}{.0131} & \val{0.9129}{.0260} & \val{0.9809}{.0107} & \val{0.9817}{.0106} & \best{\val{0.7625}{.0727}} & \val{0.8995}{.0329} & \val{0.8045}{.0544}\\
 \bottomrule
 \end{tabular}}
 \end{table*}
@@ -274,47 +275,48 @@ vs.\ prior methods with their pretraining budgets. Seven times more data
 Model & Pretrain data & ISRUC & HMC\\
 \midrule
 LaBraM   & ${\sim}2{,}500$\,h & \na   & \na\\
-CBraMod  & ${\sim}9{,}000$\,h & 0.787 & \na\\
-CSBrain  & ${\sim}9{,}000$\,h & 0.793 & 0.735\\
+CBraMod  & ${\sim}9{,}000$\,h & 0.7865 & \na\\
+CSBrain  & ${\sim}9{,}000$\,h & 0.7925 & 0.7345\\
 \midrule
-Ours (full ctrl) & ${\sim}17{,}666$\,h & 0.798 & \tbd\\
-\best{Ours} & ${\sim}2{,}500$\,h & \best{\val{0.792}{0.005}} & \best{\val{0.748}{0.005}}\\
+Ours (full ctrl) & ${\sim}17{,}666$\,h & 0.7980 & \tbd\\
+\best{Ours} & ${\sim}2{,}500$\,h & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \noindent\textbf{Sleep staging at one-seventh the data.} Our ${\sim}2{,}500$-hour
-model reaches ISRUC balanced accuracy $0.792{\pm}0.005$ and HMC $0.748{\pm}0.005$
-(Table~\ref{tab:main}), matching CSBrain on ISRUC ($0.793$) and \emph{exceeding} it
-on HMC ($0.735$; ${+}0.014$, ${\approx}2.8\sigma$), while CBraMod and CSBrain
-pretrain on ${\sim}9{,}000$ hours. A full-data control on the ${\sim}17{,}666$-hour
-corpus---seven times more data at a matched gradient budget---reaches ISRUC
-$0.798$, statistically indistinguishable from the ${\sim}2{,}500$-hour model
-(Table~\ref{tab:dataeff}). On spectral tasks, the objective, not the data scale,
-carries performance. On the tiny-cohort clinical tasks fine-tuning is
-high-variance, so we lead with the deterministic frozen probe (Table~\ref{tab:main}):
-on Mumtaz it reaches $0.917$ BA / $0.983$ AUROC---\emph{above} its own fine-tuned
-number ($0.913$) and with zero seed variance---and on Mental Arithmetic $0.708$ BA
-/ $0.759$ AUROC. The fine-tuned Mental Arithmetic mean ($0.763$) even exceeds
-CSBrain's $0.756$, but at ${\pm}0.073$ we do not lean on it.
+model reaches ISRUC balanced accuracy $0.7934{\pm}0.0051$ and HMC
+$0.7484{\pm}0.0052$ (Table~\ref{tab:main}), on par with CSBrain on ISRUC
+($0.7925$) and \emph{exceeding} it on HMC ($0.7345$; ${+}0.0139$,
+${\approx}2.7\sigma$), while CBraMod and CSBrain pretrain on ${\sim}9{,}000$ hours.
+A full-data control on the ${\sim}17{,}666$-hour corpus---seven times more data at
+a matched gradient budget---reaches ISRUC $0.7980$, statistically indistinguishable
+from the ${\sim}2{,}500$-hour model (Table~\ref{tab:dataeff}). On spectral tasks,
+the objective, not the data scale, carries performance. On the tiny-cohort clinical
+tasks fine-tuning is high-variance, so we lead with the deterministic frozen probe
+(Table~\ref{tab:main}): on Mumtaz it reaches $0.9173$ BA / $0.9833$
+AUROC---\emph{above} its own fine-tuned number ($0.9129$) and with zero seed
+variance---and on Mental Arithmetic $0.7083$ BA / $0.7590$ AUROC. The fine-tuned
+Mental Arithmetic mean ($0.7625$) even exceeds CSBrain's $0.7558$, but at
+${\pm}0.0727$ we do not lean on it.
 
 \noindent\textbf{Checkpoint selection.} We report a single converged checkpoint,
 chosen by pretraining loss and used for \emph{all} downstream tasks; we never tune
 the pretraining epoch per task. It sits at roughly the matched gradient budget of
 the full-corpus control (${\sim}7{\times}$ more epochs on ${\sim}7{\times}$ less
 data). Earlier checkpoints underfit; much later ones overfit the small subset and
-degrade the tiny-cohort clinical tasks (e.g.\ Mental Arithmetic falls from $0.763$
-to $0.617$), so the converged point is both the principled comparison to the
+degrade the tiny-cohort clinical tasks (e.g.\ Mental Arithmetic falls from $0.7625$
+to $0.6174$), so the converged point is both the principled comparison to the
 control and the natural operating point.
 
 \noindent\textbf{Label efficiency.} A probe on our frozen features reaches high
 accuracy with far fewer downstream labels than a random encoder
 (Fig.~\ref{fig:labeleff}). On every benchmark, a small fraction of labels with
 pretraining beats \emph{all} labels without it: on Mumtaz, $1\%$ of labels ($23$
-windows) reaches $0.899$ BA, above a random encoder using $100\%$ ($0.820$); on
-ISRUC, $10\%$ of sequences reaches $0.652$, above random at $100\%$ ($0.554$);
-similarly for HMC ($0.556$ at $10\%$ vs.\ $0.492$ at $100\%$) and Mental
-Arithmetic ($0.579$ at $1\%$ vs.\ $0.516$ at $100\%$). The pretraining--random gap
+windows) reaches $0.8990$ BA, above a random encoder using $100\%$ ($0.8200$); on
+ISRUC, $10\%$ of sequences reaches $0.6520$, above random at $100\%$ ($0.5540$);
+similarly for HMC ($0.5560$ at $10\%$ vs.\ $0.4920$ at $100\%$) and Mental
+Arithmetic ($0.5790$ at $1\%$ vs.\ $0.5160$ at $100\%$). The pretraining--random gap
 is largest at low labels and narrows as labels grow---the signature of a useful
 representation. On the sequence tasks the gap emerges at $10\%$: below that, too
 few sequences exist to fit the temporal head at all (both near chance), so
@@ -345,7 +347,7 @@ Objective & ISRUC & HMC & Mumtaz\\
 \midrule
 MAE only (reconstruction)          & \tbd & \tbd & \tbd\\
 CF only (spectral prediction)      & \tbd & \tbd & \tbd\\
-\best{CF\,+\,MAE (ours)}           & \best{0.792} & \best{0.748} & 0.913\\
+\best{CF\,+\,MAE (ours)}           & \best{0.7934} & \best{0.7484} & 0.9129\\
 \bottomrule
 \end{tabular}
 \end{table}
