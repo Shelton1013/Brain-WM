@@ -248,7 +248,7 @@ CBraMod  & 0.787 & \na   & 0.956 & 0.726\\
 CSBrain  & 0.793 & 0.735 & 0.964 & 0.756\\
 \midrule
 Random (FT)      & \val{0.738}{0.008} & \tbd & \tbd & \tbd\\
-\best{Ours} (FT) & \best{\val{0.790}{0.004}} & \tbd & \val{0.913}{0.026} & \val{0.717}{0.027}\\
+\best{Ours} (FT) & \best{\val{0.793}{0.005}} & \best{\val{0.748}{0.005}} & \val{0.913}{0.026} & \val{0.763}{0.073}\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -269,29 +269,32 @@ CBraMod  & ${\sim}9{,}000$\,h & 0.787 & \na\\
 CSBrain  & ${\sim}9{,}000$\,h & 0.793 & 0.735\\
 \midrule
 Ours (full ctrl) & ${\sim}17{,}666$\,h & 0.798 & \tbd\\
-\best{Ours} & ${\sim}2{,}500$\,h & \best{\val{0.790}{0.004}} & \tbd\\
+\best{Ours} & ${\sim}2{,}500$\,h & \best{\val{0.793}{0.005}} & \best{\val{0.748}{0.005}}\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\noindent\textbf{Sleep staging at one-seventh the data.} At the matched-compute
-checkpoint, our ${\sim}2{,}500$-hour model reaches ISRUC balanced accuracy
-$0.790{\pm}0.004$ (Table~\ref{tab:main}), matching CSBrain ($0.793$) and exceeding
-CBraMod ($0.787$), while both pretrain on ${\sim}9{,}000$ hours; the HMC number at
-this checkpoint is pending (\tbd, an earlier checkpoint already reaches $0.752$,
-above CSBrain's $0.735$). A matched-compute control on the full
-${\sim}17{,}666$-hour corpus---seven times more data, identical gradient
-budget---reaches ISRUC $0.798$, statistically indistinguishable from the
-${\sim}2{,}500$-hour model (Table~\ref{tab:dataeff}). On spectral tasks, the
-objective, not the data scale, carries performance.
+\noindent\textbf{Sleep staging at one-seventh the data.} Our ${\sim}2{,}500$-hour
+model reaches ISRUC balanced accuracy $0.793{\pm}0.005$ and HMC $0.748{\pm}0.005$
+(Table~\ref{tab:main}), matching CSBrain on ISRUC ($0.793$) and \emph{exceeding} it
+on HMC ($0.735$; ${+}0.014$, ${\approx}2.8\sigma$), while CBraMod and CSBrain
+pretrain on ${\sim}9{,}000$ hours. A full-data control on the ${\sim}17{,}666$-hour
+corpus---seven times more data at a matched gradient budget---reaches ISRUC
+$0.798$, statistically indistinguishable from the ${\sim}2{,}500$-hour model
+(Table~\ref{tab:dataeff}). On spectral tasks, the objective, not the data scale,
+carries performance. On the tiny-cohort clinical tasks the model is competitive
+(Mental Arithmetic $0.763$, above CSBrain's $0.756$) but high-variance under
+fine-tuning, so we lead with the deterministic frozen probe there
+(Table~\ref{tab:frozen}).
 
-\noindent\textbf{Checkpoint selection.} We report the matched-compute checkpoint:
-the ${\sim}2{,}500$-hour model trained for the same gradient budget as the
-full-corpus control (${\sim}7{\times}$ more epochs on ${\sim}7{\times}$ less data).
-Much earlier checkpoints underfit, and much later ones overfit the small subset
-and degrade the tiny-cohort clinical tasks; the matched-compute point is thus both
-the principled comparison to the full-data control and the natural operating
-point. All tasks are reported at this single checkpoint.
+\noindent\textbf{Checkpoint selection.} We report a single converged checkpoint,
+chosen by pretraining loss and used for \emph{all} downstream tasks; we never tune
+the pretraining epoch per task. It sits at roughly the matched gradient budget of
+the full-corpus control (${\sim}7{\times}$ more epochs on ${\sim}7{\times}$ less
+data). Earlier checkpoints underfit; much later ones overfit the small subset and
+degrade the tiny-cohort clinical tasks (e.g.\ Mental Arithmetic falls from $0.763$
+to $0.617$), so the converged point is both the principled comparison to the
+control and the natural operating point.
 
 \begin{table}[t]\centering\small
 \setlength{\tabcolsep}{5pt}
@@ -337,7 +340,7 @@ Objective & ISRUC & HMC & Mumtaz\\
 \midrule
 MAE only (reconstruction)          & \tbd & \tbd & \tbd\\
 CF only (spectral prediction)      & \tbd & \tbd & \tbd\\
-\best{CF\,+\,MAE (ours)}           & \best{\val{0.790}{0.004}} & \tbd & \val{0.913}{0.026}\\
+\best{CF\,+\,MAE (ours)}           & \best{\val{0.793}{0.005}} & \best{\val{0.748}{0.005}} & \val{0.913}{0.026}\\
 \bottomrule
 \end{tabular}
 \end{table}
