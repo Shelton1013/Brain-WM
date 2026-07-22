@@ -117,12 +117,15 @@ scoping to spectral/clinical EEG and motor imagery as a stated limitation.
 
 \begin{figure*}[t]\centering
 \figorbox{figures/contrast.pdf}{\textwidth}
-\caption{\textbf{Codebook-free spectral prediction vs.\ prior EEG foundation
-models.} LaBraM predicts discrete codes from a separately trained VQ tokenizer;
-CBraMod reconstructs the raw masked signal. We predict the \emph{log band-power}
-of masked patches directly, against a fixed filterbank target---no codebook, no
-two-stage training, and an objective aligned with the spectral structure that
-clinical tasks reward.}
+\caption{\textbf{What should an EEG pretext task predict?} Prior foundation models
+predict a \emph{proxy} of the signal: LaBraM predicts a discrete code from a
+separately trained vector-quantized tokenizer (a codebook plus two training
+stages); CBraMod and CSBrain reconstruct the \emph{original raw waveform}, most of
+whose variance is task-irrelevant noise. We instead predict the \emph{log
+band-power} of masked patches against a fixed filterbank target---the spectral
+quantity clinical labels are defined by. This single change removes \emph{both} the
+codebook (unlike LaBraM) and the noise reconstruction (unlike CBraMod/CSBrain),
+in one single-stage objective.}
 \label{fig:contrast}
 \end{figure*}
 
@@ -137,22 +140,28 @@ ContraWR \cite{yang2023contrawr} and FFCL \cite{li2022ffcl}. These are trained p
 task and do not transfer a shared representation across datasets; we compare
 against all of them on the identical splits.
 
-\noindent\textbf{EEG foundation models and their pretext targets.} Recent work
-pretrains a single encoder on the large Temple University Hospital EEG corpus
-(TUEG) \cite{obeid2016tuh} and fine-tunes it downstream. They differ chiefly in
-\emph{what the pretext task predicts}. BIOT \cite{yang2023biot} tokenizes
-biosignals and pretrains a cross-data transformer. LaBraM \cite{jiang2024labram}
-first trains a vector-quantized neural tokenizer---itself a spectral autoencoder
-that reconstructs Fourier amplitude and phase---and then predicts its discrete
-codes, a two-stage pipeline in the spirit of BEiT \cite{bao2022beit} and VQ-VAE
-\cite{oord2017vqvae}. CBraMod \cite{wang2025cbramod} drops the codebook and instead
-reconstructs the raw masked signal with a criss-cross transformer, following the
-masked-autoencoder recipe \cite{he2022mae}. CSBrain \cite{csbrain} adds cross-scale
-spatio-temporal modeling on top of masked reconstruction. In every case the target
-is either a discrete token or the raw microvolt waveform. We keep the criss-cross
-backbone but replace the target with a continuous \emph{spectral} one---the log
-band-power of masked patches---eliminating both the codebook and the two-stage
-tokenizer while predicting exactly the quantity clinical tasks read out.
+\noindent\textbf{What EEG foundation models predict.} Recent models pretrain a
+single encoder on the Temple University Hospital EEG corpus (TUEG)
+\cite{obeid2016tuh} and differ chiefly in \emph{what the masked-prediction target
+is}. Two families dominate, and both predict a \emph{proxy} of the signal rather
+than the discriminative content itself. (i)~\emph{Discrete codes.} LaBraM
+\cite{jiang2024labram} first trains a vector-quantized neural tokenizer---itself a
+spectral autoencoder over Fourier amplitude and phase---and then predicts its
+discrete indices, a two-stage pipeline in the spirit of BEiT \cite{bao2022beit} and
+VQ-VAE \cite{oord2017vqvae}; the codebook is an extra module to train, size and
+tune. (ii)~\emph{Raw-signal reconstruction.} CBraMod \cite{wang2025cbramod} removes
+the codebook but reconstructs the \emph{original raw waveform} of masked patches
+with a criss-cross transformer, following the masked-autoencoder recipe
+\cite{he2022mae}; CSBrain \cite{csbrain} keeps this raw-waveform target and adds
+cross-scale spatio-temporal modeling; BIOT \cite{yang2023biot} likewise tokenizes
+and reconstructs biosignals. Reconstructing the waveform spends model capacity on
+microvolt-level noise the downstream task never uses. Our target is neither a code
+nor the waveform: we predict the \emph{log band-power} of masked patches---the
+spectral quantity that clinical labels are defined by (Sec.~\ref{sec:method}). On
+the \emph{same} criss-cross backbone, this one change removes \emph{both} escapes
+at once---no codebook and no two-stage tokenizer (unlike LaBraM), and no
+reconstruction of task-irrelevant noise (unlike CBraMod/CSBrain)---yielding a
+single-stage objective aligned with what the tasks read out.
 
 \noindent\textbf{Latent-predictive SSL and collapse.} Joint-embedding predictive
 architectures (I-JEPA \cite{assran2023ijepa}) predict latent representations of
@@ -185,7 +194,7 @@ raw-signal reconstruction term and SIGReg isotropy are auxiliary.}
 \label{fig:arch}
 \end{figure*}
 
-\section{Method}
+\section{Method}\label{sec:method}
 \noindent\textbf{Design principles.} Three observations drive the design.
 (i)~\emph{The label lives in the spectrum.} Clinical EEG readouts are band-power
 contrasts---delta/spindle content for sleep stage, frontal alpha/theta for
