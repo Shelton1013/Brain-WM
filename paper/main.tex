@@ -476,15 +476,18 @@ the advantage appears once ${\geq}10\%$ of sequences suffice to fit the head.}
 \setlength{\tabcolsep}{5pt}
 \caption{\textbf{Objective ablation} at ${\sim}2{,}500$\,h, matched compute (same
 subset, same steps; only the loss changes). Isolates spectral band-power
-prediction (CF) vs.\ raw-signal reconstruction (MAE).}
+prediction (CF) vs.\ raw-signal reconstruction (MAE). Reported on the low-variance
+sleep benchmarks (large test sets, std ${\sim}0.005$), where a small delta is
+resolvable; the tiny-cohort clinical tasks are too high-variance to separate the
+conditions.}
 \label{tab:ablobj}
-\begin{tabular}{lccc}
+\begin{tabular}{lcc}
 \toprule
-Objective & ISRUC & HMC & Mumtaz\\
+Objective & ISRUC BA & HMC BA\\
 \midrule
-MAE only (reconstruction)          & \tbd & \tbd & \tbd\\
-CF only (spectral prediction)      & \tbd & \tbd & \tbd\\
-\best{CF\,+\,MAE (ours)}           & \best{0.7934} & \best{0.7484} & 0.9129\\
+MAE only (reconstruction)          & \tbd & \tbd\\
+CF only (spectral prediction)      & \tbd & \tbd\\
+\best{CF\,+\,MAE (ours)}           & \best{0.7934} & \best{0.7484}\\
 \bottomrule
 \end{tabular}
 \end{table}
