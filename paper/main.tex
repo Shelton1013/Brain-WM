@@ -37,7 +37,7 @@
 \definecolor{calpha}{HTML}{0F9D76}\definecolor{cbeta}{HTML}{D18A00}
 \definecolor{cgamma}{HTML}{D1541F}\definecolor{cacc}{HTML}{0A8F9E}
 
-\title{Predicting Band Power, Not Codebooks:\\A Data- and Label-Efficient
+\title{SpecBraM: Predicting Band Power, Not Codebooks\\A Data- and Label-Efficient
 Spectral-Prediction Foundation Model for Clinical EEG}
 \author{Anonymous Submission}
 \affiliations{Paper under double-blind review}
@@ -58,8 +58,8 @@ learnable filterbank tokenizer plus a cross-frequency band-power target gives th
 model exactly the inductive bias the downstream tasks reward. Pretrained on only
 ${\sim}2{,}500$ hours of EEG---a random one-seventh subset of the TUH EEG Corpus,
 comparable to the smallest prior foundation model and roughly a quarter of
-CBraMod's data---our model reaches state-of-the-art sleep staging (ISRUC, HMC)
-and stays competitive across clinical spectral tasks. A matched-compute full-data
+CBraMod's data---our model, \textbf{SpecBraM}, reaches state-of-the-art sleep
+staging (ISRUC, HMC) and stays competitive across clinical spectral tasks. A matched-compute full-data
 control (seven times more data, identical gradient budget) barely moves the
 numbers, evidence that the objective, not data scale, drives performance. The
 learned representations are strongly label-efficient: a linear probe on frozen
@@ -85,7 +85,8 @@ by alpha suppression and frontal-midline theta. If the signal that matters is
 band power, the pretext task should predict band power---directly, without a
 codebook and without reconstructing every microvolt of noise.
 
-We introduce a \textbf{codebook-free spectral-prediction} foundation model. A
+We introduce \textbf{SpecBraM} (Spectral Brain Model), a codebook-free
+spectral-prediction foundation model. A
 learnable filterbank tokenizer decomposes each patch into physiological bands
 before encoding; masked patches are then predicted in the \emph{spectral} domain,
 by regressing their log band-power against a \emph{fixed} (non-learnable)
@@ -96,7 +97,7 @@ Beyond simplicity, our central empirical finding is about \emph{efficiency}.
 Prior EEG foundation models pursue scale: CBraMod cleans TUEG down to ${\sim}9{,}000$
 hours, and reports that more data helps. We find the opposite for spectral tasks.
 Pretrained on a random one-seventh of TUEG (${\sim}2{,}500$ hours, the size of
-LaBraM's entire corpus), our model already matches or exceeds these methods on
+LaBraM's entire corpus), SpecBraM already matches or exceeds these methods on
 sleep staging; a matched-compute control trained on the full ${\sim}17{,}666$
 hours does not improve it (the two are within $0.004$ balanced accuracy). Data
 scale is not the bottleneck; the objective is.
@@ -335,7 +336,7 @@ CBraMod and CSBrain with ${\sim}1/4$ of their data.}
 & CBraMod~\cite{wang2025cbramod}     & ${\sim}9$k   & \val{0.7865}{.0110} & \snd{\val{0.7442}{.0152}} & \best{\val{0.8011}{.0099}} & \val{0.7269}{.0041} & \val{0.6685}{.0104} & \val{0.7395}{.0089}\\
 & CSBrain~\cite{csbrain}             & ${\sim}9$k   & \snd{\val{0.7925}{.0030}} & \val{0.7406}{.0102} & \val{0.7990}{.0091} & \snd{\val{0.7345}{.0047}} & \best{\val{0.6818}{.0046}} & \best{\val{0.7506}{.0042}}\\
 & REVE~\cite{reve2025}               & ${\sim}60$k  & \val{0.7819}{.0078} & \best{\val{0.7500}{.0156}} & \snd{\val{0.8005}{.0135}} & -- & -- & --\\
-& \textbf{Ours}                      & ${\sim}2.5$k & \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012} & \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \snd{\val{0.7459}{.0131}}\\
+& \textbf{SpecBraM}                      & ${\sim}2.5$k & \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012} & \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \snd{\val{0.7459}{.0131}}\\
 \bottomrule
 \end{tabular}}
 \end{table*}
@@ -355,7 +356,7 @@ frozen probe rivals \emph{fine-tuned} baselines from Table~\ref{tab:sleep}
 & \shortstack{Balanced\\Accuracy} & \shortstack{Cohen's\\Kappa} & \shortstack{Weighted\\F1}\\
 \midrule
 Random init   & 0.5657 & 0.4202 & 0.5235 & 0.5003 & 0.3406 & 0.4528\\
-\textbf{Ours} & \textbf{0.7522} & \textbf{0.6794} & \textbf{0.7503} & \textbf{0.7099} & \textbf{0.6200} & \textbf{0.7030}\\
+\textbf{SpecBraM} & \textbf{0.7522} & \textbf{0.6794} & \textbf{0.7503} & \textbf{0.7099} & \textbf{0.6200} & \textbf{0.7030}\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -392,8 +393,8 @@ LaBraM-Base     & \val{0.9409}{.0079} & \val{0.9798}{.0093} & \val{0.9782}{.0057
 CBraMod         & \val{0.9560}{.0056} & \val{0.9923}{.0032} & \val{0.9921}{.0025} & \val{0.7256}{.0132} & \val{0.6267}{.0099} & \val{0.7905}{.0073}\\
 CSBrain         & \best{\val{0.9643}{.0155}} & \best{\val{0.9936}{.0034}} & \best{\val{0.9956}{.0020}} & \best{\val{0.7558}{.0106}} & \best{\val{0.6696}{.0221}} & \best{\val{0.8478}{.0297}}\\
 \midrule
-Ours (frozen)   & 0.9173 & 0.9829 & 0.9833 & 0.7083 & 0.6239 & 0.7590\\
-Ours (FT)       & \val{0.9129}{.0260} & \val{0.9817}{.0106} & \val{0.9809}{.0107} & \val{0.7625}{.0727} & \val{0.8045}{.0544}$^\dagger$ & \val{0.8995}{.0329}$^\dagger$\\
+SpecBraM (frozen)   & 0.9173 & 0.9829 & 0.9833 & 0.7083 & 0.6239 & 0.7590\\
+SpecBraM (FT)       & \val{0.9129}{.0260} & \val{0.9817}{.0106} & \val{0.9809}{.0107} & \val{0.7625}{.0727} & \val{0.8045}{.0544}$^\dagger$ & \val{0.8995}{.0329}$^\dagger$\\
 \bottomrule
 \end{tabular}}
 \end{table*}
@@ -413,8 +414,8 @@ LaBraM   & ${\sim}2{,}500$\,h & 0.7633 & 0.7277\\
 CBraMod  & ${\sim}9{,}000$\,h & 0.7865 & 0.7269\\
 CSBrain  & ${\sim}9{,}000$\,h & 0.7925 & 0.7345\\
 \midrule
-Ours (full ctrl) & ${\sim}17{,}666$\,h & \val{0.7899}{.0066} & \val{0.7526}{.0009}\\
-\best{Ours} & ${\sim}2{,}500$\,h & \val{0.7934}{.0051} & \val{0.7484}{.0052}\\
+SpecBraM (full ctrl) & ${\sim}17{,}666$\,h & \val{0.7899}{.0066} & \val{0.7526}{.0009}\\
+\best{SpecBraM} & ${\sim}2{,}500$\,h & \val{0.7934}{.0051} & \val{0.7484}{.0052}\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -500,7 +501,7 @@ too high-variance to resolve an ablation.}
 Objective & ISRUC BA & HMC BA\\
 \midrule
 SIGReg only (no $\mathcal{L}_{\mathrm{cf}}$)        & \val{0.2124}{.0015} & \val{0.2737}{.0247}\\
-\best{$\mathcal{L}_{\mathrm{cf}}$ + SIGReg (ours)}  & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
+\best{$\mathcal{L}_{\mathrm{cf}}$ + SIGReg (SpecBraM)}  & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
 \bottomrule
 \end{tabular}
 \end{table}
