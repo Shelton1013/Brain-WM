@@ -92,6 +92,17 @@ hmc_ft)
     --n_reps 3 $RANDFLAG --batch_size 8 \
     --output "$OUT/${TAG}_hmc_ft.json" 2>&1 | tee $LOG/${TAG}_eval_hmc_ft.log ;;
 
+# ---- random-init FT ONLY (checkpoint-independent baseline; skips pretrained) ----
+# random-init FT does not depend on the pretrained weights, so this is reusable
+# across checkpoints. Runs only the random baseline (fast; no pretrained FT).
+isruc_random|hmc_random)
+  DS=${task%_random}
+  DD=$([ "$DS" = hmc ] && echo /home/pxieaf/home2/datasets/HMC \
+        || echo /home/pxieaf/home2/datasets/isruc/subgroupI_official)
+  run "$DS random-only FT" python eval_sleep_seq2seq.py --dataset $DS --checkpoint "$CKPT" \
+    --data_dir "$DD" --cache_dir $CACHE --n_reps 3 --random_only --batch_size 8 \
+    --output "$OUT/${TAG}_${DS}_randomFT.json" 2>&1 | tee $LOG/${TAG}_eval_${DS}_randomFT.log ;;
+
 # ---------------- TUAB (abnormal, optional, TUH-derived) ----------------
 tuab)  # --mode both = frozen + FT
   run "tuab" python eval_tuh_clinical.py --checkpoint "$CKPT" \

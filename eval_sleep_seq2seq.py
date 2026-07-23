@@ -280,6 +280,10 @@ def main():
     p.add_argument("--batch_size", type=int, default=16)
     p.add_argument("--n_reps", type=int, default=3)
     p.add_argument("--include_random_baseline", action="store_true")
+    p.add_argument("--random_only", action="store_true",
+                   help="skip the pretrained model entirely; run ONLY the "
+                        "random-init baseline (checkpoint-independent), to avoid "
+                        "recomputing the pretrained FT you already have.")
     p.add_argument("--freeze_encoder", action="store_true",
                    help="frozen probe: only train the 1-layer seq transformer + "
                         "head (tests pretrained feature quality directly)")
@@ -352,35 +356,39 @@ def main():
 
     # Frozen probe: encode JEPA features ONCE (encoder fixed), reuse across reps.
     jepa_feats = None
-    if args.freeze_encoder:
-        t = time.time()
-        jepa_feats = (precompute_seq_features(model, Xtr, device, args.batch_size),
-                      precompute_seq_features(model, Xva, device, args.batch_size),
-                      precompute_seq_features(model, Xte, device, args.batch_size))
-        print(f"  [frozen] JEPA features {tuple(jepa_feats[0].shape)} encoded once "
-              f"in {(time.time()-t)/60:.1f} min", flush=True)
-
-    print(f"\n  JEPA seq2seq {'FROZEN-probe' if args.freeze_encoder else 'FT'} "
-          f"({args.n_reps} reps × {args.max_epochs} ep)")
-    jr = []
-    for rep in range(args.n_reps):
-        torch.manual_seed(42 + rep); np.random.seed(42 + rep)
-        print(f"  Rep {rep+1}/{args.n_reps}")
+    if args.random_only:
+        print("\n  [random_only] skipping pretrained model; running random-init "
+              "baseline only.")
+    else:
         if args.freeze_encoder:
-            m = run_head_only(jepa_feats[0], ytr, jepa_feats[1], yva,
-                              jepa_feats[2], yte, N_CLASSES, model.d_model,
-                              device, args.max_epochs)
-        else:
-            m = run_finetune_seq(model, Xtr, ytr, Xva, yva, Xte, yte, N_CLASSES,
-                                 device, args.max_epochs, args.batch_size,
-                                 lp_ft_warmup=args.lp_ft_warmup,
-                                 encoder_lr_mult=args.encoder_lr_mult)
-        print(f"    BA={m['balanced_accuracy']:.4f} κ={m['cohen_kappa']:.4f} "
-              f"wF1={m['weighted_f1']:.4f}")
-        jr.append(m)
-    results["jepa_finetune"] = _agg(jr)
+            t = time.time()
+            jepa_feats = (precompute_seq_features(model, Xtr, device, args.batch_size),
+                          precompute_seq_features(model, Xva, device, args.batch_size),
+                          precompute_seq_features(model, Xte, device, args.batch_size))
+            print(f"  [frozen] JEPA features {tuple(jepa_feats[0].shape)} encoded once "
+                  f"in {(time.time()-t)/60:.1f} min", flush=True)
 
-    if args.include_random_baseline:
+        print(f"\n  JEPA seq2seq {'FROZEN-probe' if args.freeze_encoder else 'FT'} "
+              f"({args.n_reps} reps × {args.max_epochs} ep)")
+        jr = []
+        for rep in range(args.n_reps):
+            torch.manual_seed(42 + rep); np.random.seed(42 + rep)
+            print(f"  Rep {rep+1}/{args.n_reps}")
+            if args.freeze_encoder:
+                m = run_head_only(jepa_feats[0], ytr, jepa_feats[1], yva,
+                                  jepa_feats[2], yte, N_CLASSES, model.d_model,
+                                  device, args.max_epochs)
+            else:
+                m = run_finetune_seq(model, Xtr, ytr, Xva, yva, Xte, yte, N_CLASSES,
+                                     device, args.max_epochs, args.batch_size,
+                                     lp_ft_warmup=args.lp_ft_warmup,
+                                     encoder_lr_mult=args.encoder_lr_mult)
+            print(f"    BA={m['balanced_accuracy']:.4f} κ={m['cohen_kappa']:.4f} "
+                  f"wF1={m['weighted_f1']:.4f}")
+            jr.append(m)
+        results["jepa_finetune"] = _agg(jr)
+
+    if args.include_random_baseline or args.random_only:
         print(f"\n  Random-init seq2seq {'FROZEN-probe' if args.freeze_encoder else 'FT'} "
               f"({args.n_reps} reps)")
         rr = []
@@ -411,9 +419,10 @@ def main():
         r = results["random_finetune"]
         print(f"  {'Random (Ours)':22s} {r['balanced_accuracy']['mean']:>9.4f} "
               f"{r['cohen_kappa']['mean']:>9.4f} {r['weighted_f1']['mean']:>9.4f}")
-    j = results["jepa_finetune"]
-    print(f"  {'JEPA (Ours)':22s} {j['balanced_accuracy']['mean']:>9.4f} "
-          f"{j['cohen_kappa']['mean']:>9.4f} {j['weighted_f1']['mean']:>9.4f}")
+    if "jepa_finetune" in results:
+        j = results["jepa_finetune"]
+        print(f"  {'JEPA (Ours)':22s} {j['balanced_accuracy']['mean']:>9.4f} "
+              f"{j['cohen_kappa']['mean']:>9.4f} {j['weighted_f1']['mean']:>9.4f}")
 
     out = Path(args.output) if args.output else Path(args.checkpoint).parent / f"{args.dataset}_seq2seq.json"
     out.parent.mkdir(parents=True, exist_ok=True)
