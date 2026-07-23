@@ -19,37 +19,38 @@
   stage/.style={draw=line,rounded corners=4pt,fill=panel,minimum height=26mm,
     inner sep=5pt,align=center},
   head/.style={draw=acc,rounded corners=4pt,fill=accfill,align=center,
-    inner sep=5pt,minimum height=10mm},
+    inner sep=5pt},
   lbl/.style={font=\sffamily\footnotesize\bfseries,text=ink},
-  sub/.style={font=\sffamily\scriptsize,text=ink!70},
+  sub/.style={font=\sffamily\scriptsize,text=ink!70,align=center},
+  dim/.style={font=\sffamily\scriptsize\itshape,text=acc!80!ink},
   flow/.style={->,draw=ink!55,line width=1pt},
-  band/.style={minimum width=15mm,minimum height=3.4mm,rounded corners=1pt,
+  band/.style={minimum width=15mm,minimum height=3.2mm,rounded corners=1pt,
     text=white,font=\sffamily\scriptsize\bfseries,inner sep=0pt}]
 
 % =========== 1. INPUT =====================================================
-\begin{scope}
-  \node[stage,minimum width=20mm] (in) {};
-  \foreach \y/\a/\f in {8/.9/9, 3/1/13, -2/.8/6, -7/1/17}{
-    \draw[cdelta!70!ink,line width=.8pt,decorate,
-      decoration={snake,amplitude=1.1pt,segment length=3.2pt}]
-      ($(in.center)+(-8mm,\y pt)$) -- ++(16mm,0);}
-  \node[lbl,above=1pt of in] {Raw EEG};
-  \node[sub,below=1pt of in] {$10\,$s $\times$ 19 ch};
-\end{scope}
+\node[stage,minimum width=20mm] (in) {};
+\foreach \y/\f in {8/9, 3/13, -2/6, -7/17}{
+  \draw[cdelta!70!ink,line width=.8pt,decorate,
+    decoration={snake,amplitude=1.1pt,segment length=3.2pt}]
+    ($(in.center)+(-8mm,\y pt)$) -- ++(16mm,0);}
+\node[lbl,above=1pt of in] {Raw EEG};
+\node[sub,below=1pt of in] {$10\,$s $\times$ 19\,ch};
+\node[dim,below=3.5mm of in] {$[B,2560,19]$};
 
 % =========== 2. LEARNABLE FILTERBANK ======================================
-\node[stage,minimum width=24mm,right=11mm of in] (fb) {};
+\node[stage,minimum width=26mm,right=12mm of in] (fb) {};
 \foreach \c/\n/\y in {cdelta/$\delta$/9, ctheta/$\theta$/3.5, calpha/$\alpha$/-2,
                       cbeta/$\beta$/-7.5, cgamma/$\gamma$/-13}{
   \node[band,fill=\c] at ($(fb.center)+(0,\y pt)$) {\n};}
 \node[lbl,above=1pt of fb,align=center] {Learnable\\filterbank};
-\node[sub,below=1pt of fb] {$\delta\theta\alpha\beta\gamma$ bands};
+\node[sub,below=1pt of fb] {5 depthwise Conv1d\\(kernel 65), per channel\\init $\delta\theta\alpha\beta\gamma$: $2/6/10/21/38$\,Hz};
+\node[dim,below=9mm of fb] {$[B,19,5,2560]$};
 
-% =========== 3. TOKENS + MASK =============================================
-\node[stage,minimum width=24mm,right=11mm of fb] (tok) {};
+% =========== 3. PATCH + TOKENS + MASK =====================================
+\node[stage,minimum width=26mm,right=12mm of fb] (tok) {};
 \foreach \r/\y in {0/9,1/3.5,2/-2,3/-7.5,4/-13}{
-  \foreach \k/\x in {0/-7,1/-1,2/5}{
-    \pgfmathsetmacro\mask{(\k==1)?1:0}   % mask a whole TIME patch (all bands)
+  \foreach \k/\x in {0/-8,1/-2,2/4}{
+    \pgfmathsetmacro\mask{(\k==1)?1:0}
     \ifnum\mask=1
       \node[draw=line,fill=white,minimum size=3.6mm,inner sep=0,
         rounded corners=.5pt] at ($(tok.center)+(\x mm,\y pt)$){};
@@ -58,46 +59,49 @@
         at ($(tok.center)+(\x mm,\y pt)$){};
     \fi}}
 \node[lbl,above=1pt of tok,align=center] {Band tokens\\+ mask time};
-\node[sub,below=1pt of tok] {mask time patch};
+\node[sub,below=1pt of tok] {$200$-sample patches;\\embed \& concat 5 bands\\mask whole time patch\\($\to$ learnable mask token)};
+\node[dim,below=11.5mm of tok] {$[B,19,12,512]$};
 
 % =========== 4. ENCODER ===================================================
-\node[stage,minimum width=22mm,right=11mm of tok] (enc)
+\node[stage,minimum width=24mm,right=12mm of tok] (enc)
   {\bfseries\small Criss-cross\\[1pt]\bfseries\small Transformer\\[3pt]
    {\scriptsize\color{ink!70}$\times 12$}\\[1pt]
-   {\scriptsize\color{ink!70}channel\,$\!\times\!$\,time}\\
-   {\scriptsize\color{ink!70}attention}};
+   {\scriptsize\color{ink!70}channel\,$\!\oplus\!$\,time}\\
+   {\scriptsize\color{ink!70}attention, $D{=}512$}};
 \node[lbl,above=1pt of enc] {Encoder};
 
-% =========== 5. HEADS =====================================================
-\node[head,right=12mm of enc,yshift=9mm] (cf)
-  {\textbf{Cross-frequency}\\[1pt]\scriptsize predict masked\\[-1pt]
-   \scriptsize band log-power};
-\node[head,right=12mm of enc,yshift=-11mm,draw=tgt,fill=ink!4] (jepa)
-  {\textbf{Reconstruct}\,{\scriptsize(aux)}\\[1pt]\scriptsize raw signal + SIGReg};
+% =========== 5. CF HEAD (primary) =========================================
+\node[head,right=13mm of enc,minimum height=15mm] (cf)
+  {\textbf{Predict band power}\\[2pt]\scriptsize masked patches:\\[-1pt]
+   \scriptsize $\hat p_{c,t,b}=\log$-power\\[-1pt]\scriptsize of all 5 bands};
 
-% =========== FIXED TARGET (below) =========================================
-\node[stage,minimum width=24mm,fill=ink!4,draw=tgt,minimum height=13mm,
-  below=14mm of tok] (ftb)
-  {\textbf{\small Fixed filterbank}\\[1pt]{\scriptsize\color{ink!70}target band power}};
+% =========== FIXED TARGET LANE (below) ====================================
+\node[stage,minimum width=30mm,fill=ink!4,draw=tgt,minimum height=14mm,
+  below=15mm of tok] (ftb)
+  {\textbf{\small Fixed filterbank} $h^{\mathrm{fix}}$\\[1pt]
+   {\scriptsize\color{ink!70}no gradient (frozen)}\\[1pt]
+   {\scriptsize\color{ink!70}$\bar e_{c,t,b}=\tfrac1P\sum_\tau(h^{\mathrm{fix}}_b* x)^2$}};
+\node[sub,below=0pt of ftb] {target log band-power $\log(1{+}\bar e)$};
 
-% ---- flows ---------------------------------------------------------------
+% =========== flows ========================================================
 \draw[flow] (in) -- (fb);
 \draw[flow] (fb) -- (tok);
 \draw[flow] (tok) -- (enc);
-\draw[flow] (enc.east) -- ++(6mm,0) |- (cf.west);
-\draw[flow] (enc.east) -- ++(6mm,0) |- (jepa.west);
-% input -> fixed target (no grad)
+\draw[flow] (enc.east) -- (cf.west);
+% input -> fixed target (no grad, dashed)
 \draw[->,draw=tgt,densely dashed,line width=.9pt]
-  (in.south) |- (ftb.west) node[sub,pos=.75,above,text=tgt]{no grad};
-% fixed target -> CF loss
-\draw[->,draw=tgt,line width=.9pt] (ftb.east) -| ($(cf.south)+(0,-1pt)$);
+  (in.south) |- (ftb.west) node[sub,pos=.72,below,text=tgt,yshift=1mm]{raw signal, no grad};
+% fixed target -> CF loss (MSE)
+\draw[->,draw=tgt,line width=.9pt] (ftb.east) -| ($(cf.south)+(0,-1pt)$)
+  node[sub,pos=.25,below,text=tgt]{MSE};
 
-% ---- loss badges ---------------------------------------------------------
-\node[right=3mm of cf,acc,font=\sffamily\small\bfseries] (lcf)
-  {$\mathcal{L}_{\mathrm{cf}}$};
-\node[sub,below=0pt of lcf] {MSE vs.\ fixed target};
-\node[right=3mm of jepa,text=ink!55,font=\sffamily\small\bfseries]
-  {$0.5\,\mathcal{L}_{\mathrm{mae}}\!+\!\lambda\mathcal{L}_{\mathrm{sig}}$};
+% =========== SIGReg + loss badges =========================================
+\node[sub,above=1mm of enc,text=ink!60] {SIGReg (isotropy) on\\encoder output};
+\draw[->,draw=ink!35,densely dotted] (enc.north) -- ++(0,5mm);
+
+\node[right=5mm of cf,acc,font=\sffamily\small\bfseries,align=left] (lcf)
+  {$\mathcal{L}=\mathcal{L}_{\mathrm{cf}}$\\[2pt]$\;+\,0.05\,\mathcal{L}_{\mathrm{sig}}$};
+\node[sub,below=1mm of lcf,align=left] {no codebook,\\no reconstruction,\\no JEPA};
 
 \end{tikzpicture}
 \end{document}

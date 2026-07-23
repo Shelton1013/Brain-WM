@@ -111,7 +111,7 @@
     <div class="panel acc"><div class="ptitle">Predict band <u>power</u></div>
       <canvas id="bars" width="150" height="74"></canvas>
       <div class="pnote"><b>target:</b> <b>fixed</b>-filterbank<br>log band-power (no codebook)</div></div>
-    <div class="badge obj">Band power<small>spectral MSE vs. fixed target<br>+ 0.5&middot;recon + SIGReg</small></div>
+    <div class="badge obj">Band power<small>spectral MSE vs. fixed target<br>+ SIGReg (no recon)</small></div>
   </div>
   <div class="caption"><b>Frequency-band domain</b> &mdash; a learnable filterbank (5 depthwise Conv1d per channel, initialised at &delta;&theta;&alpha;&beta;&gamma; centres) maps each patch into bands; we then predict the masked patches' log band-power against a <b>fixed</b> filterbank target. The domain (bands, not raw) and the target (power, not waveform) are what differ; the mask axis (time) is shared.</div>
 

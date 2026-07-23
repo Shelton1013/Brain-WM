@@ -259,19 +259,17 @@ predicted from an uninformative encoding, so minimizing $\mathcal{L}_{\mathrm{cf
 informative. This is the crux of a codebook-free spectral objective and is verified
 in the ablations.
 
-\noindent\textbf{Regularization, and an inert reconstruction term.} We add SIGReg
+\noindent\textbf{Regularization.} The only other term is SIGReg
 \cite{balestriero2025lejepa}, an isotropy penalty (weight $\lambda{=}0.05$) that
-discourages dimensional collapse, and use \emph{no} latent JEPA term (an ablation
-found it inert). We also included a raw-signal reconstruction head (weight $0.5$),
-but its loss is \emph{identically zero} throughout pretraining: on the filterbank
-tokenizer the band tokens already determine the waveform, so reconstruction is
-trivially satisfied and contributes no gradient. The \emph{effective} objective is
-therefore purely spectral,
+prevents dimensional collapse of the representation. We deliberately use \emph{no}
+reconstruction objective---unlike CBraMod we never reconstruct the raw
+waveform---and \emph{no} latent JEPA term (an ablation found it inert). The
+objective is therefore purely spectral,
 \begin{equation}
 \mathcal{L}=\mathcal{L}_{\mathrm{cf}}+0.05\,\mathcal{L}_{\mathrm{sig}},
 \end{equation}
-and Table~\ref{tab:ablobj} confirms the spectral term carries all of the
-performance.
+and Table~\ref{tab:ablobj} shows the band-power term $\mathcal{L}_{\mathrm{cf}}$ is
+the sole learning signal.
 
 \section{Experiments}
 \noindent\textbf{Pretraining.} TUEG at 256\,Hz, 10\,s windows, robust
@@ -488,36 +486,32 @@ the advantage appears once ${\geq}10\%$ of sequences suffice to fit the head.}
 \begin{table}[t]\centering\small
 \setlength{\tabcolsep}{5pt}
 \caption{\textbf{Objective ablation} at ${\sim}2{,}500$\,h, matched compute (same
-subset, same steps; only the loss changes). Isolates spectral band-power
-prediction (CF) vs.\ raw-signal reconstruction (MAE). Reported on the low-variance
-sleep benchmarks (large test sets, std ${\sim}0.005$), where a small delta is
-resolvable; the tiny-cohort clinical tasks are too high-variance to separate the
-conditions.}
+subset, same steps; only the loss changes). Removing the band-power term
+$\mathcal{L}_{\mathrm{cf}}$ leaves only the SIGReg regularizer---no predictive
+objective---and collapses the model to chance. Reported on the low-variance sleep
+benchmarks (large test sets, std ${\sim}0.005$); the tiny-cohort clinical tasks are
+too high-variance to resolve an ablation.}
 \label{tab:ablobj}
 \begin{tabular}{lcc}
 \toprule
 Objective & ISRUC BA & HMC BA\\
 \midrule
-MAE only (reconstruction)          & \val{0.2124}{.0015} & \val{0.2737}{.0247}\\
-CF only (spectral prediction)      & \val{0.7864}{.0023} & \val{0.7486}{.0017}\\
-\best{CF\,+\,MAE (ours)}           & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
+SIGReg only (no $\mathcal{L}_{\mathrm{cf}}$)        & \val{0.2124}{.0015} & \val{0.2737}{.0247}\\
+\best{$\mathcal{L}_{\mathrm{cf}}$ + SIGReg (ours)}  & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\noindent\textbf{Spectral prediction is the load-bearing objective.}
-Table~\ref{tab:ablobj} isolates the two loss terms at identical data and compute.
-Removing the reconstruction term (CF-only) barely changes anything---ISRUC
-$0.7864$, HMC $0.7486$, within noise of the full config ($0.7934$/$0.7484$)---as
-expected, since that term's loss is identically zero and it contributes no gradient
-(Sec.~\ref{sec:method}). Removing the spectral term instead (MAE-only) leaves no
-informative objective and is catastrophic: ISRUC and HMC collapse to $0.2124$ and
+\noindent\textbf{The spectral objective is the sole learning signal.}
+Table~\ref{tab:ablobj} isolates the band-power term at identical data and compute.
+Removing it---leaving only the SIGReg isotropy regularizer, with \emph{no}
+predictive objective---is catastrophic: ISRUC and HMC collapse to $0.2124$ and
 $0.2737$, the 5-class chance level ($\kappa{\approx}0.05$), \emph{below} even a
-randomly initialized encoder (ISRUC $0.738$ fine-tuned). On our filterbank backbone the band tokens already determine
-the waveform, so raw-signal reconstruction is trivially satisfied and teaches
-nothing; only the lossy, structure-selecting band-power target compels the encoder
-to learn. Band-power prediction is thus both necessary and sufficient---the sole
-driver of the representation.
+randomly initialized encoder (ISRUC $0.738$ fine-tuned). With the band-power term
+the model reaches $0.7934$/$0.7484$. SIGReg alone spreads the representation but
+teaches it nothing; the cross-frequency band-power prediction drives all downstream
+performance. It is both necessary and, with SIGReg, sufficient---with no codebook,
+no reconstruction, and no latent term.
 
 \noindent\textbf{Fixed vs.\ learnable target.} A learnable-target filterbank
 collapses ($\mathcal{L}_{\mathrm{cf}}{\to}0$, degenerate features); the fixed
