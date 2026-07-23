@@ -332,9 +332,9 @@ CBraMod and CSBrain with ${\sim}1/4$ of their data.}
 \multirow{6}{*}{\rotatebox{90}{\shortstack{Foundation\\Models}}}
 & BIOT~\cite{yang2023biot}          & mixed        & \val{0.7527}{.0121} & \val{0.7291}{.0230} & \val{0.7790}{.0146} & \val{0.6862}{.0041} & \val{0.6295}{.0113} & \val{0.7091}{.0147}\\
 & LaBraM-Base~\cite{jiang2024labram} & ${\sim}2.5$k & \val{0.7633}{.0102} & \val{0.7231}{.0182} & \val{0.7810}{.0133} & \val{0.7277}{.0101} & \snd{\val{0.6813}{.0053}} & \val{0.7454}{.0027}\\
-& CBraMod~\cite{wang2025cbramod}     & ${\sim}9$k   & \val{0.7865}{.0110} & \best{\val{0.7442}{.0152}} & \best{\val{0.8011}{.0099}} & \val{0.7269}{.0041} & \val{0.6685}{.0104} & \val{0.7395}{.0089}\\
-& CSBrain~\cite{csbrain}             & ${\sim}9$k   & \snd{\val{0.7925}{.0030}} & \snd{\val{0.7406}{.0102}} & \snd{\val{0.7990}{.0091}} & \snd{\val{0.7345}{.0047}} & \best{\val{0.6818}{.0046}} & \best{\val{0.7506}{.0042}}\\
-& REVE~\cite{reve2025}               & ${\sim}60$k  & \val{0.7819}{.0078} & -- & -- & -- & -- & --\\
+& CBraMod~\cite{wang2025cbramod}     & ${\sim}9$k   & \val{0.7865}{.0110} & \snd{\val{0.7442}{.0152}} & \best{\val{0.8011}{.0099}} & \val{0.7269}{.0041} & \val{0.6685}{.0104} & \val{0.7395}{.0089}\\
+& CSBrain~\cite{csbrain}             & ${\sim}9$k   & \snd{\val{0.7925}{.0030}} & \val{0.7406}{.0102} & \val{0.7990}{.0091} & \snd{\val{0.7345}{.0047}} & \best{\val{0.6818}{.0046}} & \best{\val{0.7506}{.0042}}\\
+& REVE~\cite{reve2025}               & ${\sim}60$k  & \val{0.7819}{.0078} & \best{\val{0.7500}{.0156}} & \snd{\val{0.8005}{.0135}} & -- & -- & --\\
 & \textbf{Ours}                      & ${\sim}2.5$k & \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012} & \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \snd{\val{0.7459}{.0131}}\\
 \bottomrule
 \end{tabular}}
@@ -429,9 +429,9 @@ a matched gradient budget, same configuration---reaches ISRUC $0.7899$ and HMC
 $0.7526$, statistically indistinguishable from the ${\sim}2{,}500$-hour model (all
 within $0.004$; Table~\ref{tab:dataeff}). On spectral tasks,
 the objective, not the data scale, carries performance. The point holds externally
-too: REVE \cite{reve2025}, pretrained on $60{,}000$ hours (${24}{\times}$ ours) with
-a masked-autoencoding objective, reaches only $0.7819$ on ISRUC---below our
-$0.7934$---so neither scale nor reconstruction substitutes for the right pretext.
+too: REVE \cite{reve2025}, pretrained on $60{,}000$ hours (${24}{\times}$ ours),
+reaches $0.7819$ balanced accuracy on ISRUC---below our $0.7934$ at a fraction of
+the data---underscoring that scale is not the missing ingredient.
 On the tiny-cohort clinical
 tasks fine-tuning is high-variance, so we lead with the deterministic frozen probe
 (Table~\ref{tab:binary}): on Mumtaz it reaches $0.9173$ BA / $0.9833$
