@@ -407,10 +407,11 @@ SpecBraM (FT)       & \val{0.9129}{.0260} & \val{0.9817}{.0106} & \val{0.9809}{.
 
 \begin{table}[t]\centering\small
 \setlength{\tabcolsep}{5pt}
-\caption{\textbf{Data efficiency (ISRUC / HMC balanced accuracy).} Our
-${\sim}2{,}500$-hour model vs.\ a matched-compute control on the full corpus and
-vs.\ prior methods with their pretraining budgets. Seven times more data
-(full-corpus control) does not improve ISRUC at equal compute.}
+\caption{\textbf{Data efficiency (ISRUC / HMC balanced accuracy).} SpecBraM
+vs.\ a matched-compute control on the full corpus and vs.\ prior methods with
+their pretraining budgets. Seven times more data (full-corpus control) does not
+improve accuracy at equal compute; and the ${\sim}2{,}500$-hour result is stable
+across \emph{three} independently sampled subsets (std below is between-subset).}
 \label{tab:dataeff}
 \begin{tabular}{llcc}
 \toprule
@@ -421,7 +422,7 @@ CBraMod  & ${\sim}9{,}000$\,h & 0.7865 & 0.7269\\
 CSBrain  & ${\sim}9{,}000$\,h & 0.7925 & 0.7345\\
 \midrule
 SpecBraM (full ctrl) & ${\sim}17{,}666$\,h & \val{0.7899}{.0066} & \val{0.7526}{.0009}\\
-\best{SpecBraM} & ${\sim}2{,}500$\,h & \val{0.7934}{.0051} & \val{0.7484}{.0052}\\
+\best{SpecBraM} (3 subsets) & ${\sim}2{,}500$\,h & \val{0.7928}{.0027} & \val{0.7505}{.0019}\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -434,8 +435,11 @@ ${\approx}2.7\sigma$), while CBraMod and CSBrain pretrain on ${\sim}9{,}000$ hou
 A full-data control on the ${\sim}17{,}666$-hour corpus---seven times more data at
 a matched gradient budget, same configuration---reaches ISRUC $0.7899$ and HMC
 $0.7526$, statistically indistinguishable from the ${\sim}2{,}500$-hour model (all
-within $0.004$; Table~\ref{tab:dataeff}). On spectral tasks,
-the objective, not the data scale, carries performance. The point holds externally
+within $0.004$; Table~\ref{tab:dataeff}). The ${\sim}2{,}500$-hour result is also
+not a lucky draw: across \emph{three} independently sampled subsets it holds at
+ISRUC $0.7928{\pm}0.0027$ and HMC $0.7505{\pm}0.0019$ (between-subset std), so
+data efficiency is robust to \emph{which} $2{,}500$ hours are used. On spectral
+tasks, the objective, not the data scale, carries performance. The point holds externally
 too: REVE \cite{reve2025}, pretrained on $60{,}000$ hours (${24}{\times}$ ours),
 reaches $0.7819$ balanced accuracy on ISRUC---below our $0.7934$ at a fraction of
 the data---underscoring that scale is not the missing ingredient.
@@ -527,17 +531,36 @@ no reconstruction, and no latent term.
 collapses ($\mathcal{L}_{\mathrm{sp}}{\to}0$, degenerate features); the fixed
 target is necessary and sufficient to prevent this.
 
-\section{Limitations}
-Our model is designed for the spectral, quasi-stationary structure of clinical and
-passive EEG. It is \emph{not} suited to motor imagery, whose discriminative signal
-is a spatially localized event-related (de)synchronization rather than a
-stationary band-power pattern; we exclude motor-imagery benchmarks by design
-rather than reporting weak numbers. Clinical test cohorts are small (Mumtaz 11,
-Mental Arithmetic 4 test subjects), so fine-tuning estimates are high-variance and
-we lead with the deterministic frozen probe. We also exclude TUH-derived
-abnormality detection (TUAB) from the main comparison: it overlaps at the patient
-level with TUEG pretraining for every method, and is off-topic for our spectral
-scope.
+\section{Scope and Limitations}
+SpecBraM is \emph{deliberately} specialized. Its learnable filterbank and
+band-power objective encode a strong inductive bias---that the discriminative
+signal is spectral and quasi-stationary---which is exactly what makes it data- and
+label-efficient, but which also bounds where it applies. We therefore fix its scope
+\emph{a priori}, from the physics of the signal, not \emph{post hoc} from where it
+wins.
+
+\noindent\emph{In scope}: tasks whose labels are band-power contrasts---sleep stage
+(delta waves, spindles), depression (frontal alpha/theta), mental workload (alpha
+suppression, frontal-midline theta), and other rhythmic clinical or passive EEG.
+Our four benchmarks (sleep ISRUC/HMC, depression Mumtaz, workload Mental
+Arithmetic) sample the principal categories of this space and are leak-free for
+every TUEG-pretrained method; broadening it (further sleep corpora, spectral
+emotion recognition) is left to future work.
+
+\noindent\emph{Out of scope, by construction}: tasks whose discriminative signal is
+a transient or a spatially localized event rather than a stationary band-power
+pattern. The clearest case is motor imagery, defined by lateralized event-related
+(de)synchronization: a band-power target pooled over a $0.78$\,s patch cannot
+represent a sub-$100$\,ms transient or a hemisphere-specific desynchronization, so
+SpecBraM is structurally ill-suited. We therefore \emph{exclude} motor-imagery
+benchmarks rather than report weak numbers---an honest scoping, not a cherry-pick,
+because the exclusion follows from the objective, not from the results.
+
+\noindent\emph{Other limitations}: clinical test cohorts are small (Mumtaz $11$,
+Mental Arithmetic $4$ test subjects), so fine-tuning is high-variance and we lead
+with the deterministic frozen probe. We also exclude TUH-derived abnormality
+detection (TUAB): it overlaps at the patient level with TUEG pretraining for every
+method, and is off-topic for a spectral model.
 
 \section{Conclusion}
 Predicting band power---directly, against a fixed filterbank target, with no
