@@ -96,7 +96,8 @@ hours, and reports that more data helps. We find the opposite for spectral tasks
 Pretrained on a random one-seventh of TUEG (${\sim}2{,}500$ hours, the size of
 LaBraM's entire corpus), our model already matches or exceeds these methods on
 sleep staging; a matched-compute control trained on the full ${\sim}17{,}666$
-hours barely improves it. Data scale is not the bottleneck; the objective is.
+hours does not improve it (the two are within $0.004$ balanced accuracy). Data
+scale is not the bottleneck; the objective is.
 
 \noindent Our contributions:
 \begin{itemize}
@@ -416,8 +417,8 @@ LaBraM   & ${\sim}2{,}500$\,h & 0.7633 & 0.7277\\
 CBraMod  & ${\sim}9{,}000$\,h & 0.7865 & 0.7269\\
 CSBrain  & ${\sim}9{,}000$\,h & 0.7925 & 0.7345\\
 \midrule
-Ours (full ctrl) & ${\sim}17{,}666$\,h & 0.7980 & \tbd\\
-\best{Ours} & ${\sim}2{,}500$\,h & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
+Ours (full ctrl) & ${\sim}17{,}666$\,h & \val{0.7899}{.0066} & \val{0.7526}{.0009}\\
+\best{Ours} & ${\sim}2{,}500$\,h & \val{0.7934}{.0051} & \val{0.7484}{.0052}\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -428,8 +429,9 @@ $0.7484{\pm}0.0052$ (Tables~\ref{tab:isruc},~\ref{tab:hmc}), on par with CSBrain
 ($0.7925$) and \emph{exceeding} it on HMC ($0.7345$; ${+}0.0139$,
 ${\approx}2.7\sigma$), while CBraMod and CSBrain pretrain on ${\sim}9{,}000$ hours.
 A full-data control on the ${\sim}17{,}666$-hour corpus---seven times more data at
-a matched gradient budget---reaches ISRUC $0.7980$, statistically indistinguishable
-from the ${\sim}2{,}500$-hour model (Table~\ref{tab:dataeff}). On spectral tasks,
+a matched gradient budget, same configuration---reaches ISRUC $0.7899$ and HMC
+$0.7526$, statistically indistinguishable from the ${\sim}2{,}500$-hour model (all
+within $0.004$; Table~\ref{tab:dataeff}). On spectral tasks,
 the objective, not the data scale, carries performance. On the tiny-cohort clinical
 tasks fine-tuning is high-variance, so we lead with the deterministic frozen probe
 (Table~\ref{tab:binary}): on Mumtaz it reaches $0.9173$ BA / $0.9833$
