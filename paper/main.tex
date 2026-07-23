@@ -510,7 +510,8 @@ performance. Removing the spectral term instead (MAE-only) is catastrophic: ISRU
 collapses to $0.2124$, the 5-class chance level ($\kappa{=}0.02$), \emph{below}
 even a randomly initialized encoder ($0.738$ fine-tuned). On our filterbank
 backbone the band tokens already carry the waveform, so raw-signal reconstruction
-is a near-trivial task that yields a degenerate representation; the lossy,
+is a near-trivial task---its loss stays essentially zero throughout pretraining, so
+it provides no learning signal and yields a degenerate representation. The lossy,
 structure-selecting band-power target is what compels the encoder to learn. The
 spectral prediction, not the reconstruction, drives the model---and reconstruction
 is safe to keep only as a light auxiliary (it adds ${\sim}0.007$ on ISRUC).
