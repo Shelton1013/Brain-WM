@@ -442,10 +442,12 @@ ${\pm}0.0727$ we do not lean on it.
 chosen by pretraining loss and used for \emph{all} downstream tasks; we never tune
 the pretraining epoch per task. It sits at roughly the matched gradient budget of
 the full-corpus control (${\sim}7{\times}$ more epochs on ${\sim}7{\times}$ less
-data). Earlier checkpoints underfit; much later ones overfit the small subset and
-degrade the tiny-cohort clinical tasks (e.g.\ Mental Arithmetic falls from $0.7625$
-to $0.6174$), so the converged point is both the principled comparison to the
-control and the natural operating point.
+data). Earlier checkpoints underfit; much later ones overfit the small subset: sleep
+accuracy still creeps up (ISRUC $0.7951$, HMC $0.7522$ at ep45) but the tiny-cohort
+clinical tasks degrade sharply (Mental Arithmetic falls from $0.7625$ to $0.6174$).
+Reporting every task at one converged checkpoint---rather than each at its own best
+epoch---is the honest choice, and coincides with the matched-compute comparison to
+the full-data control.
 
 \noindent\textbf{Frozen features already rival fine-tuning.} A probe on our
 \emph{frozen} encoder---no backbone update---reaches $0.7522$ BA on ISRUC and
@@ -495,7 +497,7 @@ conditions.}
 \toprule
 Objective & ISRUC BA & HMC BA\\
 \midrule
-MAE only (reconstruction)          & \val{0.2124}{.0015} & \tbd\\
+MAE only (reconstruction)          & \val{0.2124}{.0015} & \val{0.2737}{.0247}\\
 CF only (spectral prediction)      & \val{0.7864}{.0023} & \val{0.7486}{.0017}\\
 \best{CF\,+\,MAE (ours)}           & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
 \bottomrule
@@ -508,9 +510,9 @@ Removing the reconstruction term (CF-only) barely changes anything---ISRUC
 $0.7864$, HMC $0.7486$, within noise of the full config ($0.7934$/$0.7484$)---as
 expected, since that term's loss is identically zero and it contributes no gradient
 (Sec.~\ref{sec:method}). Removing the spectral term instead (MAE-only) leaves no
-informative objective and is catastrophic: ISRUC collapses to $0.2124$, the 5-class
-chance level ($\kappa{=}0.02$), \emph{below} even a randomly initialized encoder
-($0.738$ fine-tuned). On our filterbank backbone the band tokens already determine
+informative objective and is catastrophic: ISRUC and HMC collapse to $0.2124$ and
+$0.2737$, the 5-class chance level ($\kappa{\approx}0.05$), \emph{below} even a
+randomly initialized encoder (ISRUC $0.738$ fine-tuned). On our filterbank backbone the band tokens already determine
 the waveform, so raw-signal reconstruction is trivially satisfied and teaches
 nothing; only the lossy, structure-selecting band-power target compels the encoder
 to learn. Band-power prediction is thus both necessary and sufficient---the sole
