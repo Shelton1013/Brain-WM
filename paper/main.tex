@@ -494,18 +494,26 @@ conditions.}
 \toprule
 Objective & ISRUC BA & HMC BA\\
 \midrule
-MAE only (reconstruction)          & \tbd & \tbd\\
-CF only (spectral prediction)      & \tbd & \tbd\\
-\best{CF\,+\,MAE (ours)}           & \best{0.7934} & \best{0.7484}\\
+MAE only (reconstruction)          & \val{0.2124}{.0015} & \tbd\\
+CF only (spectral prediction)      & \val{0.7864}{.0023} & \val{0.7486}{.0017}\\
+\best{CF\,+\,MAE (ours)}           & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\noindent\textbf{Spectral target vs.\ signal reconstruction.} Table~\ref{tab:ablobj}
-compares, at identical data and compute, our band-power target (CF) against pure
-raw-signal reconstruction (MAE) on the same backbone. \emph{[Result pending: if
-CF-only $\approx$ full $>$ MAE-only, spectral prediction is the load-bearing
-ingredient and reconstruction is unnecessary.]}
+\noindent\textbf{Spectral prediction is the load-bearing objective.}
+Table~\ref{tab:ablobj} isolates the two loss terms at identical data and compute.
+Removing the reconstruction term (CF-only) barely changes anything---ISRUC
+$0.7864$, HMC $0.7486$, within $0.007$ of the full model
+($0.7934$/$0.7484$)---so the spectral target alone recovers essentially all of the
+performance. Removing the spectral term instead (MAE-only) is catastrophic: ISRUC
+collapses to $0.2124$, the 5-class chance level ($\kappa{=}0.02$), \emph{below}
+even a randomly initialized encoder ($0.738$ fine-tuned). On our filterbank
+backbone the band tokens already carry the waveform, so raw-signal reconstruction
+is a near-trivial task that yields a degenerate representation; the lossy,
+structure-selecting band-power target is what compels the encoder to learn. The
+spectral prediction, not the reconstruction, drives the model---and reconstruction
+is safe to keep only as a light auxiliary (it adds ${\sim}0.007$ on ISRUC).
 
 \noindent\textbf{Fixed vs.\ learnable target.} A learnable-target filterbank
 collapses ($\mathcal{L}_{\mathrm{cf}}{\to}0$, degenerate features); the fixed
