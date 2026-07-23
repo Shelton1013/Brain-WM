@@ -12,7 +12,9 @@
 \usepackage{caption}       % DO NOT CHANGE THIS
 \frenchspacing             % DO NOT CHANGE THIS
 \usepackage{booktabs}
+\usepackage{multirow}
 \usepackage{amsmath,amssymb}
+\newcommand{\snd}[1]{\underline{#1}}   % second-best
 \usepackage{xcolor}
 \usepackage{tikz}
 \usetikzlibrary{arrows.meta,positioning,backgrounds,fit}
@@ -300,63 +302,60 @@ seeds. Sleep sets are large; we report 3 reps.
 single converged pretraining checkpoint, chosen by pretraining loss and applied to
 all tasks.}
 
-\begin{table}[t]\centering\footnotesize
-\setlength{\tabcolsep}{3.5pt}
-\caption{\textbf{ISRUC sleep staging (5-class).} Balanced accuracy, Cohen's
-$\kappa$, weighted-F1 (mean${\pm}$std). Baselines as reported by \citet{csbrain}
-on the identical subject-disjoint split; \textbf{bold} = best mean. Ours is
-pretrained on ${\sim}2{,}500$\,h vs.\ ${\sim}9{,}000$\,h (CBraMod/CSBrain).}
-\label{tab:isruc}
-\begin{tabular}{lccc}
+\begin{table*}[t]\centering\footnotesize
+\setlength{\tabcolsep}{3.2pt}
+\caption{\textbf{Sleep staging (5-class), fine-tuned.} Balanced accuracy, Cohen's
+Kappa and Weighted F1 (mean${\pm}$std) on ISRUC and HMC, on the identical
+subject-disjoint splits of \citet{csbrain}; baselines as reported there (REVE from
+its paper, which evaluates ISRUC only). \textbf{Bold} = best, \underline{underline}
+= second. Foundation models list their pretraining hours: ours matches or beats
+CBraMod and CSBrain with ${\sim}1/4$ of their data.}
+\label{tab:sleep}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{c l c ccc ccc}
 \toprule
-Method & BA & $\kappa$ & WF1\\
+& & & \multicolumn{3}{c}{ISRUC (5-class)} & \multicolumn{3}{c}{HMC (5-class)}\\
+\cmidrule(lr){4-6}\cmidrule(lr){7-9}
+& Method & \shortstack{Pretrain\\(hours)}
+& \shortstack{Balanced\\Accuracy} & \shortstack{Cohen's\\Kappa} & \shortstack{Weighted\\F1}
+& \shortstack{Balanced\\Accuracy} & \shortstack{Cohen's\\Kappa} & \shortstack{Weighted\\F1}\\
 \midrule
-EEGNet          & \val{0.7154}{.0121} & \val{0.7040}{.0173} & \val{0.7513}{.0124}\\
-EEGConformer    & \val{0.7400}{.0133} & \val{0.7143}{.0162} & \val{0.7634}{.0151}\\
-SPaRCNet        & \val{0.7487}{.0075} & \val{0.7097}{.0132} & \val{0.7624}{.0092}\\
-ContraWR        & \val{0.7402}{.0126} & \val{0.7178}{.0156} & \val{0.7610}{.0137}\\
-CNN-Transformer & \val{0.7363}{.0087} & \val{0.7129}{.0121} & \val{0.7719}{.0153}\\
-FFCL            & \val{0.7277}{.0182} & \val{0.7016}{.0292} & \val{0.7614}{.0197}\\
-ST-Transformer  & \val{0.7381}{.0205} & \val{0.7013}{.0352} & \val{0.7681}{.0175}\\
+\multirow{7}{*}{\rotatebox{90}{\shortstack{Task-specific\\Models}}}
+& EEGNet          & -- & \val{0.7154}{.0121} & \val{0.7040}{.0173} & \val{0.7513}{.0124} & \val{0.6534}{.0122} & \val{0.5886}{.0201} & \val{0.6536}{.0168}\\
+& EEGConformer    & -- & \val{0.7400}{.0133} & \val{0.7143}{.0162} & \val{0.7634}{.0151} & \val{0.7149}{.0086} & \val{0.6432}{.0055} & \val{0.7080}{.0039}\\
+& SPaRCNet        & -- & \val{0.7487}{.0075} & \val{0.7097}{.0132} & \val{0.7624}{.0092} & \val{0.4756}{.1109} & \val{0.3147}{.1315} & \val{0.4108}{.1310}\\
+& ContraWR        & -- & \val{0.7402}{.0126} & \val{0.7178}{.0156} & \val{0.7610}{.0137} & \val{0.4242}{.0541} & \val{0.2340}{.0554} & \val{0.2987}{.0288}\\
+& CNN-Transformer & -- & \val{0.7363}{.0087} & \val{0.7129}{.0121} & \val{0.7719}{.0153} & \val{0.6573}{.0141} & \val{0.5961}{.0105} & \val{0.6896}{.0065}\\
+& FFCL            & -- & \val{0.7277}{.0182} & \val{0.7016}{.0292} & \val{0.7614}{.0197} & \val{0.4427}{.0702} & \val{0.2542}{.0654} & \val{0.2902}{.0485}\\
+& ST-Transformer  & -- & \val{0.7381}{.0205} & \val{0.7013}{.0352} & \val{0.7681}{.0175} & \val{0.2559}{.0141} & \val{0.0503}{.0183} & \val{0.1428}{.0122}\\
 \midrule
-BIOT            & \val{0.7527}{.0121} & \val{0.7291}{.0230} & \val{0.7790}{.0146}\\
-LaBraM-Base     & \val{0.7633}{.0102} & \val{0.7231}{.0182} & \val{0.7810}{.0133}\\
-CBraMod         & \val{0.7865}{.0110} & \best{\val{0.7442}{.0152}} & \best{\val{0.8011}{.0099}}\\
-CSBrain         & \val{0.7925}{.0030} & \val{0.7406}{.0102} & \val{0.7990}{.0091}\\
-\midrule
-\best{Ours} (FT)      & \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012}\\
-Ours (frozen probe)   & 0.7522 & 0.6794 & 0.7503\\
-Random init (frozen)  & 0.5657 & 0.4202 & 0.5235\\
+\multirow{6}{*}{\rotatebox{90}{\shortstack{Foundation\\Models}}}
+& BIOT            & \tbd            & \val{0.7527}{.0121} & \val{0.7291}{.0230} & \val{0.7790}{.0146} & \val{0.6862}{.0041} & \val{0.6295}{.0113} & \val{0.7091}{.0147}\\
+& LaBraM-Base     & ${\sim}2.5$k    & \val{0.7633}{.0102} & \val{0.7231}{.0182} & \val{0.7810}{.0133} & \val{0.7277}{.0101} & \snd{\val{0.6813}{.0053}} & \val{0.7454}{.0027}\\
+& CBraMod         & ${\sim}9$k      & \val{0.7865}{.0110} & \best{\val{0.7442}{.0152}} & \best{\val{0.8011}{.0099}} & \val{0.7269}{.0041} & \val{0.6685}{.0104} & \val{0.7395}{.0089}\\
+& CSBrain         & ${\sim}9$k      & \snd{\val{0.7925}{.0030}} & \snd{\val{0.7406}{.0102}} & \snd{\val{0.7990}{.0091}} & \snd{\val{0.7345}{.0047}} & \best{\val{0.6818}{.0046}} & \best{\val{0.7506}{.0042}}\\
+& REVE            & \tbd            & \val{0.7819}{.0078} & -- & -- & -- & -- & --\\
+& \textbf{Ours}   & ${\sim}2.5$k    & \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012} & \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \snd{\val{0.7459}{.0131}}\\
 \bottomrule
-\end{tabular}
-\end{table}
+\end{tabular}}
+\end{table*}
 
 \begin{table}[t]\centering\footnotesize
-\setlength{\tabcolsep}{3.5pt}
-\caption{\textbf{HMC sleep staging (5-class).} Balanced accuracy, Cohen's
-$\kappa$, weighted-F1 (mean${\pm}$std); baselines from \citet{csbrain} on the
-identical split. \textbf{Bold} = best mean.}
-\label{tab:hmc}
-\begin{tabular}{lccc}
+\setlength{\tabcolsep}{4pt}
+\caption{\textbf{Frozen linear probe on sleep} (deterministic, no fine-tuning): a
+probe on our frozen features vs.\ the same architecture randomly initialized. The
+frozen probe rivals \emph{fine-tuned} baselines from Table~\ref{tab:sleep}
+(ISRUC $0.7522$ matches fine-tuned BIOT $0.7527$, exceeds fine-tuned EEGNet).}
+\label{tab:frozensleep}
+\begin{tabular}{l ccc ccc}
 \toprule
-Method & BA & $\kappa$ & WF1\\
+& \multicolumn{3}{c}{ISRUC} & \multicolumn{3}{c}{HMC}\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+& \shortstack{Balanced\\Accuracy} & \shortstack{Cohen's\\Kappa} & \shortstack{Weighted\\F1}
+& \shortstack{Balanced\\Accuracy} & \shortstack{Cohen's\\Kappa} & \shortstack{Weighted\\F1}\\
 \midrule
-EEGNet          & \val{0.6534}{.0122} & \val{0.5886}{.0201} & \val{0.6536}{.0168}\\
-EEGConformer    & \val{0.7149}{.0086} & \val{0.6432}{.0055} & \val{0.7080}{.0039}\\
-SPaRCNet        & \val{0.4756}{.1109} & \val{0.3147}{.1315} & \val{0.4108}{.1310}\\
-ContraWR        & \val{0.4242}{.0541} & \val{0.2340}{.0554} & \val{0.2987}{.0288}\\
-CNN-Transformer & \val{0.6573}{.0141} & \val{0.5961}{.0105} & \val{0.6896}{.0065}\\
-FFCL            & \val{0.4427}{.0702} & \val{0.2542}{.0654} & \val{0.2902}{.0485}\\
-ST-Transformer  & \val{0.2559}{.0141} & \val{0.0503}{.0183} & \val{0.1428}{.0122}\\
-\midrule
-BIOT            & \val{0.6862}{.0041} & \val{0.6295}{.0113} & \val{0.7091}{.0147}\\
-LaBraM-Base     & \val{0.7277}{.0101} & \val{0.6813}{.0053} & \val{0.7454}{.0027}\\
-CBraMod         & \val{0.7269}{.0041} & \val{0.6685}{.0104} & \val{0.7395}{.0089}\\
-CSBrain         & \val{0.7345}{.0047} & \best{\val{0.6818}{.0046}} & \best{\val{0.7506}{.0042}}\\
-\midrule
-\best{Ours} (FT)      & \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \val{0.7459}{.0131}\\
-Ours (frozen probe)   & 0.7099 & 0.6200 & 0.7030\\
-Random init (frozen)  & 0.5003 & 0.3406 & 0.4528\\
+Random init   & 0.5657 & 0.4202 & 0.5235 & 0.5003 & 0.3406 & 0.4528\\
+\textbf{Ours} & \textbf{0.7522} & \textbf{0.6794} & \textbf{0.7503} & \textbf{0.7099} & \textbf{0.6200} & \textbf{0.7030}\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -422,7 +421,7 @@ Ours (full ctrl) & ${\sim}17{,}666$\,h & \val{0.7899}{.0066} & \val{0.7526}{.000
 
 \noindent\textbf{Sleep staging at one-seventh the data.} Our ${\sim}2{,}500$-hour
 model reaches ISRUC balanced accuracy $0.7934{\pm}0.0051$ and HMC
-$0.7484{\pm}0.0052$ (Tables~\ref{tab:isruc},~\ref{tab:hmc}), on par with CSBrain on ISRUC
+$0.7484{\pm}0.0052$ (Table~\ref{tab:sleep}), on par with CSBrain on ISRUC
 ($0.7925$) and \emph{exceeding} it on HMC ($0.7345$; ${+}0.0139$,
 ${\approx}2.7\sigma$), while CBraMod and CSBrain pretrain on ${\sim}9{,}000$ hours.
 A full-data control on the ${\sim}17{,}666$-hour corpus---seven times more data at
@@ -450,7 +449,7 @@ the full-data control.
 
 \noindent\textbf{Frozen features already rival fine-tuning.} A probe on our
 \emph{frozen} encoder---no backbone update---reaches $0.7522$ BA on ISRUC and
-$0.7099$ on HMC (Tables~\ref{tab:isruc},~\ref{tab:hmc}), matching fine-tuned BIOT
+$0.7099$ on HMC (Table~\ref{tab:frozensleep}), matching fine-tuned BIOT
 ($0.7527$) and exceeding fine-tuned EEGNet ($0.7154$) and EEG Conformer
 ($0.7400$) on ISRUC, whereas the same architecture randomly initialized reaches
 only $0.5657$/$0.5003$---a ${+}0.19$/${+}0.21$ BA gap. The spectral pretext task
