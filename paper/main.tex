@@ -188,9 +188,10 @@ CBraMod and CSBrain.
 \caption{\textbf{Codebook-free spectral-prediction pretraining.} A learnable
 filterbank tokenizer splits each patch into $\delta\theta\alpha\beta\gamma$ bands;
 time patches are masked out of the encoder input. From the encoder output the
-model regresses the log band-power of masked patches (primary), supervised by a
-\emph{fixed}, non-learnable filterbank target that cannot be collapsed; a light
-raw-signal reconstruction term and SIGReg isotropy are auxiliary.}
+model regresses the log band-power of masked patches, supervised by a
+\emph{fixed}, non-learnable filterbank target that cannot be collapsed; SIGReg adds
+an isotropy penalty. (A raw-signal reconstruction head we included is inert on this
+tokenizer---its loss stays zero---so the effective objective is purely spectral.)}
 \label{fig:arch}
 \end{figure*}
 
@@ -257,19 +258,19 @@ predicted from an uninformative encoding, so minimizing $\mathcal{L}_{\mathrm{cf
 informative. This is the crux of a codebook-free spectral objective and is verified
 in the ablations.
 
-\noindent\textbf{Auxiliary terms.} A light raw-signal reconstruction head (masked
-patches, L2, weight $0.5$) stabilizes early training, and SIGReg
-\cite{balestriero2025lejepa} adds an isotropy penalty (weight $\lambda{=}0.05$)
-that discourages dimensional collapse of the representation. We use \emph{no}
-latent JEPA term: an ablation found it inert once the spectral target is present.
-The full objective is
+\noindent\textbf{Regularization, and an inert reconstruction term.} We add SIGReg
+\cite{balestriero2025lejepa}, an isotropy penalty (weight $\lambda{=}0.05$) that
+discourages dimensional collapse, and use \emph{no} latent JEPA term (an ablation
+found it inert). We also included a raw-signal reconstruction head (weight $0.5$),
+but its loss is \emph{identically zero} throughout pretraining: on the filterbank
+tokenizer the band tokens already determine the waveform, so reconstruction is
+trivially satisfied and contributes no gradient. The \emph{effective} objective is
+therefore purely spectral,
 \begin{equation}
-\mathcal{L}=\mathcal{L}_{\mathrm{cf}}+0.5\,\mathcal{L}_{\mathrm{mae}}
-+0.05\,\mathcal{L}_{\mathrm{sig}}.
+\mathcal{L}=\mathcal{L}_{\mathrm{cf}}+0.05\,\mathcal{L}_{\mathrm{sig}},
 \end{equation}
-The relative importance of the spectral ($\mathcal{L}_{\mathrm{cf}}$) and
-reconstruction ($\mathcal{L}_{\mathrm{mae}}$) terms is isolated in
-Table~\ref{tab:ablobj}.
+and Table~\ref{tab:ablobj} confirms the spectral term carries all of the
+performance.
 
 \section{Experiments}
 \noindent\textbf{Pretraining.} TUEG at 256\,Hz, 10\,s windows, robust
@@ -504,17 +505,16 @@ CF only (spectral prediction)      & \val{0.7864}{.0023} & \val{0.7486}{.0017}\\
 \noindent\textbf{Spectral prediction is the load-bearing objective.}
 Table~\ref{tab:ablobj} isolates the two loss terms at identical data and compute.
 Removing the reconstruction term (CF-only) barely changes anything---ISRUC
-$0.7864$, HMC $0.7486$, within $0.007$ of the full model
-($0.7934$/$0.7484$)---so the spectral target alone recovers essentially all of the
-performance. Removing the spectral term instead (MAE-only) is catastrophic: ISRUC
-collapses to $0.2124$, the 5-class chance level ($\kappa{=}0.02$), \emph{below}
-even a randomly initialized encoder ($0.738$ fine-tuned). On our filterbank
-backbone the band tokens already carry the waveform, so raw-signal reconstruction
-is a near-trivial task---its loss stays essentially zero throughout pretraining, so
-it provides no learning signal and yields a degenerate representation. The lossy,
-structure-selecting band-power target is what compels the encoder to learn. The
-spectral prediction, not the reconstruction, drives the model---and reconstruction
-is safe to keep only as a light auxiliary (it adds ${\sim}0.007$ on ISRUC).
+$0.7864$, HMC $0.7486$, within noise of the full config ($0.7934$/$0.7484$)---as
+expected, since that term's loss is identically zero and it contributes no gradient
+(Sec.~\ref{sec:method}). Removing the spectral term instead (MAE-only) leaves no
+informative objective and is catastrophic: ISRUC collapses to $0.2124$, the 5-class
+chance level ($\kappa{=}0.02$), \emph{below} even a randomly initialized encoder
+($0.738$ fine-tuned). On our filterbank backbone the band tokens already determine
+the waveform, so raw-signal reconstruction is trivially satisfied and teaches
+nothing; only the lossy, structure-selecting band-power target compels the encoder
+to learn. Band-power prediction is thus both necessary and sufficient---the sole
+driver of the representation.
 
 \noindent\textbf{Fixed vs.\ learnable target.} A learnable-target filterbank
 collapses ($\mathcal{L}_{\mathrm{cf}}{\to}0$, degenerate features); the fixed
