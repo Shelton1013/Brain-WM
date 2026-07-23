@@ -54,12 +54,13 @@ needs and show that a far simpler objective suffices: directly regressing the
 log band-power of masked spatio-temporal patches against a \emph{fixed}
 filterbank target, with no discrete codebook and no two-stage training. Because
 the discriminative structure of clinical EEG is overwhelmingly spectral, a
-learnable filterbank tokenizer plus a cross-frequency band-power target gives the
+learnable filterbank tokenizer plus a masked band-power target gives the
 model exactly the inductive bias the downstream tasks reward. Pretrained on only
 ${\sim}2{,}500$ hours of EEG---a random one-seventh subset of the TUH EEG Corpus,
 comparable to the smallest prior foundation model and roughly a quarter of
-CBraMod's data---our model, \textbf{SpecBraM}, reaches state-of-the-art sleep
-staging (ISRUC, HMC) and stays competitive across clinical spectral tasks. A matched-compute full-data
+CBraMod's data---our model, \textbf{SpecBraM}, reaches state-of-the-art balanced
+accuracy on sleep staging (ISRUC, HMC) and stays competitive across clinical
+spectral tasks. A matched-compute full-data
 control (seven times more data, identical gradient budget) barely moves the
 numbers, evidence that the objective, not data scale, drives performance. The
 learned representations are strongly label-efficient: a linear probe on frozen
@@ -109,14 +110,15 @@ band-power of masked EEG patches against a fixed filterbank target. Single-stage
 no vector quantization, no reconstruction of raw noise. A fixed target is
 necessary---a learnable target collapses.
 \item \textbf{Data efficiency}: with ${\sim}2{,}500$ pretraining hours (${\sim}1/4$
-of CBraMod, ${\sim}1/7$ of the corpus we have access to) the model reaches SOTA
-sleep staging; a matched-compute full-data control confirms scale is not the
-driver.
+of CBraMod, ${\sim}1/7$ of the full TUEG) the model reaches state-of-the-art
+balanced accuracy on sleep staging; a matched-compute full-data control confirms
+scale is not the driver.
 \item \textbf{Label efficiency}: a frozen linear probe approaches fine-tuned
 accuracy with a small fraction of downstream labels.
-\item A \textbf{leakage-clean} evaluation on sleep, depression and mental-workload
-benchmarks that are disjoint from TUEG for every compared method, with honest
-scoping to spectral/clinical EEG and motor imagery as a stated limitation.
+\item A \textbf{leak-free} evaluation on sleep, depression and mental-workload
+benchmarks disjoint from the TUEG corpus that LaBraM, CBraMod, CSBrain and SpecBraM
+pretrain on, with honest scoping to spectral/clinical EEG and motor imagery as a
+stated limitation.
 \end{itemize}
 
 \begin{figure*}[t]\centering
@@ -194,8 +196,8 @@ filterbank tokenizer splits each patch into $\delta\theta\alpha\beta\gamma$ band
 time patches are masked out of the encoder input. From the encoder output the
 model regresses the log band-power of masked patches, supervised by a
 \emph{fixed}, non-learnable filterbank target that cannot be collapsed; SIGReg adds
-an isotropy penalty. (A raw-signal reconstruction head we included is inert on this
-tokenizer---its loss stays zero---so the effective objective is purely spectral.)}
+an isotropy penalty. There is no reconstruction, discrete-codebook, or latent
+term---the objective is purely spectral.}
 \label{fig:arch}
 \end{figure*}
 
@@ -236,18 +238,20 @@ the channel axis and the time axis within each layer (criss-cross), so spatial
 (montage) and temporal structure are modelled without the quadratic cost of full
 $C{\times}T_p$ attention. Learned positional embeddings are added on both axes.
 
-\noindent\textbf{Masking.} We mask whole \emph{time} patches (all bands of a masked
-patch), replacing their embeddings by a shared learnable mask token so the encoder
-never sees the hidden content. Masking whole patches rather than individual bands
-makes the pretext task predict a masked patch's spectrum from its temporal
-context; an ablation (below) confirms time-patch masking outperforms band masking.
+\noindent\textbf{Masking.} We mask whole \emph{time} patches (all five bands of a
+masked patch), replacing their embeddings by a shared learnable mask token so the
+encoder never sees the hidden content. Masking whole patches---rather than
+individual bands within a patch---makes the pretext task predict a patch's entire
+spectrum from its \emph{spatio-temporal} context (the surviving patches across
+channels and time), which we found more effective and simpler than within-patch
+band interpolation.
 
 \noindent\textbf{Spectral-prediction objective (primary).} From the encoder output
 at each masked patch we predict the log band-power of all $N$ bands and supervise
 it against a target computed by a \emph{fixed} (registered as a buffer, no
 gradient) reference filterbank $h^{\mathrm{fix}}$ applied to the raw signal:
 \begin{equation}
-\mathcal{L}_{\mathrm{cf}}=\frac{1}{|\mathcal{M}|}\!\!\sum_{(c,t,b)\in\mathcal{M}}\!\!
+\mathcal{L}_{\mathrm{sp}}=\frac{1}{|\mathcal{M}|}\!\!\sum_{(c,t,b)\in\mathcal{M}}\!\!
 \big(\hat p_{c,t,b}-\log(1+\bar e_{c,t,b})\big)^2,\quad
 \bar e_{c,t,b}=\tfrac1P\!\sum_\tau (h^{\mathrm{fix}}_b*x)^2_{c,t,\tau},
 \end{equation}
@@ -255,9 +259,9 @@ where $\mathcal{M}$ is the set of masked (channel, patch, band) triples and $P$ 
 patch length. \emph{Why a fixed target.} If the target filterbank were also
 learnable, the loss admits a trivial optimum: drive the target filters to zero so
 $\bar e\to0$ and predict zero---we observe exactly this collapse
-($\mathcal{L}_{\mathrm{cf}}{\to}4{\times}10^{-4}$ with degenerate, uninformative
+($\mathcal{L}_{\mathrm{sp}}{\to}4{\times}10^{-4}$ with degenerate, uninformative
 features). Freezing the target inverts the incentive: real band energy cannot be
-predicted from an uninformative encoding, so minimizing $\mathcal{L}_{\mathrm{cf}}$
+predicted from an uninformative encoding, so minimizing $\mathcal{L}_{\mathrm{sp}}$
 \emph{forces} the encoder (and the learnable \emph{input} filterbank) to stay
 informative. This is the crux of a codebook-free spectral objective and is verified
 in the ablations.
@@ -269,9 +273,9 @@ reconstruction objective---unlike CBraMod we never reconstruct the raw
 waveform---and \emph{no} latent JEPA term (an ablation found it inert). The
 objective is therefore purely spectral,
 \begin{equation}
-\mathcal{L}=\mathcal{L}_{\mathrm{cf}}+0.05\,\mathcal{L}_{\mathrm{sig}},
+\mathcal{L}=\mathcal{L}_{\mathrm{sp}}+0.05\,\mathcal{L}_{\mathrm{sig}},
 \end{equation}
-and Table~\ref{tab:ablobj} shows the band-power term $\mathcal{L}_{\mathrm{cf}}$ is
+and Table~\ref{tab:ablobj} shows the band-power term $\mathcal{L}_{\mathrm{sp}}$ is
 the sole learning signal.
 
 \section{Experiments}
@@ -307,10 +311,12 @@ all tasks.}
 \setlength{\tabcolsep}{3.2pt}
 \caption{\textbf{Sleep staging (5-class), fine-tuned.} Balanced accuracy, Cohen's
 Kappa and Weighted F1 (mean${\pm}$std) on ISRUC and HMC, on the identical
-subject-disjoint splits of \citet{csbrain}; baselines as reported there (REVE from
-its paper, which evaluates ISRUC only). \textbf{Bold} = best, \underline{underline}
-= second. Foundation models list their pretraining hours: ours matches or beats
-CBraMod and CSBrain with ${\sim}1/4$ of their data.}
+subject-disjoint splits of \citet{csbrain}; baselines as reported there. REVE is
+from its own paper (ISRUC only); its $92$-dataset, $60$k-hour corpus may overlap
+these benchmarks and its protocol may differ, so its numbers are not strictly
+comparable. \textbf{Bold} = best, \underline{underline} = second. Foundation models
+list their pretraining hours: SpecBraM matches or beats CBraMod and CSBrain with
+${\sim}1/4$ of their data.}
 \label{tab:sleep}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{c l c ccc ccc}
@@ -491,7 +497,7 @@ the advantage appears once ${\geq}10\%$ of sequences suffice to fit the head.}
 \setlength{\tabcolsep}{5pt}
 \caption{\textbf{Objective ablation} at ${\sim}2{,}500$\,h, matched compute (same
 subset, same steps; only the loss changes). Removing the band-power term
-$\mathcal{L}_{\mathrm{cf}}$ leaves only the SIGReg regularizer---no predictive
+$\mathcal{L}_{\mathrm{sp}}$ leaves only the SIGReg regularizer---no predictive
 objective---and collapses the model to chance. Reported on the low-variance sleep
 benchmarks (large test sets, std ${\sim}0.005$); the tiny-cohort clinical tasks are
 too high-variance to resolve an ablation.}
@@ -500,8 +506,8 @@ too high-variance to resolve an ablation.}
 \toprule
 Objective & ISRUC BA & HMC BA\\
 \midrule
-SIGReg only (no $\mathcal{L}_{\mathrm{cf}}$)        & \val{0.2124}{.0015} & \val{0.2737}{.0247}\\
-\best{$\mathcal{L}_{\mathrm{cf}}$ + SIGReg (SpecBraM)}  & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
+SIGReg only (no $\mathcal{L}_{\mathrm{sp}}$)        & \val{0.2124}{.0015} & \val{0.2737}{.0247}\\
+\best{$\mathcal{L}_{\mathrm{sp}}$ + SIGReg (SpecBraM)}  & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -513,12 +519,12 @@ predictive objective---is catastrophic: ISRUC and HMC collapse to $0.2124$ and
 $0.2737$, the 5-class chance level ($\kappa{\approx}0.05$), \emph{below} even a
 randomly initialized encoder (ISRUC $0.738$ fine-tuned). With the band-power term
 the model reaches $0.7934$/$0.7484$. SIGReg alone spreads the representation but
-teaches it nothing; the cross-frequency band-power prediction drives all downstream
+teaches it nothing; the masked band-power prediction drives all downstream
 performance. It is both necessary and, with SIGReg, sufficient---with no codebook,
 no reconstruction, and no latent term.
 
 \noindent\textbf{Fixed vs.\ learnable target.} A learnable-target filterbank
-collapses ($\mathcal{L}_{\mathrm{cf}}{\to}0$, degenerate features); the fixed
+collapses ($\mathcal{L}_{\mathrm{sp}}{\to}0$, degenerate features); the fixed
 target is necessary and sufficient to prevent this.
 
 \section{Limitations}
@@ -536,8 +542,9 @@ scope.
 \section{Conclusion}
 Predicting band power---directly, against a fixed filterbank target, with no
 codebook and no two-stage tokenizer---is a simple objective that is well matched
-to the spectral structure of clinical EEG. It reaches state-of-the-art sleep
-staging with a fraction of the pretraining data used by prior foundation models,
+to the spectral structure of clinical EEG. It reaches state-of-the-art balanced
+accuracy on sleep staging with a fraction of the pretraining data used by prior
+foundation models,
 is label-efficient downstream, and makes the surprising point that for spectral
 EEG tasks the pretext \emph{objective}, not the data scale, is what matters. We
 argue this reframes what an EEG foundation model should predict.
