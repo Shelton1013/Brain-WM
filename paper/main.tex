@@ -321,21 +321,21 @@ CBraMod and CSBrain with ${\sim}1/4$ of their data.}
 & \shortstack{Balanced\\Accuracy} & \shortstack{Cohen's\\Kappa} & \shortstack{Weighted\\F1}\\
 \midrule
 \multirow{7}{*}{\rotatebox{90}{\shortstack{Task-specific\\Models}}}
-& EEGNet          & -- & \val{0.7154}{.0121} & \val{0.7040}{.0173} & \val{0.7513}{.0124} & \val{0.6534}{.0122} & \val{0.5886}{.0201} & \val{0.6536}{.0168}\\
-& EEGConformer    & -- & \val{0.7400}{.0133} & \val{0.7143}{.0162} & \val{0.7634}{.0151} & \val{0.7149}{.0086} & \val{0.6432}{.0055} & \val{0.7080}{.0039}\\
-& SPaRCNet        & -- & \val{0.7487}{.0075} & \val{0.7097}{.0132} & \val{0.7624}{.0092} & \val{0.4756}{.1109} & \val{0.3147}{.1315} & \val{0.4108}{.1310}\\
-& ContraWR        & -- & \val{0.7402}{.0126} & \val{0.7178}{.0156} & \val{0.7610}{.0137} & \val{0.4242}{.0541} & \val{0.2340}{.0554} & \val{0.2987}{.0288}\\
-& CNN-Transformer & -- & \val{0.7363}{.0087} & \val{0.7129}{.0121} & \val{0.7719}{.0153} & \val{0.6573}{.0141} & \val{0.5961}{.0105} & \val{0.6896}{.0065}\\
-& FFCL            & -- & \val{0.7277}{.0182} & \val{0.7016}{.0292} & \val{0.7614}{.0197} & \val{0.4427}{.0702} & \val{0.2542}{.0654} & \val{0.2902}{.0485}\\
-& ST-Transformer  & -- & \val{0.7381}{.0205} & \val{0.7013}{.0352} & \val{0.7681}{.0175} & \val{0.2559}{.0141} & \val{0.0503}{.0183} & \val{0.1428}{.0122}\\
+& EEGNet~\cite{lawhern2018eegnet}          & -- & \val{0.7154}{.0121} & \val{0.7040}{.0173} & \val{0.7513}{.0124} & \val{0.6534}{.0122} & \val{0.5886}{.0201} & \val{0.6536}{.0168}\\
+& EEGConformer~\cite{song2023conformer}    & -- & \val{0.7400}{.0133} & \val{0.7143}{.0162} & \val{0.7634}{.0151} & \val{0.7149}{.0086} & \val{0.6432}{.0055} & \val{0.7080}{.0039}\\
+& SPaRCNet~\cite{jing2023sparcnet}        & -- & \val{0.7487}{.0075} & \val{0.7097}{.0132} & \val{0.7624}{.0092} & \val{0.4756}{.1109} & \val{0.3147}{.1315} & \val{0.4108}{.1310}\\
+& ContraWR~\cite{yang2023contrawr}        & -- & \val{0.7402}{.0126} & \val{0.7178}{.0156} & \val{0.7610}{.0137} & \val{0.4242}{.0541} & \val{0.2340}{.0554} & \val{0.2987}{.0288}\\
+& CNN-Transformer~\cite{peh2022cnntransformer} & -- & \val{0.7363}{.0087} & \val{0.7129}{.0121} & \val{0.7719}{.0153} & \val{0.6573}{.0141} & \val{0.5961}{.0105} & \val{0.6896}{.0065}\\
+& FFCL~\cite{li2022ffcl}            & -- & \val{0.7277}{.0182} & \val{0.7016}{.0292} & \val{0.7614}{.0197} & \val{0.4427}{.0702} & \val{0.2542}{.0654} & \val{0.2902}{.0485}\\
+& ST-Transformer~\cite{song2021sttransformer}  & -- & \val{0.7381}{.0205} & \val{0.7013}{.0352} & \val{0.7681}{.0175} & \val{0.2559}{.0141} & \val{0.0503}{.0183} & \val{0.1428}{.0122}\\
 \midrule
 \multirow{6}{*}{\rotatebox{90}{\shortstack{Foundation\\Models}}}
-& BIOT            & \tbd            & \val{0.7527}{.0121} & \val{0.7291}{.0230} & \val{0.7790}{.0146} & \val{0.6862}{.0041} & \val{0.6295}{.0113} & \val{0.7091}{.0147}\\
-& LaBraM-Base     & ${\sim}2.5$k    & \val{0.7633}{.0102} & \val{0.7231}{.0182} & \val{0.7810}{.0133} & \val{0.7277}{.0101} & \snd{\val{0.6813}{.0053}} & \val{0.7454}{.0027}\\
-& CBraMod         & ${\sim}9$k      & \val{0.7865}{.0110} & \best{\val{0.7442}{.0152}} & \best{\val{0.8011}{.0099}} & \val{0.7269}{.0041} & \val{0.6685}{.0104} & \val{0.7395}{.0089}\\
-& CSBrain         & ${\sim}9$k      & \snd{\val{0.7925}{.0030}} & \snd{\val{0.7406}{.0102}} & \snd{\val{0.7990}{.0091}} & \snd{\val{0.7345}{.0047}} & \best{\val{0.6818}{.0046}} & \best{\val{0.7506}{.0042}}\\
-& REVE            & \tbd            & \val{0.7819}{.0078} & -- & -- & -- & -- & --\\
-& \textbf{Ours}   & ${\sim}2.5$k    & \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012} & \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \snd{\val{0.7459}{.0131}}\\
+& BIOT~\cite{yang2023biot}          & mixed        & \val{0.7527}{.0121} & \val{0.7291}{.0230} & \val{0.7790}{.0146} & \val{0.6862}{.0041} & \val{0.6295}{.0113} & \val{0.7091}{.0147}\\
+& LaBraM-Base~\cite{jiang2024labram} & ${\sim}2.5$k & \val{0.7633}{.0102} & \val{0.7231}{.0182} & \val{0.7810}{.0133} & \val{0.7277}{.0101} & \snd{\val{0.6813}{.0053}} & \val{0.7454}{.0027}\\
+& CBraMod~\cite{wang2025cbramod}     & ${\sim}9$k   & \val{0.7865}{.0110} & \best{\val{0.7442}{.0152}} & \best{\val{0.8011}{.0099}} & \val{0.7269}{.0041} & \val{0.6685}{.0104} & \val{0.7395}{.0089}\\
+& CSBrain~\cite{csbrain}             & ${\sim}9$k   & \snd{\val{0.7925}{.0030}} & \snd{\val{0.7406}{.0102}} & \snd{\val{0.7990}{.0091}} & \snd{\val{0.7345}{.0047}} & \best{\val{0.6818}{.0046}} & \best{\val{0.7506}{.0042}}\\
+& REVE~\cite{reve2025}               & ${\sim}60$k  & \val{0.7819}{.0078} & -- & -- & -- & -- & --\\
+& \textbf{Ours}                      & ${\sim}2.5$k & \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012} & \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \snd{\val{0.7459}{.0131}}\\
 \bottomrule
 \end{tabular}}
 \end{table*}
@@ -428,7 +428,11 @@ A full-data control on the ${\sim}17{,}666$-hour corpus---seven times more data 
 a matched gradient budget, same configuration---reaches ISRUC $0.7899$ and HMC
 $0.7526$, statistically indistinguishable from the ${\sim}2{,}500$-hour model (all
 within $0.004$; Table~\ref{tab:dataeff}). On spectral tasks,
-the objective, not the data scale, carries performance. On the tiny-cohort clinical
+the objective, not the data scale, carries performance. The point holds externally
+too: REVE \cite{reve2025}, pretrained on $60{,}000$ hours (${24}{\times}$ ours) with
+a masked-autoencoding objective, reaches only $0.7819$ on ISRUC---below our
+$0.7934$---so neither scale nor reconstruction substitutes for the right pretext.
+On the tiny-cohort clinical
 tasks fine-tuning is high-variance, so we lead with the deterministic frozen probe
 (Table~\ref{tab:binary}): on Mumtaz it reaches $0.9173$ BA / $0.9833$
 AUROC---\emph{above} its own fine-tuned number ($0.9129$) and with zero seed
