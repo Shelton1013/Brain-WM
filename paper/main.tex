@@ -282,20 +282,10 @@ reconstruction). Band power keeps only \emph{which} bands carry energy---the
 quantity clinical labels are defined by---and discards the rest. This lossy target
 is the sweet spot: coarse enough to ignore noise, yet informative enough to force a
 discriminative spectral representation. It denoises rather than reconstructs.
-
-\noindent\textbf{What predicting masked band power teaches.} One might object that
-many waveforms share the same band power, so the target does not determine the
-masked signal. This is intentional: the detail beyond band power (phase, fine
-shape) is exactly the task-irrelevant part we discard---we predict the
-\emph{invariant}, not the waveform. The learning signal does not come from mapping
-a patch to its own band power (which is local and trivial) but from predicting the
-band power of a \emph{masked} patch from its spatio-temporal \emph{context}: because
-the patch is hidden, the encoder must infer its spectral content from the
-surrounding channels and time, i.e.\ represent the underlying \emph{spectral state}
-of the recording (a delta-dominated epoch, a spindle-rich window). That state is
-precisely what clinical labels are defined by, so the pretext forces the
-discriminative representation. It is a cloze task on band power---the model learns
-the spectral ``meaning'' from context, not the exact waveform.
+ Because masked patches are predicted from their
+spatio-temporal context, the encoder must represent the underlying \emph{spectral
+state} of the recording (a delta-dominated epoch, a spindle-rich window)---exactly
+what clinical labels are defined by (Fig.~\ref{fig:arch}).
 
 \noindent\textbf{Regularization.} The only other term is SIGReg
 \cite{balestriero2025lejepa}, an isotropy penalty (weight $\lambda{=}0.05$) that
