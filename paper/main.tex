@@ -266,6 +266,19 @@ predicted from an uninformative encoding, so minimizing $\mathcal{L}_{\mathrm{sp
 informative. This is the crux of a codebook-free spectral objective and is verified
 in the ablations.
 
+\noindent\textbf{Why band power, not the full spectrum.} Band-power prediction is
+the self-supervised \emph{pretext} task: its purpose is to train the encoder, not
+to produce a useful output---after pretraining the band-power head is discarded and
+the encoder alone transfers downstream. We predict a compact $N$-dimensional summary
+(one log-power per band per masked patch) rather than the masked patch's full
+spectrum or raw waveform. Predicting the full spectrum would, like reconstruction,
+force the model to fit the fine spectral detail and phase of the masked region---
+most of which is task-irrelevant noise (the failure mode of raw-signal
+reconstruction). Band power keeps only \emph{which} bands carry energy---the
+quantity clinical labels are defined by---and discards the rest. This lossy target
+is the sweet spot: coarse enough to ignore noise, yet informative enough to force a
+discriminative spectral representation. It denoises rather than reconstructs.
+
 \noindent\textbf{Regularization.} The only other term is SIGReg
 \cite{balestriero2025lejepa}, an isotropy penalty (weight $\lambda{=}0.05$) that
 prevents dimensional collapse of the representation. We deliberately use \emph{no}
