@@ -353,12 +353,13 @@ ${\sim}1/4$ of their data.}
 & FFCL~\cite{li2022ffcl}            & -- & \val{0.7277}{.0182} & \val{0.7016}{.0292} & \val{0.7614}{.0197} & \val{0.4427}{.0702} & \val{0.2542}{.0654} & \val{0.2902}{.0485}\\
 & ST-Transformer~\cite{song2021sttransformer}  & -- & \val{0.7381}{.0205} & \val{0.7013}{.0352} & \val{0.7681}{.0175} & \val{0.2559}{.0141} & \val{0.0503}{.0183} & \val{0.1428}{.0122}\\
 \midrule
-\multirow{6}{*}{\rotatebox{90}{\shortstack{Foundation\\Models}}}
+\multirow{7}{*}{\rotatebox{90}{\shortstack{Foundation\\Models}}}
 & BIOT~\cite{yang2023biot}          & mixed        & \val{0.7527}{.0121} & \val{0.7291}{.0230} & \val{0.7790}{.0146} & \val{0.6862}{.0041} & \val{0.6295}{.0113} & \val{0.7091}{.0147}\\
 & LaBraM-Base~\cite{jiang2024labram} & ${\sim}2.5$k & \val{0.7633}{.0102} & \val{0.7231}{.0182} & \val{0.7810}{.0133} & \val{0.7277}{.0101} & \snd{\val{0.6813}{.0053}} & \val{0.7454}{.0027}\\
 & CBraMod~\cite{wang2025cbramod}     & ${\sim}9$k   & \val{0.7865}{.0110} & \snd{\val{0.7442}{.0152}} & \best{\val{0.8011}{.0099}} & \val{0.7269}{.0041} & \val{0.6685}{.0104} & \val{0.7395}{.0089}\\
 & CSBrain~\cite{csbrain}             & ${\sim}9$k   & \snd{\val{0.7925}{.0030}} & \val{0.7406}{.0102} & \val{0.7990}{.0091} & \snd{\val{0.7345}{.0047}} & \best{\val{0.6818}{.0046}} & \best{\val{0.7506}{.0042}}\\
 & REVE~\cite{reve2025}               & ${\sim}60$k  & \val{0.7819}{.0078} & \best{\val{0.7500}{.0156}} & \snd{\val{0.8005}{.0135}} & -- & -- & --\\
+& SpecBraM (from scratch)                & --           & \val{0.7384}{.0085} & \val{0.6598}{.0116} & \val{0.7373}{.0078} & \val{0.7085}{.0003} & \val{0.6202}{.0055} & \val{0.7061}{.0075}\\
 & \textbf{SpecBraM}                      & ${\sim}2.5$k & \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012} & \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \snd{\val{0.7459}{.0131}}\\
 \bottomrule
 \end{tabular}}
@@ -483,10 +484,12 @@ the full-data control.
 \emph{frozen} encoder---no backbone update---reaches $0.7522$ BA on ISRUC and
 $0.7099$ on HMC (Table~\ref{tab:frozensleep}), matching fine-tuned BIOT
 ($0.7527$) and exceeding fine-tuned EEGNet ($0.7154$) and EEG Conformer
-($0.7400$) on ISRUC, whereas the same architecture randomly initialized reaches
-only $0.5657$/$0.5003$---a ${+}0.19$/${+}0.21$ BA gap. The spectral pretext task
-therefore produces a representation that is discriminative off-the-shelf, not only
-after fine-tuning.
+($0.7400$) on ISRUC, whereas the same architecture randomly initialized and frozen
+reaches only $0.5657$/$0.5003$---a ${+}0.19$/${+}0.21$ BA gap. Strikingly, the
+frozen probe even matches or exceeds \emph{fine-tuning} the same architecture from
+scratch (ISRUC $0.7384$, HMC $0.7085$; Table~\ref{tab:sleep}): the pretrained
+features are more useful off-the-shelf than a from-scratch network is after full
+training.
 
 \noindent\textbf{Label efficiency.} A probe on our frozen features reaches high
 accuracy with far fewer downstream labels than a random encoder
@@ -516,19 +519,20 @@ the advantage appears once ${\geq}10\%$ of sequences suffice to fit the head.}
 \subsection{Ablations}
 \begin{table}[t]\centering\small
 \setlength{\tabcolsep}{5pt}
-\caption{\textbf{Objective ablation} at ${\sim}2{,}500$\,h, matched compute (same
-subset, same steps; only the loss changes). Removing the band-power term
-$\mathcal{L}_{\mathrm{sp}}$ leaves only the SIGReg regularizer---no predictive
-objective---and collapses the model to chance. Reported on the low-variance sleep
-benchmarks (large test sets, std ${\sim}0.005$); the tiny-cohort clinical tasks are
-too high-variance to resolve an ablation.}
+\caption{\textbf{Ablation} at ${\sim}2{,}500$\,h, matched compute (same subset,
+same steps). We vary the loss (removing the band-power term $\mathcal{L}_{\mathrm{sp}}$)
+and the mask axis (masking frequency bands instead of time patches, same
+objective). Removing $\mathcal{L}_{\mathrm{sp}}$ collapses to chance; the mask-axis
+result is in progress. Reported on the low-variance sleep benchmarks; the
+tiny-cohort clinical tasks are too high-variance to resolve an ablation.}
 \label{tab:ablobj}
 \begin{tabular}{lcc}
 \toprule
-Objective & ISRUC BA & HMC BA\\
+Variant & ISRUC BA & HMC BA\\
 \midrule
 SIGReg only (no $\mathcal{L}_{\mathrm{sp}}$)        & \val{0.2124}{.0015} & \val{0.2737}{.0247}\\
-\best{$\mathcal{L}_{\mathrm{sp}}$ + SIGReg (SpecBraM)}  & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
+Band (frequency) masking                            & \tbd & \tbd\\
+\best{SpecBraM (time mask, $\mathcal{L}_{\mathrm{sp}}$+SIGReg)}  & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -537,12 +541,14 @@ SIGReg only (no $\mathcal{L}_{\mathrm{sp}}$)        & \val{0.2124}{.0015} & \val
 Table~\ref{tab:ablobj} isolates the band-power term at identical data and compute.
 Removing it---leaving only the SIGReg isotropy regularizer, with \emph{no}
 predictive objective---is catastrophic: ISRUC and HMC collapse to $0.2124$ and
-$0.2737$, the 5-class chance level ($\kappa{\approx}0.05$), \emph{below} even a
-randomly initialized encoder (ISRUC $0.738$ fine-tuned). With the band-power term
-the model reaches $0.7934$/$0.7484$. SIGReg alone spreads the representation but
-teaches it nothing; the masked band-power prediction drives all downstream
+$0.2737$, the 5-class chance level ($\kappa{\approx}0.05$), \emph{below} even the
+from-scratch baseline (ISRUC $0.7384$; Table~\ref{tab:sleep}). With the band-power
+term the model reaches $0.7934$/$0.7484$. SIGReg alone spreads the representation
+but teaches it nothing; the masked band-power prediction drives all downstream
 performance. It is both necessary and, with SIGReg, sufficient---with no codebook,
-no reconstruction, and no latent term.
+no reconstruction, and no latent term. A mask-axis ablation---masking frequency
+bands instead of time patches under the same objective---is in progress
+(Table~\ref{tab:ablobj}).
 
 \noindent\textbf{Fixed vs.\ learnable target.} A learnable-target filterbank
 collapses ($\mathcal{L}_{\mathrm{sp}}{\to}0$, degenerate features); the fixed
