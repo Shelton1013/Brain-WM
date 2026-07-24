@@ -75,17 +75,19 @@
 
     <!-- OURS -->
     <div class="branch ours">
-      <div class="h"><span class="tag ours">OURS</span> Predict band <u>power</u></div>
+      <div class="h"><span class="tag ours">OURS</span> Predict masked patch's band <u>power</u> &mdash; from context</div>
       <div class="brow">
         <canvas id="bars" width="150" height="78"></canvas>
         <div>
-          <div class="cost"><b>5 numbers</b> / patch<br>(one log-power per band)</div>
-          <div class="cost" style="margin-top:4px">target = <b>fixed filterbank</b> power<br>(frozen, cannot collapse)</div>
+          <div class="cost"><b>5 numbers</b> / patch &middot; <b>inferred from context</b><br>(patch is hidden &rarr; infer from other time &amp; channels)</div>
+          <div class="cost" style="margin-top:4px">target = <b>fixed filterbank</b> power (frozen)</div>
+          <div class="cost" style="margin-top:4px;color:var(--good)">many waveforms &rarr; <b>this same summary</b>: we keep the invariant</div>
         </div>
       </div>
-      <div class="verdict good">&#10003; A <b>lossy, denoised summary</b>: keeps <b>which</b> bands carry energy
-        &mdash; exactly what clinical labels are defined by &mdash; and throws away phase and fine detail.
-        The encoder must learn discriminative <b>spectral structure</b>, not noise.</div>
+      <div class="verdict good">&#10003; To fill in a <b>hidden</b> patch's band power the encoder must represent the
+        <b>spectral state</b> of the recording (delta-dominated? spindle-rich?) &mdash; exactly what sleep /
+        clinical labels are. Phase &amp; fine shape (the part that differs between same-power waveforms) is
+        task-irrelevant and discarded. A <b>cloze task on band power</b>: learn the spectral meaning, not the waveform.</div>
     </div>
 
     <!-- NAIVE -->
