@@ -190,14 +190,18 @@ arithmetic \cite{zyma2019mentalarith}---using the subject-disjoint splits of
 CBraMod and CSBrain.
 
 \begin{figure*}[t]\centering
-\figorbox{figures/pipeline.pdf}{\textwidth}
-\caption{\textbf{Codebook-free spectral-prediction pretraining.} A learnable
-filterbank tokenizer splits each patch into $\delta\theta\alpha\beta\gamma$ bands;
-time patches are masked out of the encoder input. From the encoder output the
-model regresses the log band-power of masked patches, supervised by a
-\emph{fixed}, non-learnable filterbank target that cannot be collapsed; SIGReg adds
-an isotropy penalty. There is no reconstruction, discrete-codebook, or latent
-term---the objective is purely spectral.}
+\figorbox{figures/method.pdf}{\textwidth}
+\caption{\textbf{Why band power, not the band signal.} SpecBraM tokenizes each
+patch through a learnable filterbank, masks whole time patches, and encodes them
+(top). From the encoding of a masked patch two targets are possible.
+\emph{Ours} predicts the log band-power of the five bands---a five-number, denoised
+summary matched to a \emph{fixed} filterbank---keeping \emph{which} bands carry
+energy (the quantity clinical labels are defined by) and discarding phase and
+noise. The \emph{alternative}, reconstructing the band-domain waveforms, is
+reconstruction: it forces the model to fit phase, fine spectral shape and
+noise---the failure mode of raw-signal methods. Band-power prediction is only the
+pretext; after pretraining the head is discarded and the encoder transfers
+downstream.}
 \label{fig:arch}
 \end{figure*}
 

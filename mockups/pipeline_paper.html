@@ -1,0 +1,292 @@
+<title>EEG-LeJEPA — model figure (paper grade)</title>
+<style>
+  :root{
+    --ink:#16202b; --ink2:#3a4b5a; --muted:#67788a; --faint:#93a1ad;
+    --paper:#ffffff; --panel:#f4f7f9; --panel2:#eaeff3; --line:#ccd5dd; --line2:#dfe6eb;
+    --acc:#0a7d8c; --accfill:#e6f2f3; --accline:#8fc6cd;
+    --tgt:#7d8b98; --tgtfill:#eef1f4;
+    --delta:#3b5bd0; --theta:#6741c9; --alpha:#0f9d76; --beta:#c47f10; --gamma:#c2482a;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#e9eef2;color:var(--ink);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;padding:30px 18px 54px}
+  .head{max-width:1180px;margin:0 auto 20px;text-align:center}
+  .head h1{font-size:1.16rem;font-weight:700;margin:0 0 5px;letter-spacing:-.01em}
+  .head p{margin:0;color:var(--ink2);font-size:.83rem;line-height:1.5}
+  .fig{max-width:1180px;margin:0 auto;background:var(--paper);border:1px solid var(--line);
+    border-radius:12px;padding:26px 26px 22px;box-shadow:0 10px 34px rgba(16,30,45,.08)}
+
+  .eyebrow{font-family:var(--mono);font-size:.56rem;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--faint);font-weight:600}
+  .shape{font-family:var(--mono);font-size:.6rem;color:var(--muted);white-space:nowrap}
+  .op{font-family:var(--mono);font-size:.6rem;color:var(--ink2)}
+
+  /* main flow */
+  .flow{display:flex;align-items:stretch;gap:0}
+  .step{display:flex;flex-direction:column;align-items:center;gap:6px;flex:1 1 0;min-width:0}
+  .card{width:100%;border:1px solid var(--line);border-radius:10px;background:var(--panel);
+    padding:9px 8px 8px;display:flex;flex-direction:column;align-items:center;gap:5px}
+  .card.acc{border-color:var(--accline);background:var(--accfill)}
+  .card.enc{background:var(--paper);border-color:var(--accline);min-height:118px;justify-content:center}
+  .cname{font-size:.73rem;font-weight:700;text-align:center;line-height:1.16}
+  .cnote{font-size:.58rem;color:var(--muted);font-family:var(--mono);text-align:center;line-height:1.35}
+  .flowarr{display:flex;align-items:center;padding:0 3px;color:var(--faint);flex:0 0 auto;align-self:center;
+    height:100%;font-size:1rem}
+  .arrlab{font-family:var(--mono);font-size:.53rem;color:var(--faint);text-align:center;line-height:1.2}
+
+  canvas{display:block}
+
+  /* connectors + detail row */
+  .detailrow{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:26px}
+  .detail{border:1px solid var(--line2);border-radius:10px;background:var(--paper);padding:12px 14px 13px;
+    position:relative}
+  .detail::before{content:"";position:absolute;top:-13px;left:50%;width:1px;height:13px;
+    border-left:1.5px dashed var(--accline)}
+  .detail .dh{display:flex;align-items:baseline;gap:8px;margin-bottom:9px}
+  .detail .dh .t{font-size:.72rem;font-weight:700}
+  .chips{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .chip{border:1px solid var(--line);border-radius:7px;background:var(--panel);padding:5px 7px;
+    display:flex;flex-direction:column;gap:2px;min-width:0}
+  .chip .cl{font-size:.62rem;font-weight:600;line-height:1.1}
+  .chip .cs{font-family:var(--mono);font-size:.55rem;color:var(--muted)}
+  .chip.k{border-color:var(--accline);background:var(--accfill)}
+  .mini-arr{color:var(--faint);font-size:.85rem;flex:0 0 auto}
+
+  /* heads */
+  .heads{display:flex;flex-direction:column;gap:7px;justify-content:center;flex:1.15 1 0}
+  .hcard{border-radius:9px;padding:8px 10px}
+  .hcard.main{border:1.5px solid var(--acc);background:var(--accfill)}
+  .hcard.aux{border:1px dashed var(--accline);background:var(--paper)}
+  .hcard.reg{border:1px dashed var(--tgt);background:var(--tgtfill)}
+  .hcard .ht{font-size:.71rem;font-weight:700;display:flex;align-items:baseline;gap:6px}
+  .hcard .ht .k{font-family:var(--mono);font-weight:400;font-size:.56rem;color:var(--muted)}
+  .hcard .hn{font-size:.58rem;color:var(--muted);font-family:var(--mono);line-height:1.4;margin-top:2px}
+  .hrow{display:flex;align-items:center;gap:8px}
+
+  /* target + loss */
+  .foot{display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:center;margin-top:22px;
+    padding-top:16px;border-top:1px solid var(--line2)}
+  .tgtbox{display:flex;align-items:center;gap:10px;border:1px dashed var(--tgt);background:var(--tgtfill);
+    border-radius:9px;padding:8px 11px}
+  .tgtbox .l{font-size:.66rem;font-weight:700;color:var(--ink2)}
+  .tgtbox .l small{display:block;font-weight:400;font-family:var(--mono);font-size:.55rem;color:var(--muted)}
+  .nograd{font-family:var(--mono);font-size:.56rem;color:var(--tgt);font-style:italic;line-height:1.4}
+  .lossbar{font-family:var(--mono);font-size:.82rem;text-align:center;color:var(--ink);
+    background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:11px 12px}
+  .lossbar b{color:var(--acc)}
+  .lossbar .drop{color:var(--muted);font-size:.66rem}
+
+  .legend{display:flex;gap:15px;justify-content:center;flex-wrap:wrap;margin-top:16px;
+    font-family:var(--mono);font-size:.62rem;color:var(--muted)}
+  .legend span{display:flex;align-items:center;gap:5px}
+  .sw{width:10px;height:10px;border-radius:2px;display:inline-block}
+  .cap{max-width:1180px;margin:14px auto 0;color:var(--ink2);font-size:.72rem;line-height:1.55}
+  .cap b{color:var(--ink)}
+  sub{font-size:.72em}
+</style>
+
+<div class="head">
+  <h1>EEG&#8209;LeJEPA: frequency&#8209;native self&#8209;supervised pretraining</h1>
+  <p>A learnable filterbank tokenizes each patch into physiological bands; a criss&#8209;cross transformer encodes band&#8209;masked tokens;
+     the model predicts the <b>spectral power</b> of masked bands against a fixed&#8209;filterbank target, with a weak JEPA consistency term and SIGReg.</p>
+</div>
+
+<div class="fig">
+
+  <!-- ===================== MAIN FLOW ===================== -->
+  <div class="flow">
+
+    <div class="step">
+      <div class="eyebrow">input</div>
+      <div class="card">
+        <div class="cname">Raw EEG</div>
+        <canvas id="eeg" width="120" height="60"></canvas>
+        <div class="cnote">per&#8209;recording<br>robust norm</div>
+      </div>
+      <div class="shape">[B,&nbsp;2560,&nbsp;19]</div>
+    </div>
+
+    <div class="flowarr"><div><div>&rarr;</div></div></div>
+
+    <div class="step">
+      <div class="eyebrow">1 · tokenize</div>
+      <div class="card acc">
+        <div class="cname">Learnable<br>filterbank</div>
+        <canvas id="bands" width="120" height="72"></canvas>
+        <div class="cnote">5 bandpass conv<br>&delta;&thinsp;&theta;&thinsp;&alpha;&thinsp;&beta;&thinsp;&gamma;</div>
+      </div>
+      <div class="shape">[B,&nbsp;19,&nbsp;5,&nbsp;T<sub>p</sub>,&nbsp;200]</div>
+    </div>
+
+    <div class="flowarr"><div><div>&rarr;</div></div></div>
+
+    <div class="step">
+      <div class="eyebrow">2 · mask</div>
+      <div class="card acc">
+        <div class="cname">Band tokens<br>+ mask bands</div>
+        <canvas id="tok" width="120" height="72"></canvas>
+        <div class="cnote">hide random<br>bands / patch</div>
+      </div>
+      <div class="shape">[B,&nbsp;19,&nbsp;T<sub>p</sub>,&nbsp;512]</div>
+    </div>
+
+    <div class="flowarr"><div><div>&rarr;</div><div class="arrlab">+pos</div></div></div>
+
+    <div class="step">
+      <div class="eyebrow">3 · encode</div>
+      <div class="card enc">
+        <div class="cname">Criss&#8209;cross<br>Transformer</div>
+        <div class="cnote" style="margin-top:3px">&times;&thinsp;12 blocks<br>d = 512, 8 heads</div>
+      </div>
+      <div class="shape">[B,&nbsp;19,&nbsp;T<sub>p</sub>,&nbsp;512]</div>
+    </div>
+
+    <div class="flowarr"><div><div>&rarr;</div></div></div>
+
+    <!-- heads -->
+    <div class="heads">
+      <div class="eyebrow" style="text-align:center">4 · objectives</div>
+      <div class="hcard main">
+        <div class="hrow">
+          <div style="flex:1">
+            <div class="ht">Cross&#8209;frequency <span class="k">main · L<sub>cf</sub></span></div>
+            <div class="hn">Linear 512&rarr;5 · predict masked<br>band <b>log&#8209;power</b> (scalar/patch)</div>
+          </div>
+          <canvas id="bars" width="96" height="52"></canvas>
+        </div>
+      </div>
+      <div class="hcard aux">
+        <div class="ht" style="color:var(--acc)">JEPA <span class="k">aux · &lambda;=0.3</span></div>
+        <div class="hn">predictor MLP · match full&#8209;band<br>encoding (stop&#8209;grad target)</div>
+      </div>
+      <div class="hcard reg">
+        <div class="ht" style="color:var(--ink2)">SIGReg <span class="k">anti&#8209;collapse</span></div>
+        <div class="hn">embeddings &rarr; isotropic Gaussian</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ===================== DETAIL INSETS ===================== -->
+  <div class="detailrow">
+
+    <!-- filterbank tokenizer internals -->
+    <div class="detail">
+      <div class="dh"><span class="eyebrow">detail</span><span class="t">FilterbankTokenizer</span></div>
+      <div class="chips">
+        <div class="chip"><span class="cl">Conv1d bank</span><span class="cs">1&rarr;5, k=65</span><span class="cs">Hann bandpass init</span></div>
+        <span class="mini-arr">&rarr;</span>
+        <div class="chip"><span class="cl">patch embed</span><span class="cs">Linear 200&rarr;64</span><span class="cs">per band</span></div>
+        <span class="mini-arr">&rarr;</span>
+        <div class="chip k"><span class="cl">mask band</span><span class="cs">&rarr; mask token</span><span class="cs">[B,19,T<sub>p</sub>,5,64]</span></div>
+        <span class="mini-arr">&rarr;</span>
+        <div class="chip"><span class="cl">combine</span><span class="cs">Linear 5&middot;64&rarr;512</span><span class="cs">token</span></div>
+      </div>
+    </div>
+
+    <!-- criss-cross block internals -->
+    <div class="detail">
+      <div class="dh"><span class="eyebrow">detail</span><span class="t">Criss&#8209;cross block (&times;12)</span></div>
+      <div class="chips">
+        <div class="chip k"><span class="cl">Channel MHSA</span><span class="cs">attn over 19 ch</span><span class="cs">LN · residual</span></div>
+        <span class="mini-arr">&rarr;</span>
+        <div class="chip k"><span class="cl">Time MHSA</span><span class="cs">attn over T<sub>p</sub></span><span class="cs">LN · residual</span></div>
+        <span class="mini-arr">&rarr;</span>
+        <div class="chip"><span class="cl">FFN</span><span class="cs">512&rarr;2048&rarr;512</span><span class="cs">GELU · residual</span></div>
+      </div>
+      <div class="cnote" style="text-align:left;margin-top:8px;color:var(--muted)">
+        alternates <b>channel&#8209;</b> then <b>time&#8209;</b>axis attention &rarr; full spatio&#8209;temporal mixing at O(C&sup2;+T<sub>p</sub>&sup2;) not O((C&middot;T<sub>p</sub>)&sup2;)</div>
+    </div>
+
+  </div>
+
+  <!-- ===================== TARGET + LOSS ===================== -->
+  <div class="foot">
+    <div class="tgtbox">
+      <div class="l">Fixed filterbank<small>non&#8209;learnable buffer</small></div>
+      <canvas id="tgt" width="104" height="42"></canvas>
+      <div class="nograd">no&#8209;grad target<br>for L<sub>cf</sub></div>
+    </div>
+    <div class="lossbar">
+      &#8466; = <b>L<sub>cf</sub></b><span style="color:var(--muted)">(band&#8209;power MSE)</span>
+      &nbsp;+&nbsp; 0.3&thinsp;L<sub>jepa</sub> &nbsp;+&nbsp; &lambda;&thinsp;L<sub>sigreg</sub>
+      &nbsp;&nbsp;<span class="drop">— raw&#8209;signal / VQ reconstruction is dropped</span>
+    </div>
+  </div>
+
+  <div class="legend">
+    <span><i class="sw" style="background:var(--delta)"></i>&delta;</span>
+    <span><i class="sw" style="background:var(--theta)"></i>&theta;</span>
+    <span><i class="sw" style="background:var(--alpha)"></i>&alpha;</span>
+    <span><i class="sw" style="background:var(--beta)"></i>&beta;</span>
+    <span><i class="sw" style="background:var(--gamma)"></i>&gamma;</span>
+    <span><i class="sw" style="background:#aeb9c4"></i>masked</span>
+    <span><i class="sw" style="border:1.5px solid var(--acc);background:transparent"></i>learnable / pretraining path</span>
+    <span><i class="sw" style="border:1.5px dashed var(--tgt);background:transparent"></i>stop&#8209;grad</span>
+  </div>
+
+</div>
+
+<p class="cap"><b>Figure 1.</b> EEG&#8209;LeJEPA pretraining. Raw 10&#8209;s / 19&#8209;channel EEG is decomposed by a <b>learnable
+  filterbank</b> into five physiological bands per patch; per&#8209;band patch embeddings are combined into tokens, a random subset of
+  <b>bands</b> is masked, and a 12&#8209;layer <b>criss&#8209;cross transformer</b> (alternating channel&#8209; and time&#8209;axis attention)
+  encodes the visible tokens. The primary objective L<sub>cf</sub> predicts the <b>spectral power</b> of each masked band (a scalar per
+  patch — not a waveform) against a <b>fixed</b>&#8209;filterbank target (stop&#8209;grad; a learnable target collapses to&nbsp;0), with an
+  auxiliary weak JEPA latent&#8209;consistency term and a SIGReg anti&#8209;collapse regularizer. For downstream tasks the encoder tokens are
+  mean&#8209;pooled to a 512&#8209;d representation.</p>
+
+<script>
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function noise(seed){let s=seed;return()=>{s=(s*9301+49297)%233280;return s/233280;};}
+
+function drawEEG(id){
+  const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
+  x.clearRect(0,0,W,H);const r=noise(7),chs=3,pad=7;
+  for(let ch=0;ch<chs;ch++){const y0=pad+(H-2*pad)*(ch+0.5)/chs,f=[3,5,8][ch];
+    x.beginPath();x.lineWidth=1.15;x.strokeStyle=css('--ink');
+    for(let px=0;px<=W;px+=2){const t=px/W;
+      const yy=y0+Math.sin(t*Math.PI*2*f)*H*0.06*(0.6+0.4*Math.sin(t*20+ch))+(r()-0.5)*2;
+      px===0?x.moveTo(px,yy):x.lineTo(px,yy);} x.stroke();}
+}
+function drawBands(id){
+  const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
+  x.clearRect(0,0,W,H);
+  const B=[['--delta',2],['--theta',4],['--alpha',7],['--beta',12],['--gamma',20]];
+  const rh=H/5,r=noise(3);
+  B.forEach((b,i)=>{const y0=rh*(i+0.5),f=b[1];
+    x.beginPath();x.lineWidth=1.25;x.strokeStyle=css(b[0]);
+    for(let px=11;px<=W;px+=2){const t=px/W;
+      const yy=y0+Math.sin(t*Math.PI*2*f)*rh*0.3*(0.7+0.3*r());
+      px===11?x.moveTo(px,yy):x.lineTo(px,yy);} x.stroke();
+    x.fillStyle=css(b[0]);x.font='8px ui-monospace';x.fillText(['δ','θ','α','β','γ'][i],1,y0+3);});
+}
+function drawTok(id){
+  const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
+  x.clearRect(0,0,W,H);
+  const cols=['--delta','--theta','--alpha','--beta','--gamma'],nT=4,pad=12;
+  const cw=(W-pad-3)/nT,rh=(H-4)/5,mB=3,mC=[1,3];
+  for(let b=0;b<5;b++){for(let t=0;t<nT;t++){
+    const xx=pad+t*cw+1.5,yy=2+b*rh+1.5,ww=cw-3,hh=rh-3;
+    if(b===mB&&mC.includes(t)){x.fillStyle='rgba(150,161,173,.4)';x.fillRect(xx,yy,ww,hh);
+      x.strokeStyle=css('--faint');x.setLineDash([2,2]);x.strokeRect(xx+.5,yy+.5,ww-1,hh-1);x.setLineDash([]);}
+    else{x.fillStyle=css(cols[b]);x.globalAlpha=.82;x.fillRect(xx,yy,ww,hh);x.globalAlpha=1;}}
+    x.fillStyle=css(cols[b]);x.font='7.5px ui-monospace';x.fillText(['δ','θ','α','β','γ'][b],1,2+b*rh+rh*0.74);}
+}
+function bars(id,masked){
+  const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
+  x.clearRect(0,0,W,H);
+  const vals=[0.9,0.72,0.6,masked?null:0.62,0.34],cols=['--delta','--theta','--alpha','--beta','--gamma'];
+  const base=H-11,slot=(W-4)/5,bw=8,predV=0.5,tgtV=0.62;
+  vals.forEach((v,i)=>{const cx=3+slot*(i+0.5);
+    if(masked&&i===3){const ph=(base-5)*predV,th=(base-5)*tgtV,g=2,px0=cx-bw-g/2,tx0=cx+g/2;
+      x.fillStyle=css('--acc');x.fillRect(px0,base-ph,bw,ph);
+      x.strokeStyle=css('--ink');x.lineWidth=1;x.setLineDash([2,2]);x.strokeRect(tx0+.5,base-th+.5,bw-1,th-1);x.setLineDash([]);
+      x.fillStyle=css('--beta');x.font='7px ui-monospace';x.fillText('β',cx-2,base+9);
+    }else{const bh=(base-5)*v;x.fillStyle=css(cols[i]);x.fillRect(cx-bw/2,base-bh,bw,bh);
+      x.fillStyle=css(cols[i]);x.font='7px ui-monospace';x.fillText(['δ','θ','α','β','γ'][i],cx-2,base+9);}});
+  x.strokeStyle=css('--line');x.beginPath();x.moveTo(3,base);x.lineTo(W-2,base);x.stroke();
+}
+drawEEG('eeg');drawBands('bands');drawTok('tok');bars('bars',true);bars('tgt',false);
+</script>

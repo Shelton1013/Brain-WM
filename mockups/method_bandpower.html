@@ -1,0 +1,163 @@
+<title>Why band power — method rationale</title>
+<style>
+  :root{
+    --ink:#1b2a38; --muted:#5a6b7a; --faint:#8797a5; --line:#c7d2da;
+    --panel:#f5f7f9; --paper:#ffffff; --acc:#0a8f9e; --accfill:#e7f4f5;
+    --good:#0f9d76; --goodfill:#e6f4ee; --bad:#c24a3b; --badfill:#f7e9e6;
+    --gray:#aeb9c4;
+    --delta:#3b5bd0; --theta:#6741c9; --alpha:#0f9d76; --beta:#d18a00; --gamma:#d1541f;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#fff;color:var(--ink);font-family:var(--sans);padding:16px 18px}
+  .board{width:1120px;margin:0 auto}
+  h1{font-size:1.05rem;margin:0 0 16px;text-align:center;font-weight:700}
+  .row{display:flex;align-items:center;gap:10px}
+  .arrow{color:var(--faint);font-size:1.2rem;flex:0 0 auto}
+  .arrow.big{font-size:1.6rem}
+  .box{border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:7px 10px 6px;
+    display:flex;flex-direction:column;align-items:center;gap:4px}
+  .box .t{font-size:.72rem;font-weight:700}
+  .box .n{font-size:.6rem;color:var(--muted);font-family:var(--mono);text-align:center;line-height:1.3}
+  .enc{border:1px solid var(--line);border-radius:9px;background:#eef2f5;padding:9px 11px;text-align:center;
+    font-size:.72rem;font-weight:700;line-height:1.2}
+  .enc small{font-weight:400;color:var(--muted);font-size:.58rem;font-family:var(--mono)}
+  .zed{border:1.5px solid var(--ink);border-radius:9px;background:#fff;padding:9px 11px;text-align:center;
+    font-size:.72rem;font-weight:700;line-height:1.25}
+  .zed small{font-weight:400;color:var(--muted);font-size:.58rem;font-family:var(--mono)}
+  /* branch cards */
+  .branch{border-radius:11px;padding:11px 13px 10px;display:flex;flex-direction:column;gap:6px;width:430px}
+  .branch.ours{border:2px solid var(--acc);background:var(--accfill)}
+  .branch.naive{border:2px dashed var(--bad);background:var(--badfill)}
+  .branch .h{display:flex;align-items:center;gap:8px;font-size:.86rem;font-weight:700}
+  .branch.ours .h{color:var(--acc)} .branch.naive .h{color:var(--bad)}
+  .tag{font-family:var(--mono);font-size:.6rem;padding:1px 6px;border-radius:5px;font-weight:700}
+  .tag.ours{background:var(--acc);color:#fff} .tag.naive{background:var(--bad);color:#fff}
+  .branch .cost{font-family:var(--mono);font-size:.63rem;color:var(--muted)}
+  .verdict{border-radius:7px;padding:6px 8px;font-size:.68rem;line-height:1.4}
+  .verdict.good{background:var(--goodfill);border:1px solid var(--good);color:#0a6b52}
+  .verdict.bad{background:#fbeae6;border:1px solid var(--bad);color:#8f3123}
+  .verdict b{font-weight:700}
+  .brow{display:flex;align-items:center;gap:12px}
+  canvas{display:block}
+  .down{margin-top:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel);
+    padding:11px 14px;font-size:.76rem;text-align:center;line-height:1.5}
+  .down b{color:var(--acc)}
+  .zwrap{display:flex;flex-direction:column;align-items:center;gap:5px}
+  .split{display:flex;flex-direction:column;gap:14px}
+  .cap{font-size:.64rem;color:var(--muted);font-style:italic;text-align:center;margin-top:3px}
+</style>
+
+<div class="board">
+<h1>What does the model predict for a masked patch — and why band <u>power</u>, not the band <u>signal</u>?</h1>
+
+<!-- ===== compact pipeline (1–4, de-emphasised) → z ===== -->
+<div class="row" style="justify-content:center;margin-bottom:20px">
+  <div class="box"><div class="t">Raw EEG</div><canvas id="eeg" width="86" height="40"></canvas></div>
+  <div class="arrow">&rarr;</div>
+  <div class="box"><div class="t">Filterbank</div><canvas id="bells" width="74" height="40"></canvas>
+     <div class="n">&delta;&theta;&alpha;&beta;&gamma;</div></div>
+  <div class="arrow">&rarr;</div>
+  <div class="box"><div class="t">Mask time</div><canvas id="grid" width="80" height="44"></canvas></div>
+  <div class="arrow">&rarr;</div>
+  <div class="enc">Criss-cross<br>encoder<br><small>&times;12</small></div>
+  <div class="arrow big">&rarr;</div>
+  <div class="zwrap">
+    <div class="zed">encoding of the<br>masked patch<br><small>z (what we predict from)</small></div>
+    <div class="cap">two ways to define the target:</div>
+  </div>
+</div>
+
+<!-- ===== the branch: two possible targets ===== -->
+<div class="row" style="justify-content:center">
+  <div class="split">
+
+    <!-- OURS -->
+    <div class="branch ours">
+      <div class="h"><span class="tag ours">OURS</span> Predict band <u>power</u></div>
+      <div class="brow">
+        <canvas id="bars" width="150" height="78"></canvas>
+        <div>
+          <div class="cost"><b>5 numbers</b> / patch<br>(one log-power per band)</div>
+          <div class="cost" style="margin-top:4px">target = <b>fixed filterbank</b> power<br>(frozen, cannot collapse)</div>
+        </div>
+      </div>
+      <div class="verdict good">&#10003; A <b>lossy, denoised summary</b>: keeps <b>which</b> bands carry energy
+        &mdash; exactly what clinical labels are defined by &mdash; and throws away phase and fine detail.
+        The encoder must learn discriminative <b>spectral structure</b>, not noise.</div>
+    </div>
+
+    <!-- NAIVE -->
+    <div class="branch naive">
+      <div class="h"><span class="tag naive">ALTERNATIVE</span> Reconstruct the band <u>signal</u></div>
+      <div class="brow">
+        <canvas id="waves" width="150" height="78"></canvas>
+        <div>
+          <div class="cost"><b>~1280&times;5 samples</b> / patch<br>(every point of every band)</div>
+          <div class="cost" style="margin-top:4px">target = full band-domain<br>waveforms</div>
+        </div>
+      </div>
+      <div class="verdict bad">&#10007; This is <b>reconstruction</b>: to match the waveform the model must fit
+        <b>phase, fine spectral shape, and noise</b> &mdash; most of which is task-irrelevant. Capacity is spent
+        modelling noise (the failure mode of raw-signal reconstruction, e.g., CBraMod).</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== downstream use ===== -->
+<div class="down">
+  Band-power prediction is only the <b>pretext task</b>. After pretraining we <b>discard the prediction head</b>
+  and keep the <b>encoder</b> &mdash; that encoder is the foundation model that transfers to downstream tasks
+  (sleep staging, depression, mental workload). We never reconstruct anything at inference.
+</div>
+
+</div>
+
+<script>
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function noise(s){return()=>{s=(s*9301+49297)%233280;return s/233280;};}
+
+function drawEEG(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height,r=noise(7);
+  for(let ch=0;ch<3;ch++){const y0=6+(H-12)*(ch+0.5)/3;x.beginPath();x.lineWidth=1;x.strokeStyle=css('--ink');
+    for(let p=0;p<=W;p+=2){const t=p/W;let yy=y0+Math.sin(t*Math.PI*2*(3+ch*3))*3+(r()-0.5)*2.5;p===0?x.moveTo(p,yy):x.lineTo(p,yy);}x.stroke();}}
+
+function drawBells(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
+  const cols=['--delta','--theta','--alpha','--beta','--gamma'],ctr=[.12,.3,.47,.66,.87],w=.1;
+  cols.forEach((col,i)=>{x.strokeStyle=css(col);x.lineWidth=1.3;x.beginPath();
+    for(let p=0;p<=W;p++){const t=p/W,y=(H-4)-(H-8)*Math.exp(-((t-ctr[i])**2)/(2*w*w));p===0?x.moveTo(p,y):x.lineTo(p,y);}x.stroke();});
+  x.strokeStyle=css('--line');x.beginPath();x.moveTo(0,H-3);x.lineTo(W,H-3);x.stroke();}
+
+function drawGrid(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
+  const cols=['--delta','--theta','--alpha','--beta','--gamma'],nB=5,nT=4,cw=(W-2)/nT,rh=(H-2)/nB,mask=[1,3];
+  for(let b=0;b<nB;b++)for(let t=0;t<nT;t++){const xx=1+t*cw,yy=1+b*rh;
+    if(mask.includes(t)){x.fillStyle='#eef1f4';x.fillRect(xx,yy,cw-1.5,rh-1.5);
+      x.strokeStyle=css('--gray');x.setLineDash([2,2]);x.strokeRect(xx+.5,yy+.5,cw-2.5,rh-2.5);x.setLineDash([]);
+      x.fillStyle=css('--faint');x.font='6px ui-monospace';x.fillText('M',xx+cw/2-2,yy+rh/2+2);}
+    else{x.fillStyle=css(cols[b]);x.globalAlpha=.8;x.fillRect(xx,yy,cw-1.5,rh-1.5);x.globalAlpha=1;}}}
+
+// band-power bars: pred (solid teal) vs target (dashed, band colour)
+function drawBars(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
+  const cols=['--delta','--theta','--alpha','--beta','--gamma'],lab=['δ','θ','α','β','γ'];
+  const tgt=[.92,.62,.66,.5,.28],pred=[.85,.68,.6,.55,.32],base=H-14,slot=(W-6)/5;
+  for(let i=0;i<5;i++){const cx=5+slot*(i+0.5),bw=8,g=3;
+    x.fillStyle=css('--acc');x.fillRect(cx-bw-g/2,base-(base-6)*pred[i],bw,(base-6)*pred[i]);
+    x.strokeStyle=css(cols[i]);x.lineWidth=1.2;x.setLineDash([2,2]);
+    x.strokeRect(cx+g/2+.5,base-(base-6)*tgt[i]+.5,bw-1,(base-6)*tgt[i]-1);x.setLineDash([]);
+    x.fillStyle=css(cols[i]);x.font='8px ui-monospace';x.fillText(lab[i],cx-3,base+11);}
+  x.strokeStyle=css('--line');x.beginPath();x.moveTo(3,base);x.lineTo(W-3,base);x.stroke();
+  x.fillStyle=css('--muted');x.save();x.translate(8,H/2-4);x.rotate(-Math.PI/2);x.font='7px ui-monospace';x.fillText('log-power',-14,0);x.restore();}
+
+// band waveforms: target (solid) + pred (faint offset) for all 5 bands = must fit every wiggle
+function drawWaves(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
+  const cols=['--delta','--theta','--alpha','--beta','--gamma'],f=[2,4,7,12,20],rh=H/5,r=noise(5),r2=noise(19);
+  for(let b=0;b<5;b++){const y0=rh*(b+0.5);
+    x.strokeStyle=css(cols[b]);x.lineWidth=1;x.beginPath();
+    for(let p=0;p<=W;p+=2){const t=p/W,y=y0+Math.sin(t*Math.PI*2*f[b])*rh*0.3*(0.7+0.3*r());p===0?x.moveTo(p,y):x.lineTo(p,y);}x.stroke();
+    x.strokeStyle=css('--gray');x.globalAlpha=.6;x.lineWidth=.8;x.beginPath();
+    for(let p=0;p<=W;p+=2){const t=p/W,y=y0+Math.sin(t*Math.PI*2*f[b]+0.6)*rh*0.3*(0.7+0.3*r2())+1.5;p===0?x.moveTo(p,y):x.lineTo(p,y);}x.stroke();x.globalAlpha=1;}
+  x.fillStyle=css('--faint');x.font='6px system-ui';}
+
+drawEEG('eeg');drawBells('bells');drawGrid('grid');drawBars('bars');drawWaves('waves');
+</script>
