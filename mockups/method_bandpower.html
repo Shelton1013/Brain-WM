@@ -11,11 +11,11 @@
   }
   *{box-sizing:border-box}
   body{margin:0;background:#fff;color:var(--ink);font-family:var(--sans);padding:16px 18px}
-  .board{width:1120px;margin:0 auto}
+  .board{width:1080px;margin:0 auto}
   h1{font-size:1.05rem;margin:0 0 16px;text-align:center;font-weight:700}
   .row{display:flex;align-items:center;gap:10px}
   .arrow{color:var(--faint);font-size:1.2rem;flex:0 0 auto}
-  .arrow.big{font-size:1.6rem}
+  .arrow.big{font-size:1.55rem}
   .box{border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:7px 10px 6px;
     display:flex;flex-direction:column;align-items:center;gap:4px}
   .box .t{font-size:.72rem;font-weight:700}
@@ -26,140 +26,164 @@
   .zed{border:1.5px solid var(--ink);border-radius:9px;background:#fff;padding:9px 11px;text-align:center;
     font-size:.72rem;font-weight:700;line-height:1.25}
   .zed small{font-weight:400;color:var(--muted);font-size:.58rem;font-family:var(--mono)}
-  /* branch cards */
-  .branch{border-radius:11px;padding:11px 13px 10px;display:flex;flex-direction:column;gap:6px;width:430px}
+  .branch{border-radius:11px;padding:10px 13px;display:flex;flex-direction:column;gap:7px;width:460px}
   .branch.ours{border:2px solid var(--acc);background:var(--accfill)}
   .branch.naive{border:2px dashed var(--bad);background:var(--badfill)}
-  .branch .h{display:flex;align-items:center;gap:8px;font-size:.86rem;font-weight:700}
+  .branch .h{display:flex;align-items:center;gap:8px;font-size:.85rem;font-weight:700}
   .branch.ours .h{color:var(--acc)} .branch.naive .h{color:var(--bad)}
   .tag{font-family:var(--mono);font-size:.6rem;padding:1px 6px;border-radius:5px;font-weight:700}
   .tag.ours{background:var(--acc);color:#fff} .tag.naive{background:var(--bad);color:#fff}
-  .branch .cost{font-family:var(--mono);font-size:.63rem;color:var(--muted)}
-  .verdict{border-radius:7px;padding:6px 8px;font-size:.68rem;line-height:1.4}
-  .verdict.good{background:var(--goodfill);border:1px solid var(--good);color:#0a6b52}
-  .verdict.bad{background:#fbeae6;border:1px solid var(--bad);color:#8f3123}
-  .verdict b{font-weight:700}
-  .brow{display:flex;align-items:center;gap:12px}
+  .viz{display:flex;flex-direction:column;align-items:center;gap:2px}
+  .vlab{font-size:.6rem;color:var(--muted);font-family:var(--mono);text-align:center;line-height:1.25}
+  .brow{display:flex;align-items:center;gap:10px;justify-content:center}
+  .take{border-radius:7px;padding:5px 9px;font-size:.72rem;font-weight:600;text-align:center}
+  .take.good{background:var(--goodfill);border:1px solid var(--good);color:#0a6b52}
+  .take.bad{background:#fbeae6;border:1px solid var(--bad);color:#8f3123}
   canvas{display:block}
-  .down{margin-top:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel);
-    padding:11px 14px;font-size:.76rem;text-align:center;line-height:1.5}
+  .down{margin-top:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel);
+    padding:10px 14px;font-size:.74rem;text-align:center;line-height:1.5}
   .down b{color:var(--acc)}
   .zwrap{display:flex;flex-direction:column;align-items:center;gap:5px}
-  .split{display:flex;flex-direction:column;gap:14px}
-  .cap{font-size:.64rem;color:var(--muted);font-style:italic;text-align:center;margin-top:3px}
+  .cap{font-size:.63rem;color:var(--muted);font-style:italic;text-align:center}
 </style>
 
 <div class="board">
-<h1>What does the model predict for a masked patch — and why band <u>power</u>, not the band <u>signal</u>?</h1>
+<h1>What to predict for a masked patch — and why band <u>power</u>, not the band <u>signal</u>?</h1>
 
-<!-- ===== compact pipeline (1–4, de-emphasised) → z ===== -->
-<div class="row" style="justify-content:center;margin-bottom:20px">
-  <div class="box"><div class="t">Raw EEG</div><canvas id="eeg" width="86" height="40"></canvas></div>
+<!-- ===== compact pipeline → z ===== -->
+<div class="row" style="justify-content:center;margin-bottom:18px">
+  <div class="box"><div class="t">Raw EEG</div><canvas id="eeg" width="82" height="38"></canvas></div>
   <div class="arrow">&rarr;</div>
-  <div class="box"><div class="t">Filterbank</div><canvas id="bells" width="74" height="40"></canvas>
+  <div class="box"><div class="t">Filterbank</div><canvas id="bells" width="70" height="38"></canvas>
      <div class="n">&delta;&theta;&alpha;&beta;&gamma;</div></div>
   <div class="arrow">&rarr;</div>
-  <div class="box"><div class="t">Mask time</div><canvas id="grid" width="80" height="44"></canvas></div>
+  <div class="box"><div class="t">Mask time</div><canvas id="grid" width="78" height="42"></canvas></div>
   <div class="arrow">&rarr;</div>
   <div class="enc">Criss-cross<br>encoder<br><small>&times;12</small></div>
   <div class="arrow big">&rarr;</div>
-  <div class="zwrap">
-    <div class="zed">encoding of the<br>masked patch<br><small>z (what we predict from)</small></div>
-    <div class="cap">two ways to define the target:</div>
-  </div>
+  <div class="zwrap"><div class="zed">encoding of the<br>masked patch</div>
+    <div class="cap">two ways to define its target:</div></div>
 </div>
 
-<!-- ===== the branch: two possible targets ===== -->
-<div class="row" style="justify-content:center">
-  <div class="split">
+<div class="row" style="justify-content:center;align-items:flex-start;gap:26px">
 
-    <!-- OURS -->
-    <div class="branch ours">
-      <div class="h"><span class="tag ours">OURS</span> Predict masked patch's band <u>power</u> &mdash; from context</div>
-      <div class="brow">
-        <canvas id="bars" width="150" height="78"></canvas>
-        <div>
-          <div class="cost"><b>5 numbers</b> / patch &middot; <b>inferred from context</b><br>(patch is hidden &rarr; infer from other time &amp; channels)</div>
-          <div class="cost" style="margin-top:4px">target = <b>fixed filterbank</b> power (frozen)</div>
-          <div class="cost" style="margin-top:4px;color:var(--good)">many waveforms &rarr; <b>this same summary</b>: we keep the invariant</div>
-        </div>
-      </div>
-      <div class="verdict good">&#10003; To fill in a <b>hidden</b> patch's band power the encoder must represent the
-        <b>spectral state</b> of the recording (delta-dominated? spindle-rich?) &mdash; exactly what sleep /
-        clinical labels are. Phase &amp; fine shape (the part that differs between same-power waveforms) is
-        task-irrelevant and discarded. A <b>cloze task on band power</b>: learn the spectral meaning, not the waveform.</div>
+  <!-- ===== OURS ===== -->
+  <div class="branch ours">
+    <div class="h"><span class="tag ours">OURS</span> Predict band power &mdash; from context</div>
+    <div class="brow">
+      <div class="viz"><canvas id="ctx" width="150" height="66"></canvas>
+        <div class="vlab">infer the <b>hidden</b> patch's power<br>from its neighbours (context)</div></div>
+      <div class="arrow">&rarr;</div>
+      <div class="viz"><canvas id="bars" width="120" height="66"></canvas>
+        <div class="vlab"><span style="color:var(--acc)">&#9632;</span> pred &nbsp;<span>&#9633;</span> fixed target</div></div>
     </div>
-
-    <!-- NAIVE -->
-    <div class="branch naive">
-      <div class="h"><span class="tag naive">ALTERNATIVE</span> Reconstruct the band <u>signal</u></div>
-      <div class="brow">
-        <canvas id="waves" width="150" height="78"></canvas>
-        <div>
-          <div class="cost"><b>~1280&times;5 samples</b> / patch<br>(every point of every band)</div>
-          <div class="cost" style="margin-top:4px">target = full band-domain<br>waveforms</div>
-        </div>
-      </div>
-      <div class="verdict bad">&#10007; This is <b>reconstruction</b>: to match the waveform the model must fit
-        <b>phase, fine spectral shape, and noise</b> &mdash; most of which is task-irrelevant. Capacity is spent
-        modelling noise (the failure mode of raw-signal reconstruction, e.g., CBraMod).</div>
+    <div class="brow" style="gap:8px">
+      <canvas id="many" width="170" height="46"></canvas>
+      <div class="vlab" style="text-align:left">many waveforms<br>&rarr; the <b>same</b> power</div>
     </div>
-
+    <div class="take good">&rArr; the encoder must learn the <b>spectral state</b> (= the label), not the waveform</div>
   </div>
+
+  <!-- ===== NAIVE ===== -->
+  <div class="branch naive">
+    <div class="h"><span class="tag naive">ALTERNATIVE</span> Reconstruct the band signal</div>
+    <div class="brow">
+      <div class="viz"><canvas id="ctx2" width="150" height="66"></canvas>
+        <div class="vlab">infer the <b>hidden</b> patch's<br>waveform from context</div></div>
+      <div class="arrow">&rarr;</div>
+      <div class="viz"><canvas id="waves" width="120" height="66"></canvas>
+        <div class="vlab">every sample of every band</div></div>
+    </div>
+    <div class="brow" style="gap:8px">
+      <canvas id="one2many" width="170" height="46"></canvas>
+      <div class="vlab" style="text-align:left">one power &rarr; <b>many</b> waveforms:<br>must pick phase &amp; noise</div>
+    </div>
+    <div class="take bad">&rArr; reconstruction: capacity spent fitting phase &amp; noise (CBraMod's failure)</div>
+  </div>
+
 </div>
 
-<!-- ===== downstream use ===== -->
+<!-- ===== downstream ===== -->
 <div class="down">
-  Band-power prediction is only the <b>pretext task</b>. After pretraining we <b>discard the prediction head</b>
-  and keep the <b>encoder</b> &mdash; that encoder is the foundation model that transfers to downstream tasks
-  (sleep staging, depression, mental workload). We never reconstruct anything at inference.
+  Band-power prediction is only the <b>pretext task</b>: after pretraining we <b>discard the head</b> and keep the
+  <b>encoder</b> &mdash; the foundation model that transfers to sleep&nbsp;/&nbsp;depression&nbsp;/&nbsp;workload.
+  Nothing is reconstructed at inference.
 </div>
-
 </div>
 
 <script>
 const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 function noise(s){return()=>{s=(s*9301+49297)%233280;return s/233280;};}
+const COLS=['--delta','--theta','--alpha','--beta','--gamma'];
 
 function drawEEG(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height,r=noise(7);
   for(let ch=0;ch<3;ch++){const y0=6+(H-12)*(ch+0.5)/3;x.beginPath();x.lineWidth=1;x.strokeStyle=css('--ink');
     for(let p=0;p<=W;p+=2){const t=p/W;let yy=y0+Math.sin(t*Math.PI*2*(3+ch*3))*3+(r()-0.5)*2.5;p===0?x.moveTo(p,yy):x.lineTo(p,yy);}x.stroke();}}
-
 function drawBells(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
-  const cols=['--delta','--theta','--alpha','--beta','--gamma'],ctr=[.12,.3,.47,.66,.87],w=.1;
-  cols.forEach((col,i)=>{x.strokeStyle=css(col);x.lineWidth=1.3;x.beginPath();
-    for(let p=0;p<=W;p++){const t=p/W,y=(H-4)-(H-8)*Math.exp(-((t-ctr[i])**2)/(2*w*w));p===0?x.moveTo(p,y):x.lineTo(p,y);}x.stroke();});
-  x.strokeStyle=css('--line');x.beginPath();x.moveTo(0,H-3);x.lineTo(W,H-3);x.stroke();}
-
+  const ctr=[.12,.3,.47,.66,.87],w=.1;COLS.forEach((col,i)=>{x.strokeStyle=css(col);x.lineWidth=1.3;x.beginPath();
+    for(let p=0;p<=W;p++){const t=p/W,y=(H-4)-(H-8)*Math.exp(-((t-ctr[i])**2)/(2*w*w));p===0?x.moveTo(p,y):x.lineTo(p,y);}x.stroke();});}
 function drawGrid(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
-  const cols=['--delta','--theta','--alpha','--beta','--gamma'],nB=5,nT=4,cw=(W-2)/nT,rh=(H-2)/nB,mask=[1,3];
+  const nB=5,nT=4,cw=(W-2)/nT,rh=(H-2)/nB,mask=[1,3];
   for(let b=0;b<nB;b++)for(let t=0;t<nT;t++){const xx=1+t*cw,yy=1+b*rh;
-    if(mask.includes(t)){x.fillStyle='#eef1f4';x.fillRect(xx,yy,cw-1.5,rh-1.5);
-      x.strokeStyle=css('--gray');x.setLineDash([2,2]);x.strokeRect(xx+.5,yy+.5,cw-2.5,rh-2.5);x.setLineDash([]);
-      x.fillStyle=css('--faint');x.font='6px ui-monospace';x.fillText('M',xx+cw/2-2,yy+rh/2+2);}
-    else{x.fillStyle=css(cols[b]);x.globalAlpha=.8;x.fillRect(xx,yy,cw-1.5,rh-1.5);x.globalAlpha=1;}}}
+    if(mask.includes(t)){x.fillStyle='#eef1f4';x.fillRect(xx,yy,cw-1.5,rh-1.5);x.strokeStyle=css('--gray');
+      x.setLineDash([2,2]);x.strokeRect(xx+.5,yy+.5,cw-2.5,rh-2.5);x.setLineDash([]);}
+    else{x.fillStyle=css(COLS[b]);x.globalAlpha=.8;x.fillRect(xx,yy,cw-1.5,rh-1.5);x.globalAlpha=1;}}}
 
-// band-power bars: pred (solid teal) vs target (dashed, band colour)
+// context strip: 7 band-token columns, middle masked '?', context arrows from neighbours
+function drawCtx(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
+  const nT=7,cw=13,gap=4,x0=8,cy=H/2-4,mid=3;
+  for(let t=0;t<nT;t++){const xx=x0+t*(cw+gap);
+    if(t===mid){x.fillStyle='#fff';x.fillRect(xx,cy-15,cw,30);x.strokeStyle=css('--acc');x.lineWidth=1.4;
+      x.setLineDash([2,2]);x.strokeRect(xx+.5,cy-14.5,cw-1,29);x.setLineDash([]);
+      x.fillStyle=css('--acc');x.font='bold 13px system-ui';x.fillText('?',xx+cw/2-3.5,cy+4);}
+    else{for(let b=0;b<5;b++){x.fillStyle=css(COLS[b]);x.globalAlpha=.8;x.fillRect(xx,cy-15+b*6,cw,5.2);x.globalAlpha=1;}}}
+  const mx=x0+mid*(cw+gap)+cw/2;
+  [mid-1,mid+1].forEach(t=>{const sx=x0+t*(cw+gap)+cw/2;
+    x.strokeStyle=css('--acc');x.lineWidth=1.1;x.beginPath();
+    x.moveTo(sx,cy-19);x.quadraticCurveTo((sx+mx)/2,cy-27,mx,cy-17);x.stroke();
+    const ang=Math.atan2(-17-(-27),mx-(sx+mx)/2);x.beginPath();
+    x.moveTo(mx,cy-17);x.lineTo(mx-4*Math.cos(ang-0.5),cy-17-4*Math.sin(ang-0.5));
+    x.moveTo(mx,cy-17);x.lineTo(mx-4*Math.cos(ang+0.5),cy-17-4*Math.sin(ang+0.5));x.stroke();});
+  x.fillStyle=css('--faint');x.font='7px ui-monospace';x.fillText('time',x0,H-2);x.fillText('→',W-14,H-2);}
+
+// band-power bars: pred (solid) vs target (dashed)
 function drawBars(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
-  const cols=['--delta','--theta','--alpha','--beta','--gamma'],lab=['δ','θ','α','β','γ'];
-  const tgt=[.92,.62,.66,.5,.28],pred=[.85,.68,.6,.55,.32],base=H-14,slot=(W-6)/5;
+  const lab=['δ','θ','α','β','γ'],tgt=[.92,.62,.66,.5,.28],pred=[.85,.68,.6,.55,.32],base=H-13,slot=(W-6)/5;
   for(let i=0;i<5;i++){const cx=5+slot*(i+0.5),bw=8,g=3;
     x.fillStyle=css('--acc');x.fillRect(cx-bw-g/2,base-(base-6)*pred[i],bw,(base-6)*pred[i]);
-    x.strokeStyle=css(cols[i]);x.lineWidth=1.2;x.setLineDash([2,2]);
+    x.strokeStyle=css(COLS[i]);x.lineWidth=1.2;x.setLineDash([2,2]);
     x.strokeRect(cx+g/2+.5,base-(base-6)*tgt[i]+.5,bw-1,(base-6)*tgt[i]-1);x.setLineDash([]);
-    x.fillStyle=css(cols[i]);x.font='8px ui-monospace';x.fillText(lab[i],cx-3,base+11);}
-  x.strokeStyle=css('--line');x.beginPath();x.moveTo(3,base);x.lineTo(W-3,base);x.stroke();
-  x.fillStyle=css('--muted');x.save();x.translate(8,H/2-4);x.rotate(-Math.PI/2);x.font='7px ui-monospace';x.fillText('log-power',-14,0);x.restore();}
+    x.fillStyle=css(COLS[i]);x.font='8px ui-monospace';x.fillText(lab[i],cx-3,base+11);}
+  x.strokeStyle=css('--line');x.beginPath();x.moveTo(3,base);x.lineTo(W-3,base);x.stroke();}
 
-// band waveforms: target (solid) + pred (faint offset) for all 5 bands = must fit every wiggle
+// many waveforms -> same 5-bar power  (ours: many-to-one is fine)
+function drawMany(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
+  const f=[3,7,12];for(let i=0;i<3;i++){const y0=8+i*13;x.strokeStyle=css('--ink');x.globalAlpha=.65;x.lineWidth=.9;
+    x.beginPath();for(let p=0;p<=44;p+=2){const t=p/44,y=y0+Math.sin(t*Math.PI*2*f[i]+i)*4;p===0?x.moveTo(6+p,y):x.lineTo(6+p,y);}x.stroke();x.globalAlpha=1;}
+  x.strokeStyle=css('--faint');x.lineWidth=1;x.beginPath();x.moveTo(56,5);x.quadraticCurveTo(60,H/2,56,H-5);x.stroke();
+  x.fillStyle=css('--acc');x.font='15px system-ui';x.fillText('→',64,H/2+5);
+  const bx=86,tg=[.9,.6,.66,.5,.3];for(let b=0;b<5;b++){x.fillStyle=css(COLS[b]);x.globalAlpha=.9;
+    x.fillRect(bx+b*8,H-6-(H-16)*tg[b],6,(H-16)*tg[b]);x.globalAlpha=1;}
+  x.fillStyle=css('--good');x.font='bold 8px system-ui';x.fillText('same power',bx-4,H-1);}
+
+// one power -> many waveforms (naive: ambiguous, must pick)
+function drawOne2Many(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
+  const tg=[.9,.6,.66,.5,.3];for(let b=0;b<5;b++){x.fillStyle=css(COLS[b]);x.globalAlpha=.9;
+    x.fillRect(6+b*8,H-6-(H-16)*tg[b],6,(H-16)*tg[b]);x.globalAlpha=1;}
+  x.fillStyle=css('--muted');x.font='bold 8px system-ui';x.fillText('one power',4,H-1);
+  x.strokeStyle=css('--bad');x.font='15px system-ui';x.fillStyle=css('--bad');x.fillText('→',54,H/2+5);
+  const f=[3,7,12];for(let i=0;i<3;i++){const y0=8+i*13;x.strokeStyle=css('--bad');x.globalAlpha=.6;x.lineWidth=.9;
+    x.beginPath();for(let p=0;p<=44;p+=2){const t=p/44,y=y0+Math.sin(t*Math.PI*2*f[i]+i*2)*4;p===0?x.moveTo(74+p,y):x.lineTo(74+p,y);}x.stroke();x.globalAlpha=1;}
+  x.fillStyle=css('--bad');x.font='bold 8px system-ui';x.fillText('which one?',72,H-1);}
+
+// band waveforms target (reconstruction)
 function drawWaves(id){const c=document.getElementById(id),x=c.getContext('2d'),W=c.width,H=c.height;
-  const cols=['--delta','--theta','--alpha','--beta','--gamma'],f=[2,4,7,12,20],rh=H/5,r=noise(5),r2=noise(19);
-  for(let b=0;b<5;b++){const y0=rh*(b+0.5);
-    x.strokeStyle=css(cols[b]);x.lineWidth=1;x.beginPath();
+  const f=[2,4,7,12,20],rh=H/5,r=noise(5),r2=noise(19);
+  for(let b=0;b<5;b++){const y0=rh*(b+0.5);x.strokeStyle=css(COLS[b]);x.lineWidth=1;x.beginPath();
     for(let p=0;p<=W;p+=2){const t=p/W,y=y0+Math.sin(t*Math.PI*2*f[b])*rh*0.3*(0.7+0.3*r());p===0?x.moveTo(p,y):x.lineTo(p,y);}x.stroke();
-    x.strokeStyle=css('--gray');x.globalAlpha=.6;x.lineWidth=.8;x.beginPath();
-    for(let p=0;p<=W;p+=2){const t=p/W,y=y0+Math.sin(t*Math.PI*2*f[b]+0.6)*rh*0.3*(0.7+0.3*r2())+1.5;p===0?x.moveTo(p,y):x.lineTo(p,y);}x.stroke();x.globalAlpha=1;}
-  x.fillStyle=css('--faint');x.font='6px system-ui';}
+    x.strokeStyle=css('--gray');x.globalAlpha=.55;x.lineWidth=.8;x.beginPath();
+    for(let p=0;p<=W;p+=2){const t=p/W,y=y0+Math.sin(t*Math.PI*2*f[b]+0.6)*rh*0.3*(0.7+0.3*r2())+1.4;p===0?x.moveTo(p,y):x.lineTo(p,y);}x.stroke();x.globalAlpha=1;}}
 
-drawEEG('eeg');drawBells('bells');drawGrid('grid');drawBars('bars');drawWaves('waves');
+drawEEG('eeg');drawBells('bells');drawGrid('grid');
+drawCtx('ctx');drawCtx('ctx2');drawBars('bars');drawMany('many');drawOne2Many('one2many');drawWaves('waves');
 </script>
