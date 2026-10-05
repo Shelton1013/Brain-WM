@@ -173,8 +173,46 @@ def load_schizophrenia(args):
     return X_tr, y_tr, X_te, y_te, meta
 
 
+def load_mumtaz_cbramod(args):
+    """Mumtaz on the CBraMod/CSBrain split (as eval_mumtaz --split_mode cbramod)."""
+    from dataset_mumtaz import MumtazDataset, make_cbramod_split
+    splits = make_cbramod_split(args.data_dir)
+
+    def _ds(subjects):
+        return MumtazDataset(
+            data_dir=args.data_dir, subjects=subjects,
+            sample_rate=args.sample_rate, trial_duration_s=args.trial_duration_s,
+            normalization=args.normalization, cache_dir=args.cache_dir,
+            bandpass=args.bandpass)
+
+    X_tr, y_tr = dataset_to_xy(_ds(splits["train"]))
+    X_te, y_te = dataset_to_xy(_ds(splits["test"]))
+    meta = {"split": {k: {g: list(v) for g, v in d.items()}
+                      for k, d in splits.items()}}
+    return X_tr, y_tr, X_te, y_te, meta
+
+
+def load_mental_arith(args):
+    """Mental Arithmetic on the CSBrain split (as eval_mental_arithmetic)."""
+    from dataset_mental_arithmetic import MentalArithmeticDataset, make_csbrain_split
+    splits = make_csbrain_split(args.data_dir)
+
+    def _ds(subjects):
+        return MentalArithmeticDataset(
+            data_dir=args.data_dir, subjects=subjects,
+            sample_rate=args.sample_rate, trial_duration_s=args.trial_duration_s,
+            normalization=args.normalization, cache_dir=args.cache_dir)
+
+    X_tr, y_tr = dataset_to_xy(_ds(splits["train"]))
+    X_te, y_te = dataset_to_xy(_ds(splits["test"]))
+    meta = {"split": {k: list(v) for k, v in splits.items()}}
+    return X_tr, y_tr, X_te, y_te, meta
+
+
 LOADERS = {"mumtaz": load_mumtaz, "siena": load_siena,
-           "schizophrenia": load_schizophrenia}
+           "schizophrenia": load_schizophrenia,
+           "mumtaz_cbramod": load_mumtaz_cbramod,
+           "mental_arith": load_mental_arith}
 
 
 def main():
@@ -189,6 +227,8 @@ def main():
     p.add_argument("--negative_per_positive", type=float, default=0.0,
                    help="Siena only; 0 = keep all interictal (match eval_siena).")
     p.add_argument("--frozen_reps", type=int, default=5)
+    p.add_argument("--bandpass", type=float, nargs=2, default=None,
+                   help="mumtaz_cbramod only: band-pass the raw EDFs")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--output", default=None)
     args = p.parse_args()

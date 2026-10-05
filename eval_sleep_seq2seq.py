@@ -83,17 +83,23 @@ class SeqHead(nn.Module):
         return self.cls(self.norm(h))  # [B, seq, n_classes]
 
 
+WIN = 2560   # the 10-s pretraining window at 256 Hz
+
+
 def _encode_epochs(model, x_seq):
-    """x_seq: [B, seq, T, C] → per-epoch pooled features [B, seq, d]."""
+    """x_seq: [B, seq, T, C] → per-epoch pooled features [B, seq, d].
+    A 30-s epoch (T = 3 x 2560) is encoded as three 10-s windows whose pooled
+    features are averaged; a 10-s epoch is one window (unchanged behaviour)."""
     B, S, T, C = x_seq.shape
-    flat = x_seq.reshape(B * S, T, C)
-    feats = model._encode(model._tokenize(flat)).mean(1)   # [B*S, d]
-    return feats.reshape(B, S, -1)
+    nw = T // WIN if T % WIN == 0 else 1
+    flat = x_seq.reshape(B * S * nw, T // nw, C)
+    feats = model._encode(model._tokenize(flat)).mean(1)   # [B*S*nw, d]
+    return feats.reshape(B, S, nw, -1).mean(2)
 
 
 def run_finetune_seq(base_model, Xtr, ytr, Xva, yva, Xte, yte, n_classes,
                      device, max_epochs=50, batch_size=16, freeze_encoder=False,
-                     lp_ft_warmup=0, encoder_lr_mult=1.0):
+                     lp_ft_warmup=0, encoder_lr_mult=1.0, micro_batch=0):
     """Full-FT (or LP-FT). lp_ft_warmup>0: freeze encoder for the first K epochs
     (linear-probe the head), then unfreeze with encoder LR = base_lr *
     encoder_lr_mult. This tests whether the frozen-good / FT-worse reversal is
@@ -148,14 +154,23 @@ def run_finetune_seq(base_model, Xtr, ytr, Xva, yva, Xte, yte, n_classes,
         t0 = time.time()
         for si, (bx, by) in enumerate(tr):
             bx = bx.to(device, non_blocking=True); by = by.to(device, non_blocking=True)
-            if enc_frozen:
-                with torch.no_grad():
-                    feats = _encode_epochs(model, bx)
-                logits = head(feats)
-            else:
-                logits = head(_encode_epochs(model, bx))      # [B,seq,C]
-            loss = crit(logits.reshape(-1, n_classes), by.reshape(-1))
-            opt.zero_grad(); loss.backward()
+            # micro_batch: split the batch, accumulate gradients, step once —
+            # same batch / steps / schedule, ~B/micro_batch less activation memory
+            # (needed for 30-s epochs: 3 windows each)
+            mb = micro_batch if 0 < micro_batch < bx.shape[0] else bx.shape[0]
+            opt.zero_grad()
+            loss = 0.0
+            for i in range(0, bx.shape[0], mb):
+                mx, my = bx[i:i + mb], by[i:i + mb]
+                if enc_frozen:
+                    with torch.no_grad():
+                        feats = _encode_epochs(model, mx)
+                    logits = head(feats)
+                else:
+                    logits = head(_encode_epochs(model, mx))  # [b,seq,C]
+                part = crit(logits.reshape(-1, n_classes), my.reshape(-1)) * (mx.shape[0] / bx.shape[0])
+                part.backward()
+                loss = loss + part.detach()
             torch.nn.utils.clip_grad_norm_(trainable, 1.0)
             opt.step(); sched.step()
             if ep == 0 and (si == 0 or (si + 1) % 10 == 0):
@@ -279,6 +294,8 @@ def main():
     p.add_argument("--max_epochs", type=int, default=50)
     p.add_argument("--batch_size", type=int, default=16)
     p.add_argument("--n_reps", type=int, default=3)
+    p.add_argument("--rep_start", type=int, default=0,
+                   help="first rep index (seed 42+rep): lets reps run as parallel jobs")
     p.add_argument("--include_random_baseline", action="store_true")
     p.add_argument("--random_only", action="store_true",
                    help="skip the pretrained model entirely; run ONLY the "
@@ -292,6 +309,9 @@ def main():
     p.add_argument("--lp_ft_warmup", type=int, default=0,
                    help="LP-FT: freeze encoder for the first K epochs (linear-"
                         "probe the head), then unfreeze. 0 = plain full-FT.")
+    p.add_argument("--micro_batch", type=int, default=0,
+                   help="split each training batch into chunks of this many sequences "
+                        "and accumulate gradients (same effective batch); 0 = off")
     p.add_argument("--encoder_lr_mult", type=float, default=1.0,
                    help="encoder LR = base_lr * this (head keeps base_lr). "
                         "Use <1 (e.g. 0.1) with --lp_ft_warmup for gentle FT.")
@@ -304,27 +324,53 @@ def main():
 
     # Build per-epoch datasets for the 3 splits, then group into sequences.
     dsk = dict(sample_rate=args.sample_rate, trial_duration_s=args.trial_duration_s,
-               normalization=args.normalization, cache_dir=args.cache_dir)
+               normalization=args.normalization,
+               # 30-s epochs would write ~40 GB per-epoch caches: read the EDFs and
+               # cache the finished SEQUENCES instead (seq_cache below)
+               cache_dir=args.cache_dir if args.trial_duration_s <= 10 else None)
     if args.dataset == "isruc":
         from dataset_isruc import ISRUCDataset, CBRAMOD_ISRUC_SPLITS as SP, N_CLASSES
         mk = lambda subs: ISRUCDataset(data_dir=args.data_dir, subjects=subs, **dsk)
-        tr_ds, va_ds, te_ds = mk(SP["train"]), mk(SP["val"]), mk(SP["test"])
         ref = "CBraMod 0.7865 / CSBrain 0.7925 (BA)"
     else:
         from dataset_hmc import HMCDataset, make_hmc_split, N_CLASSES
         SP = make_hmc_split(args.data_dir)
         mk = lambda subs: HMCDataset(args.data_dir, subs, **dsk)
-        tr_ds, va_ds, te_ds = mk(SP["train"]), mk(SP["val"]), mk(SP["test"])
         ref = "CSBrain 0.7345 (BA)"
 
     print(f"\n{'='*72}\n  {args.dataset.upper()} seq2seq sleep staging (seq_len={SEQ_LEN})\n{'='*72}")
     print(f"  Reference: {ref}")
     model, model_cls, mtype, n_ch, ckpt_args = load_pretrained(args.checkpoint, device)
 
+    # >10-s epochs: reading the EDFs + building sequences takes ~3 h, so the
+    # finished sequence arrays are cached once and memory-mapped afterwards.
+    # Written to a private temp dir and renamed into place (atomic), so
+    # concurrent jobs never see a partial cache.
+    seq_cache = (Path(args.cache_dir) / f"seq{args.trial_duration_s}s_{args.dataset}_"
+                 f"{args.sample_rate}hz_{args.normalization}"
+                 if args.trial_duration_s > 10 and args.cache_dir else None)
     t0 = time.time()
-    Xtr, ytr = build_sequences(tr_ds)
-    Xva, yva = build_sequences(va_ds)
-    Xte, yte = build_sequences(te_ds)
+    if seq_cache is not None and (seq_cache / "done").exists():
+        ld = lambda n: np.load(seq_cache / f"{n}.npy", mmap_mode="r")
+        Xtr, ytr, Xva, yva, Xte, yte = (ld(n) for n in ("Xtr", "ytr", "Xva", "yva", "Xte", "yte"))
+        print(f"  ↻ sequence cache: {seq_cache}")
+    else:
+        Xtr, ytr = build_sequences(mk(SP["train"]))
+        Xva, yva = build_sequences(mk(SP["val"]))
+        Xte, yte = build_sequences(mk(SP["test"]))
+        if seq_cache is not None and not seq_cache.exists():
+            import os, shutil
+            tmp = seq_cache.with_name(seq_cache.name + f".tmp{os.getpid()}")
+            tmp.mkdir(parents=True, exist_ok=True)
+            for n, a in (("Xtr", Xtr), ("ytr", ytr), ("Xva", Xva), ("yva", yva),
+                         ("Xte", Xte), ("yte", yte)):
+                np.save(tmp / f"{n}.npy", a)
+            (tmp / "done").touch()
+            try:
+                tmp.rename(seq_cache)
+                print(f"  ↑ saved sequence cache: {seq_cache}")
+            except OSError:                       # another job finished first
+                shutil.rmtree(tmp, ignore_errors=True)
     print(f"Sequences: train {Xtr.shape}, val {Xva.shape}, test {Xte.shape} "
           f"({(time.time()-t0)/60:.1f} min)")
 
@@ -371,7 +417,7 @@ def main():
         print(f"\n  JEPA seq2seq {'FROZEN-probe' if args.freeze_encoder else 'FT'} "
               f"({args.n_reps} reps × {args.max_epochs} ep)")
         jr = []
-        for rep in range(args.n_reps):
+        for rep in range(args.rep_start, args.rep_start + args.n_reps):
             torch.manual_seed(42 + rep); np.random.seed(42 + rep)
             print(f"  Rep {rep+1}/{args.n_reps}")
             if args.freeze_encoder:
@@ -382,7 +428,8 @@ def main():
                 m = run_finetune_seq(model, Xtr, ytr, Xva, yva, Xte, yte, N_CLASSES,
                                      device, args.max_epochs, args.batch_size,
                                      lp_ft_warmup=args.lp_ft_warmup,
-                                     encoder_lr_mult=args.encoder_lr_mult)
+                                     encoder_lr_mult=args.encoder_lr_mult,
+                                     micro_batch=args.micro_batch)
             print(f"    BA={m['balanced_accuracy']:.4f} κ={m['cohen_kappa']:.4f} "
                   f"wF1={m['weighted_f1']:.4f}")
             jr.append(m)
@@ -392,7 +439,7 @@ def main():
         print(f"\n  Random-init seq2seq {'FROZEN-probe' if args.freeze_encoder else 'FT'} "
               f"({args.n_reps} reps)")
         rr = []
-        for rep in range(args.n_reps):
+        for rep in range(args.rep_start, args.rep_start + args.n_reps):
             torch.manual_seed(42 + rep); np.random.seed(42 + rep)
             print(f"  Rep {rep+1}/{args.n_reps}")
             rm = build_random_init(model_cls, n_ch, ckpt_args, device)
@@ -407,7 +454,8 @@ def main():
                 m = run_finetune_seq(rm, Xtr, ytr, Xva, yva, Xte, yte, N_CLASSES,
                                      device, args.max_epochs, args.batch_size,
                                      lp_ft_warmup=args.lp_ft_warmup,
-                                     encoder_lr_mult=args.encoder_lr_mult)
+                                     encoder_lr_mult=args.encoder_lr_mult,
+                                     micro_batch=args.micro_batch)
             print(f"    BA={m['balanced_accuracy']:.4f} κ={m['cohen_kappa']:.4f} "
                   f"wF1={m['weighted_f1']:.4f}")
             rr.append(m)

@@ -299,6 +299,9 @@ def main():
                         "(test=14 subj, --seed only varies training). "
                         "counts: old seed-randomized subject split.")
     p.add_argument("--include_random_baseline", action="store_true")
+    p.add_argument("--bandpass", type=float, nargs=2, default=None,
+                   metavar=("LO", "HI"),
+                   help="band-pass the raw EDFs (e.g. 0.5 45 = pretraining band)")
     p.add_argument("--device", default="auto")
     p.add_argument("--output", default=None)
     p.add_argument("--seed", type=int, default=42)
@@ -345,6 +348,7 @@ def main():
         trial_duration_s=args.trial_duration_s,
         normalization=args.normalization,
         cache_dir=args.cache_dir,
+        bandpass=args.bandpass,
     )
     val_ds = MumtazDataset(
         data_dir=args.mumtaz_dir,
@@ -353,6 +357,7 @@ def main():
         trial_duration_s=args.trial_duration_s,
         normalization=args.normalization,
         cache_dir=args.cache_dir,
+        bandpass=args.bandpass,
     )
     test_ds = MumtazDataset(
         data_dir=args.mumtaz_dir,
@@ -361,6 +366,7 @@ def main():
         trial_duration_s=args.trial_duration_s,
         normalization=args.normalization,
         cache_dir=args.cache_dir,
+        bandpass=args.bandpass,
     )
     print(f"Data loaded in {(time.time()-t0)/60:.1f} min")
 

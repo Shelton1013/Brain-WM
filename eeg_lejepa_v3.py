@@ -35,6 +35,41 @@ from regularizers import distribution_reg
 
 # Physiological band centres (Hz) used to initialise the filterbank.
 _BAND_CENTERS_HZ = [2.0, 6.0, 10.0, 21.0, 38.0]    # δ θ α β γ
+# Exact clinical band edges (Hz) for the FFT band-power target (ablation).
+_BAND_EDGES_HZ = [(0.5, 4.0), (4.0, 8.0), (8.0, 13.0), (13.0, 30.0), (30.0, 45.0)]
+
+# Pretext targets (ablation — isolates the prediction target on a fixed backbone):
+#   bandpower     : log band-power from the FIXED Hann filterbank (paper default)
+#   fft_bandpower : log band-power in exact δθαβγ bands via per-patch FFT
+#   raw_recon     : reconstruct the raw masked waveform (CBraMod-style MAE)
+#   band_recon    : reconstruct the fixed-filterbank band WAVEFORMS of the patch
+TARGET_TYPES = ("bandpower", "fft_bandpower", "raw_recon", "band_recon")
+
+
+def v3_kwargs_from_args(a: dict) -> dict:
+    """Constructor kwargs for EEGLeJEPA_v3 from a checkpoint's saved args.
+    Single source of truth for train/eval loaders (new ablation flags default
+    to the paper model, so old checkpoints load unchanged)."""
+    return dict(
+        d_model=a.get("d_model", 512),
+        encoder_layers=a.get("encoder_layers", 12), n_heads=8,
+        patch_len=a.get("patch_len", 200),
+        max_time_patches=a.get("max_time_patches", 64),
+        max_channels=a.get("max_channels", 32),
+        n_bands=a.get("n_bands", 5),
+        d_band=a.get("cf_d_band", 64),
+        filt_kernel=a.get("filt_kernel", 65),
+        sample_rate=256,
+        band_mask_ratio=a.get("band_mask_ratio", 0.30),
+        jepa_weight=a.get("jepa_weight", 0.3),
+        cf_weight=a.get("cf_weight", 1.0),
+        sigreg_lambda=a.get("sigreg_lambda", 0.05),
+        reg_type=a.get("reg_type", "sigreg"),
+        mask_axis=a.get("mask_axis", "frequency"),
+        target_type=a.get("target_type", "bandpower"),
+        patch_local_filter=bool(a.get("patch_local_filter", False)),
+        tokenizer_type=a.get("tokenizer_type", "filterbank"),
+    )
 
 
 class FilterbankTokenizer(nn.Module):
@@ -49,9 +84,13 @@ class FilterbankTokenizer(nn.Module):
 
     def __init__(self, patch_len: int, d_model: int, n_bands: int = 5,
                  d_band: int = 64, filt_kernel: int = 65, sample_rate: int = 256,
-                 learnable_target: bool = False):
+                 learnable_target: bool = False, patch_local: bool = False):
         super().__init__()
         self.patch_len = patch_len
+        # ablation (leakage control): filter each patch in isolation (zero-pad
+        # at patch edges) so a masked patch's samples cannot reach the band
+        # signals of its visible neighbours through the 65-tap kernel.
+        self.patch_local = patch_local
         self.n_bands = n_bands
         self.d_band = d_band
         # LEARNABLE bank — used only for the encoder INPUT (tokenization).
@@ -84,6 +123,17 @@ class FilterbankTokenizer(nn.Module):
                 kernel = kernel / (kernel.norm() + 1e-6)
                 weight[b, 0].copy_(kernel)
 
+    def _filter(self, x: torch.Tensor, weight: torch.Tensor, B: int, C: int,
+                Tp: int) -> torch.Tensor:
+        """x [B*C,1,T_use] -> band signals [B,C,N,Tp,P] (full-signal or per-patch)."""
+        P, N = self.patch_len, self.n_bands
+        if self.patch_local:
+            xp = x.reshape(B * C * Tp, 1, P)
+            y = F.conv1d(xp, weight, padding=weight.shape[-1] // 2)   # [BCTp,N,P]
+            return y.reshape(B, C, Tp, N, P).permute(0, 1, 3, 2, 4)
+        y = F.conv1d(x, weight, padding=weight.shape[-1] // 2)
+        return y.reshape(B, C, N, Tp, P)
+
     def forward(self, eeg: torch.Tensor):
         B, T, C = eeg.shape
         Tp = T // self.patch_len
@@ -91,7 +141,7 @@ class FilterbankTokenizer(nn.Module):
         x = eeg[:, :T_use, :].permute(0, 2, 1).reshape(B * C, 1, T_use)  # [B*C,1,T]
 
         # ── INPUT: learnable bank ──
-        bands = self.filters(x).reshape(B, C, self.n_bands, Tp, self.patch_len)
+        bands = self._filter(x, self.filters.weight, B, C, Tp)
 
         # ── CF TARGET ──
         if self.learnable_target:
@@ -102,8 +152,7 @@ class FilterbankTokenizer(nn.Module):
         else:
             # DEFAULT: fixed bank, no grad -> stable, ungameable.
             with torch.no_grad():
-                tbands = F.conv1d(x, self.target_filters, padding=self.tgt_pad)
-                tbands = tbands.reshape(B, C, self.n_bands, Tp, self.patch_len)
+                tbands = self._filter(x, self.target_filters, B, C, Tp)
                 band_logpow = torch.log1p((tbands ** 2).mean(dim=-1)) \
                     .permute(0, 1, 3, 2).contiguous()
 
@@ -112,10 +161,50 @@ class FilterbankTokenizer(nn.Module):
         token = self._combine(band_emb)                        # [B,C,Tp,D]
         return band_emb, band_logpow, token
 
+    @torch.no_grad()
+    def fixed_band_signals(self, eeg: torch.Tensor) -> torch.Tensor:
+        """Fixed-filterbank band waveforms per patch: [B,C,Tp,N,P]."""
+        B, T, C = eeg.shape
+        Tp = T // self.patch_len
+        x = eeg[:, :Tp * self.patch_len, :].permute(0, 2, 1).reshape(B * C, 1, -1)
+        return self._filter(x, self.target_filters, B, C, Tp).permute(0, 1, 3, 2, 4)
+
     def _combine(self, band_emb: torch.Tensor) -> torch.Tensor:
         B, C, Tp, N, d = band_emb.shape
         tok = self.combine(band_emb.reshape(B, C, Tp, N * d))
         return self.norm(tok)
+
+
+class LinearPatchTokenizer(FilterbankTokenizer):
+    """Ablation: plain CBraMod-style linear patch embedding — NO spectral bias
+    at the input. The raw patch is projected straight to N*d_band features
+    (split into N chunks so masking / _combine / the encoder are unchanged).
+    The fixed reference filterbank is kept ONLY to compute the band-power
+    target, which never depends on the input tokenizer."""
+
+    def __init__(self, patch_len: int, d_model: int, n_bands: int = 5,
+                 d_band: int = 64, filt_kernel: int = 65, sample_rate: int = 256,
+                 patch_local: bool = False, **_):
+        super().__init__(patch_len, d_model, n_bands, d_band, filt_kernel,
+                         sample_rate, learnable_target=False, patch_local=patch_local)
+        del self.filters, self.band_proj            # no learnable filterbank
+        self.patch_proj = nn.Linear(patch_len, n_bands * d_band)
+
+    def forward(self, eeg: torch.Tensor):
+        B, T, C = eeg.shape
+        P, N = self.patch_len, self.n_bands
+        Tp = T // P
+        x = eeg[:, :Tp * P, :].permute(0, 2, 1).reshape(B * C, 1, Tp * P)
+        with torch.no_grad():
+            tbands = self._filter(x, self.target_filters, B, C, Tp)
+            band_logpow = torch.log1p((tbands ** 2).mean(dim=-1)) \
+                .permute(0, 1, 3, 2).contiguous()
+        band_emb = self.patch_proj(x.reshape(B, C, Tp, P)) \
+            .reshape(B, C, Tp, N, self.d_band)
+        return band_emb, band_logpow, self._combine(band_emb)
+
+
+TOKENIZERS = {"filterbank": FilterbankTokenizer, "linear": LinearPatchTokenizer}
 
 
 class EEGLeJEPA_v3(nn.Module):
@@ -142,6 +231,9 @@ class EEGLeJEPA_v3(nn.Module):
                                              # time-patches, cross-time). Only the
                                              # MASK AXIS differs — isolates the
                                              # frequency-vs-time-masking claim.
+        target_type: str = "bandpower",      # ablation: pretext target (TARGET_TYPES)
+        patch_local_filter: bool = False,    # ablation: per-patch filtering (no leak)
+        tokenizer_type: str = "filterbank",  # ablation: "linear" = no spectral input bias
         **_ignored,          # tolerate extra ckpt args
     ):
         super().__init__()
@@ -152,14 +244,20 @@ class EEGLeJEPA_v3(nn.Module):
         self.band_mask_ratio = band_mask_ratio
         assert mask_axis in ("frequency", "time")
         self.mask_axis = mask_axis
+        assert target_type in TARGET_TYPES, target_type
+        if target_type in ("raw_recon", "band_recon"):
+            assert mask_axis == "time", "waveform targets need whole-patch masking"
+        self.target_type = target_type
+        self.sample_rate = sample_rate
         self.jepa_weight = jepa_weight
         self.cf_weight = cf_weight
         self.sigreg_lambda = sigreg_lambda
         self.reg_type = reg_type
 
-        self.tokenizer = FilterbankTokenizer(
+        assert tokenizer_type in TOKENIZERS, tokenizer_type
+        self.tokenizer = TOKENIZERS[tokenizer_type](
             patch_len, d_model, n_bands, d_band, filt_kernel, sample_rate,
-            learnable_target=cf_learnable_target)
+            learnable_target=cf_learnable_target, patch_local=patch_local_filter)
 
         self.pos_time = nn.Parameter(torch.zeros(1, 1, max_time_patches, d_model))
         self.pos_channel = nn.Parameter(torch.zeros(1, max_channels, 1, d_model))
@@ -178,6 +276,12 @@ class EEGLeJEPA_v3(nn.Module):
         self.jepa_predictor = nn.Sequential(
             nn.Linear(d_model, d_model), nn.GELU(), nn.Linear(d_model, d_model))
         self.cf_head = nn.Linear(d_model, n_bands)   # predict per-band log-power
+        # waveform-reconstruction heads exist only for those ablations, so the
+        # paper model's state_dict is unchanged
+        if target_type == "raw_recon":
+            self.recon_head = nn.Linear(d_model, patch_len)
+        elif target_type == "band_recon":
+            self.recon_head = nn.Linear(d_model, n_bands * patch_len)
 
         self._cached_enc_4d = None
 
@@ -222,12 +326,28 @@ class EEGLeJEPA_v3(nn.Module):
         tok_ctx = self.tokenizer._combine(band_ctx)         # [B,C,Tp,D]
         enc_ctx = self._encode_4d(self._add_pos(tok_ctx))    # [B,C,Tp,D]
 
-        # ─ Cross-frequency spectral prediction (primary) ─
-        cf_pred = self.cf_head(enc_ctx)                      # [B,C,Tp,N]
-        if bmask.any():
-            loss_cf = F.mse_loss(cf_pred[bmask], band_logpow[bmask])
+        # ─ Pretext loss on masked positions (primary) ─
+        if self.target_type in ("bandpower", "fft_bandpower"):
+            if self.target_type == "fft_bandpower":
+                band_logpow = self._fft_band_logpow(eeg)[:, :C, :Tp]
+            cf_pred = self.cf_head(enc_ctx)                  # [B,C,Tp,N]
+            if bmask.any():
+                loss_cf = F.mse_loss(cf_pred[bmask], band_logpow[bmask])
+            else:
+                loss_cf = enc_ctx.sum() * 0.0
         else:
-            loss_cf = enc_ctx.sum() * 0.0
+            tmask = bmask[..., 0]                            # [B,C,Tp] whole patches
+            P = self.patch_len
+            if self.target_type == "raw_recon":
+                tgt = eeg[:, :Tp * P, :C].permute(0, 2, 1).reshape(B, C, Tp, P)
+            else:
+                tgt = self.tokenizer.fixed_band_signals(eeg)[:, :C, :Tp] \
+                    .reshape(B, C, Tp, N * P)
+            pred = self.recon_head(enc_ctx)
+            if tmask.any():
+                loss_cf = F.mse_loss(pred[tmask], tgt[tmask])
+            else:
+                loss_cf = enc_ctx.sum() * 0.0
 
         # ─ Cross-band JEPA (dense latent consistency) ─
         with torch.no_grad():
@@ -249,6 +369,23 @@ class EEGLeJEPA_v3(nn.Module):
             "mae": torch.tensor(0.0, device=eeg.device),
             "pajr": torch.tensor(0.0, device=eeg.device),
         }
+
+    @torch.no_grad()
+    def _fft_band_logpow(self, eeg: torch.Tensor) -> torch.Tensor:
+        """log(1+band variance) in exact δθαβγ bands via per-patch FFT:
+        [B,C,Tp,N]. Patch-local by construction (no cross-patch leakage)."""
+        B, T, C = eeg.shape
+        P = self.patch_len
+        Tp = T // P
+        xp = eeg[:, :Tp * P, :].permute(0, 2, 1).reshape(B, C, Tp, P).float()
+        spec = torch.fft.rfft(xp, dim=-1).abs() ** 2          # [B,C,Tp,P//2+1]
+        freqs = torch.fft.rfftfreq(P, d=1.0 / self.sample_rate).to(eeg.device)
+        out = []
+        for lo, hi in _BAND_EDGES_HZ[: self.n_bands]:
+            sel = (freqs >= lo) & (freqs < hi)
+            # one-sided Parseval: band variance = 2 * sum|X_k|^2 / P^2
+            out.append(2.0 * spec[..., sel].sum(-1) / (P * P))
+        return torch.log1p(torch.stack(out, dim=-1))
 
     # ── downstream interface (matches v2) ───────────────────────────
     def _tokenize(self, eeg: torch.Tensor) -> torch.Tensor:

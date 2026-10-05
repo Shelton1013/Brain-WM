@@ -228,6 +228,18 @@ def main():
                         help="ablation: use the LEARNABLE filterbank as the CF "
                              "target (collapse-prone; demonstrates why a fixed "
                              "target is needed)")
+    parser.add_argument("--target_type", type=str, default="bandpower",
+                        choices=["bandpower", "fft_bandpower", "raw_recon",
+                                 "band_recon"],
+                        help="v3 ablation: pretext target on the SAME backbone "
+                             "(bandpower = paper model)")
+    parser.add_argument("--tokenizer_type", type=str, default="filterbank",
+                        choices=["filterbank", "linear"],
+                        help="v3 ablation: linear = plain patch embedding (no "
+                             "spectral input bias); target is unaffected")
+    parser.add_argument("--patch_local_filter", action="store_true",
+                        help="v3 ablation: filter each patch in isolation "
+                             "(no cross-patch leakage through the conv kernel)")
     parser.add_argument("--reg_type", type=str, default="sigreg",
                         choices=["sigreg", "vicreg"],
                         help="sigreg is SAFE (v1 confirmed); vicreg DESTROYS features")
@@ -237,6 +249,9 @@ def main():
 
     # Training
     parser.add_argument("--epochs", type=int, default=15)
+    parser.add_argument("--stop_after_epoch", type=int, default=0,
+                        help="if >0, exit after this epoch while keeping the LR "
+                             "schedule of --epochs (matched-step ablations)")
     parser.add_argument("--batch_size", type=int, default=4,
                         help="per-GPU batch. 24M @ d_model 512 uses ~15-20GB")
     parser.add_argument("--lr", type=float, default=3e-4)
@@ -244,7 +259,12 @@ def main():
     parser.add_argument("--warmup_epochs", type=int, default=1)
     parser.add_argument("--grad_clip", type=float, default=3.0)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--subset_seed", type=int, default=None,
+                        help="seed for the --pretrain_n_subjects draw (default: --seed). Fix it to replicate pretraining over init/data order on the SAME subset.")
     parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--resume_from", type=str, default="",
+                        help="checkpoint to continue from, or 'auto' = latest "
+                             "checkpoint_ep*.pt in --output_dir (none -> fresh start)")
 
     # Data-loading options (from train_jepa)
     parser.add_argument("--normalization", type=str, default="per_recording_robust",
@@ -319,7 +339,8 @@ def main():
         all_sids = sorted({int(s) for d in subs
                            for s in getattr(d, "subject_ids", [])})
         n_keep = min(args.pretrain_n_subjects, len(all_sids))
-        rng = np.random.RandomState(args.seed)
+        rng = np.random.RandomState(
+            args.seed if args.subset_seed is None else args.subset_seed)
         keep = sorted(int(x) for x in
                       rng.choice(np.asarray(all_sids), size=n_keep, replace=False))
         remap = {old: new for new, old in enumerate(keep)}   # → [0, n_keep)
@@ -391,6 +412,9 @@ def main():
             sigreg_lambda=args.sigreg_lambda, reg_type=args.reg_type,
             cf_learnable_target=args.cf_learnable_target,
             mask_axis=args.mask_axis,
+            target_type=args.target_type,
+            patch_local_filter=args.patch_local_filter,
+            tokenizer_type=args.tokenizer_type,
         ).to(device)
     else:
         model = EEGLeJEPA_v2(**model_kwargs).to(device)
@@ -422,9 +446,26 @@ def main():
             args_dict["n_subjects_actual"] = int(dataset.n_subjects)
             json.dump(args_dict, f, indent=2)
 
+    # ─── Resume (model + optimizer; LR schedule fast-forwarded) ────
+    start_epoch = 1
+    if args.resume_from:
+        ck_path = args.resume_from
+        if ck_path == "auto":                       # latest checkpoint in output_dir
+            eps = [int(p.stem.split("_ep")[1]) for p in output_dir.glob("checkpoint_ep*.pt")]
+            ck_path = str(output_dir / f"checkpoint_ep{max(eps)}.pt") if eps else ""
+        if ck_path:
+            ck = torch.load(ck_path, map_location=device, weights_only=False)
+            raw_model.load_state_dict(ck["model_state_dict"])
+            optimizer.load_state_dict(ck["optimizer_state_dict"])
+            start_epoch = ck["epoch"] + 1
+            for _ in range(len(loader) * ck["epoch"]):
+                scheduler.step()
+            pprint(f"Resumed from {ck_path} (epoch {ck['epoch']}); "
+                   f"lr={scheduler.get_last_lr()[0]:.3e}")
+
     # ─── Train ────────────────────────────────────────────────────
     best_loss = float("inf")
-    for epoch in range(1, args.epochs + 1):
+    for epoch in range(start_epoch, args.epochs + 1):
         if sampler is not None:
             sampler.set_epoch(epoch)
 
@@ -464,6 +505,10 @@ def main():
                 pprint(f"  → best_model.pt saved (min-loss {avg_loss:.4f}); "
                        f"NOTE: pick downstream ckpt from checkpoint_ep*.pt, "
                        f"NOT best_model.pt")
+
+        if args.stop_after_epoch and epoch >= args.stop_after_epoch:
+            pprint(f"stop_after_epoch={args.stop_after_epoch} reached; exiting")
+            break
 
     if is_dist():
         dist.destroy_process_group()

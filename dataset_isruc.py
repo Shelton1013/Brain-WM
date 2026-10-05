@@ -245,7 +245,8 @@ class ISRUCDataset(Dataset):
     ):
         if not MNE_AVAILABLE:
             raise ImportError("mne required: pip install mne")
-        assert normalization in ("per_trial_zscore", "per_recording_robust")
+        # "none" = raw µV (baseline models apply their own scaling)
+        assert normalization in ("per_trial_zscore", "per_recording_robust", "none")
         assert trial_duration_s <= EPOCH_S, (
             f"trial_duration_s={trial_duration_s} must be <= ISRUC epoch "
             f"length {EPOCH_S}s")

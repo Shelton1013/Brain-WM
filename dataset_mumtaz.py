@@ -263,10 +263,12 @@ class MumtazDataset(Dataset):
         trial_duration_s: int = 10,
         normalization: str = "per_recording_robust",
         cache_dir: Optional[str] = None,
+        bandpass: Optional[tuple] = None,   # (lo, hi) Hz; None = raw (legacy)
     ):
         if not MNE_AVAILABLE:
             raise ImportError("mne required: pip install mne")
         assert normalization in ("per_trial_zscore", "per_recording_robust")
+        self.bandpass = tuple(bandpass) if bandpass else None
         self.sample_rate = sample_rate
         self.trial_samples = sample_rate * trial_duration_s
         self.normalization = normalization
@@ -289,6 +291,8 @@ class MumtazDataset(Dataset):
                 "sample_rate": sample_rate,
                 "trial_duration_s": trial_duration_s,
                 "normalization": normalization,
+                # only in the key when set, so legacy (unfiltered) caches still hit
+                **({"bandpass": self.bandpass} if self.bandpass else {}),
             })
             cache_path = Path(cache_dir) / f"mumtaz_{key}.pt"
             if cache_path.exists():
@@ -341,6 +345,10 @@ class MumtazDataset(Dataset):
         # Resample only if native != target
         if int(round(raw.info["sfreq"])) != self.sample_rate:
             raw = raw.resample(self.sample_rate, verbose=False)
+        # Match the pretraining band (TUEG cache is 0.5-45 Hz): the raw Mumtaz
+        # EDFs carry 50 Hz mains and slow drift that pretraining never saw.
+        if self.bandpass:
+            raw.filter(self.bandpass[0], self.bandpass[1], verbose=False)
         # Get data as (samples, channels)
         sig = raw.get_data().T.astype(np.float32)       # (T, 19)
 
