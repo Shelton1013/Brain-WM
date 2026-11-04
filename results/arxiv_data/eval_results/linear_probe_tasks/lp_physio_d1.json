@@ -1,0 +1,35 @@
+{
+  "task": "physio",
+  "results": {
+    "d1_s42": {
+      "C": 0.1,
+      "val_ba": 0.3662710277438006,
+      "test": {
+        "balanced_accuracy": 0.42127983613331266,
+        "cohen_kappa": 0.2285344719368102,
+        "weighted_f1": 0.4190166805071563
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_s42_sub2100/checkpoint_ep16.pt"
+    },
+    "d1_s43": {
+      "C": 1.0,
+      "val_ba": 0.3951222655956971,
+      "test": {
+        "balanced_accuracy": 0.4009641635381798,
+        "cohen_kappa": 0.20132824849534348,
+        "weighted_f1": 0.3988882660320594
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "d1_s44": {
+      "C": 0.1,
+      "val_ba": 0.37199283479315887,
+      "test": {
+        "balanced_accuracy": 0.3920330426980806,
+        "cohen_kappa": 0.18946648679311684,
+        "weighted_f1": 0.3915342919767446
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_s44_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "task": "physio",
+  "results": {
+    "reve_base_mean": {
+      "C": 0.1,
+      "val_ba": 0.36439266123809444,
+      "test": {
+        "balanced_accuracy": 0.3593495709483804,
+        "cohen_kappa": 0.145857925792366,
+        "weighted_f1": 0.3596262737335877
+      }
+    },
+    "reve_base_attn": {
+      "C": 0.01,
+      "val_ba": 0.4072379781359656,
+      "test": {
+        "balanced_accuracy": 0.403214249468709,
+        "cohen_kappa": 0.20425234844712492,
+        "weighted_f1": 0.40299392997307387
+      }
+    },
+    "reve_large_mean": {
+      "C": 0.01,
+      "val_ba": 0.4815936509496216,
+      "test": {
+        "balanced_accuracy": 0.5075061116318488,
+        "cohen_kappa": 0.34335150494045685,
+        "weighted_f1": 0.5029428103304255
+      }
+    },
+    "reve_large_attn": {
+      "C": 0.01,
+      "val_ba": 0.51908932849412,
+      "test": {
+        "balanced_accuracy": 0.5385594462605492,
+        "cohen_kappa": 0.3847489013343941,
+        "weighted_f1": 0.536634292597946
+      }
+    }
+  }
+}

@@ -574,6 +574,79 @@ for t in ("ma", "mumtaz", "physio", "faced"):
                     f"--output {o} && touch {o}.done",
                     Path(f"{o}.done"), deps=[b.name], short=True,
                     key=f"--task {t} --random_init", light=True)]
+# 10-06 (CVPR B+C): linear tokenizer + per-patch FFT band-power target with
+#   B: standard δθαβγ edges   C: the measured passbands of the default filters.
+# main (filter, narrow) vs C isolates the estimator; C vs B the band definition.
+PRE_FFTB = []
+for s in (42, 43, 44):                            # seed 42 of both first
+    for i, (tag, bands) in enumerate((("fftstd", "standard"), ("fftnarrow", "narrow"))):
+        name = f"abl_linear_{tag}_s{s}_sub2100"
+        p = pretrain(name, 29561 + 2 * (s - 42) + i,
+                     ["tokenizer_type=linear", "target_type=fft_bandpower",
+                      f"fft_bands={bands}", f"seed={s}", "subset_seed=42"])
+        PRE_FFTB.append(p)
+        LP2_GROUPS[name] = {f"lin{tag}_s{s}_ep16": _CK(name)}
+# 10-06 (theory-aligned standard-band targets): B used a rectangular FFT and
+# log1p of tiny band variances. D1 = standard bands + true log;
+# D2 = standard bands + 3-taper DPSS multitaper + true log.
+for s in (42, 43, 44):
+    for i, (tag, extra) in enumerate((("fftstdlog", ["target_log=log"]),
+                                      ("fftstdmt", ["fft_taper=multitaper", "target_log=log"]))):
+        name = f"abl_linear_{tag}_s{s}_sub2100"
+        p = pretrain(name, 29571 + 2 * (s - 42) + i,
+                     ["tokenizer_type=linear", "target_type=fft_bandpower", "fft_bands=standard",
+                      *extra, f"seed={s}", "subset_seed=42"])
+        PRE_FFTB.append(p)
+        LP2_GROUPS[name] = {f"lin{tag}_s{s}_ep16": _CK(name)}
+# 10-06 SIGReg necessity (the target is fixed, so collapse is impossible without it):
+#   F1 = main target (filter, narrow, log1p) with SIGReg 0 -- 2 GPUs x 256 (same
+#        effective batch; SIGReg is off, so the per-GPU batch does not matter)
+#   F2 = D2 (standard bands, multitaper, log) with SIGReg 0 -- fully theory-aligned
+def pretrain2(name, port, overrides):
+    out = M / name
+    cmd = (f"{PY} emit_ablation_cmd.py --ref_args {REF} --output_dir {out} "
+           f"--nproc 2 --batch_size 256 --master_port {port} "
+           f"--stop_after_epoch {EP} --set {' '.join(overrides)}")
+    run = (f'CMD=$({cmd}) && echo "$CMD" && '
+           f'eval "${{CMD/torchrun/{PY} -m torch.distributed.run}} --resume_from auto"')
+    return Job(f"pre_{name}", 2, run, out / f"checkpoint_ep{EP}.pt")
+
+
+_F = [pretrain2("abl_linear_bandpower_nosig_s42_sub2100", 29581,
+                ["tokenizer_type=linear", "target_type=bandpower", "sigreg_lambda=0",
+                 "seed=42", "subset_seed=42"]),
+      pretrain("abl_linear_fftstdmt_nosig_s42_sub2100", 29582,
+               ["tokenizer_type=linear", "target_type=fft_bandpower", "fft_bands=standard",
+                "fft_taper=multitaper", "target_log=log", "sigreg_lambda=0",
+                "seed=42", "subset_seed=42"])]
+# 10-07: F1/F2 showed SIGReg is unnecessary (and hurts the standard-band target)
+#   G = D1 (standard bands, rect FFT, true log) with SIGReg 0, 2 GPUs x 256
+_F.append(pretrain2("abl_linear_fftstdlog_nosig_s42_sub2100", 29583,
+                    ["tokenizer_type=linear", "target_type=fft_bandpower", "fft_bands=standard",
+                     "target_log=log", "sigreg_lambda=0", "seed=42", "subset_seed=42"]))
+# 10-08: D1 held over 3 seeds -> G (D1 + SIGReg 0) seeds 43/44 on 4 GPUs
+for s in (43, 44):
+    _F.insert(0, pretrain(f"abl_linear_fftstdlog_nosig_s{s}_sub2100", 29584 + s - 43,
+                          ["tokenizer_type=linear", "target_type=fft_bandpower",
+                           "fft_bands=standard", "target_log=log", "sigreg_lambda=0",
+                           f"seed={s}", "subset_seed=42"]))
+for p in _F:
+    LP2_GROUPS[p.name[4:]] = {p.name[4:].replace("abl_linear_", "lin").replace("_sub2100", "_ep16"): _CK(p.name[4:])}
+
+# user 10-06: standard-band theory alignment is the top priority -> D1/D2 seed 42
+# run before everything else (B/C seed 44 resume afterwards via --resume_from auto)
+_first = [p for p in PRE_FFTB if p.name.endswith(("fftstdmt_s42_sub2100", "fftstdlog_s42_sub2100"))]
+# 10-07: D1 (standard bands, rect FFT, true log) beat the main target on seed 42
+# -> its seeds 43/44 go next, ahead of everything else still queued
+_d1 = [p for p in PRE_FFTB if p.name.endswith(("fftstdlog_s43_sub2100", "fftstdlog_s44_sub2100"))]
+PRE_FFTB = _first + _d1 + _F + [p for p in PRE_FFTB if p not in _first and p not in _d1]
+_VIG += PRE_FFTB
+for p in PRE_FFTB:
+    for ds in ("isruc", "hmc"):
+        j = lp2(ds, "specbram", p.name[4:])
+        j.deps = [p.name]
+        _VIG.append(j)
+
 # 10-05: TUAB linear probe (CBraMod preprocessing / split; ~409k 10-s windows).
 TUAB_LP = TASK_NPZ / "tuab"
 _tb = Job("npz_tuab", 0, f"OMP_NUM_THREADS=2 {PY} build_tuab_lp.py --out_dir {TUAB_LP} "
@@ -588,7 +661,294 @@ for grp, ckeys, extra in (("lin", [k for k in _VIG_CK if k.startswith("lin")], "
                     f"mkdir -p {LPT_DIR} && OMP_NUM_THREADS=8 {PY} eval_linear_probe_tuab.py"
                     f"{ck} {extra} --output {o} && touch {o}.done",
                     Path(f"{o}.done"), deps=[_tb.name], short=True, key=f"--output {o}"))
-JOBS = _VIG + JOBS
+
+# 10-09: new main model D1 (linear tok, standard bands, rect FFT, true log, SIGReg 0.05)
+# -> every downstream evaluation again, 3 pretraining seeds
+D1_CK = {f"d1_s{s}": _CK(f"abl_linear_fftstdlog_s{s}_sub2100") for s in (42, 43, 44)}
+_ck = " ".join(f"{k}={v}" for k, v in D1_CK.items())
+_D1 = []
+for t in ("ma", "mumtaz", "physio", "faced"):
+    o = LPT_DIR / f"lp_{t}_d1.json"
+    _D1.append(Job(f"lptask_{t}_d1", 1, f"OMP_NUM_THREADS=8 {PY} eval_linear_probe_tasks.py "
+                   f"--task {t} --checkpoints {_ck} --output {o} && touch {o}.done",
+                   Path(f"{o}.done"), short=True, key=f"--output {o}", light=True))
+o = LPT_DIR / "lp_tuab_d1.json"
+_D1.append(Job("lptuab_d1", 1, f"OMP_NUM_THREADS=8 {PY} eval_linear_probe_tuab.py "
+               f"--checkpoints {_ck} --output {o} && touch {o}.done",
+               Path(f"{o}.done"), short=True, key=f"--output {o}"))
+for bp in ((0.5, 45), (4, 45)):
+    o = VIG_DIR / f"lp_d1_bp{bp[0]:g}.json"
+    _D1.append(Job(f"seedvig_lp_d1_bp{bp[0]:g}", 1,
+                   f"mkdir -p {VIG_DIR} && {PY} eval_seedvig.py --mode lp --bandpass {bp[0]} {bp[1]} "
+                   f"--checkpoints {_ck} --output {o} && touch {o}.done",
+                   Path(f"{o}.done"), short=True, key=f"--output {o}", light=True))
+# SEED-VIG fine-tuning of the main model (0.5-45 Hz, as the other targets)
+for s in (42, 43, 44):
+    o = VIG_DIR / f"ft_d1_s{s}.json"
+    _D1.append(Job(f"seedvig_ft_d1_s{s}", 1,
+                   f"mkdir -p {VIG_DIR} && {PY} eval_seedvig.py --mode ft --seed 0 "
+                   f"--checkpoints d1_s{s}={D1_CK[f'd1_s{s}']} --output {o}", o, short=True))
+# fine-tuning is secondary: 30-s sleep FT (one run per pretraining seed) last
+_D1 += [ft30(M / f"abl_linear_fftstdlog_s{s}_sub2100" / "checkpoint_ep16.pt", ds, 0)
+        for s in (42, 43, 44) for ds in ("hmc", "isruc")]
+_VIG += _D1
+
+# 10-09: TUEV (6-class events) linear probe, CBraMod preprocessing / split
+TUEV_LP = TASK_NPZ / "tuev"
+_te = Job("npz_tuev", 0, f"OMP_NUM_THREADS=2 {PY} build_tuev_lp.py --out_dir {TUEV_LP} "
+          f"--workers 24", TUEV_LP / "DONE", short=True, key="build_tuev_lp.py")
+_VIG.append(_te)
+for grp, ck, extra in (("d1", _ck, ""),
+                       ("lin", " ".join(f"{k}={_VIG_CK[k]}" for k in _VIG_CK if k.startswith("lin")),
+                        "--random_init"),
+                       ("base", "", "--baselines cbramod labram")):
+    o = LPT_DIR / f"lp_tuev_{grp}.json"
+    _VIG.append(Job(f"lptuev_{grp}", 1,
+                    f"mkdir -p {LPT_DIR} && OMP_NUM_THREADS=8 {PY} eval_linear_probe_tuab.py --task tuev"
+                    f"{' --checkpoints ' + ck if ck else ''} {extra} --output {o} && touch {o}.done",
+                    Path(f"{o}.done"), deps=[_te.name], short=True, key=f"--output {o}"))
+# 10-09 (free GPUs): (1) vigilance hypothesis -- D1 without the delta band target
+#   (= D1 target on a 4-Hz high-passed signal; input and tokenizer unchanged);
+#   (2) D1 target with the filterbank tokenizer -> completes tokenizer x target for the
+#   main target (vs fbraw, 3 seeds); (3) linear probe along pretraining for D1 seed 42.
+_N = []
+# 10-09 evening: the paper drops SIGReg (fixed target -> no collapse to prevent), so every
+# new run uses sigreg_lambda=0; the SIGReg versions of these two runs were stopped at ep3.
+_NOSIG = ["sigreg_lambda=0"]
+_NEW = [("nd_s42", "abl_linear_fftnodelta_nosig_s42_sub2100", 29601,
+         ["tokenizer_type=linear", "target_type=fft_bandpower", "fft_bands=nodelta",
+          "target_log=log", "seed=42", "subset_seed=42", *_NOSIG]),
+        ("fbd1_s42", "abl_fb_fftstdlog_nosig_s42_sub2100", 29602,
+         ["tokenizer_type=filterbank", "target_type=fft_bandpower", "fft_bands=standard",
+          "target_log=log", "seed=42", "subset_seed=42", *_NOSIG]),
+        # main model without SIGReg: seeds 43/44 exist (4x128); seed 42 was run on 2x256
+        # -> re-pretrain it on 4x128 so all three seeds share one launcher
+        ("g_s42", "abl_linear_fftstdlog_nosig4g_s42_sub2100", 29603,
+         ["tokenizer_type=linear", "target_type=fft_bandpower", "fft_bands=standard",
+          "target_log=log", "seed=42", "subset_seed=42", *_NOSIG])]
+for s in (43, 44):
+    _NEW.append((f"fbd1_s{s}", f"abl_fb_fftstdlog_nosig_s{s}_sub2100", 29604 + s - 43,
+                 ["tokenizer_type=filterbank", "target_type=fft_bandpower", "fft_bands=standard",
+                  "target_log=log", f"seed={s}", "subset_seed=42", *_NOSIG]))
+_EXIST = {f"g_s{s}": f"abl_linear_fftstdlog_nosig_s{s}_sub2100" for s in (43, 44)}
+
+
+def _downstream(key, name, deps, sleep_lp=True, ft=False):
+    out = []
+    ck = f"{key}={_CK(name)}"
+    if sleep_lp:
+        LP2_GROUPS[name] = {f"{key}_ep16": _CK(name)}
+        for ds in ("isruc", "hmc"):
+            j = lp2(ds, "specbram", name)
+            j.deps = list(deps)
+            out.append(j)
+    for t in ("ma", "mumtaz", "physio", "faced"):
+        o = LPT_DIR / f"lp_{t}_{key}.json"
+        out.append(Job(f"lptask_{t}_{key}", 1, f"OMP_NUM_THREADS=8 {PY} eval_linear_probe_tasks.py "
+                       f"--task {t} --checkpoints {ck} --output {o} && touch {o}.done",
+                       Path(f"{o}.done"), deps=deps, short=True, key=f"--output {o}", light=True))
+    for task in ("tuab", "tuev"):
+        o = LPT_DIR / f"lp_{task}_{key}.json"
+        out.append(Job(f"lp{task}_{key}", 1, f"OMP_NUM_THREADS=8 {PY} eval_linear_probe_tuab.py "
+                       f"--task {task} --checkpoints {ck} --output {o} && touch {o}.done",
+                       Path(f"{o}.done"), deps=deps, short=True, key=f"--output {o}"))
+    for bp in ((0.5, 45), (4, 45)):
+        o = VIG_DIR / f"lp_{key}_bp{bp[0]:g}.json"
+        out.append(Job(f"seedvig_lp_{key}_bp{bp[0]:g}", 1,
+                       f"mkdir -p {VIG_DIR} && {PY} eval_seedvig.py --mode lp --bandpass {bp[0]} {bp[1]} "
+                       f"--checkpoints {ck} --output {o} && touch {o}.done",
+                       Path(f"{o}.done"), deps=deps, short=True, key=f"--output {o}", light=True))
+    if ft:
+        o = VIG_DIR / f"ft_{key}.json"
+        out.append(Job(f"seedvig_ft_{key}", 1, f"mkdir -p {VIG_DIR} && {PY} eval_seedvig.py --mode ft "
+                       f"--seed 0 --checkpoints {ck} --output {o}", o, deps=deps, short=True))
+        for ds in ("hmc", "isruc"):
+            j = ft30(M / name / "checkpoint_ep16.pt", ds, 0)
+            j.deps = list(deps)
+            out.append(j)
+    return out
+
+
+_PRE, _EV = [], []
+for key, name, port, ov in _NEW:
+    p = pretrain(name, port, ov)
+    _PRE.append(p)
+    _EV += _downstream(key, name, [p.name], ft=key.startswith("g_"))
+for key, name in _EXIST.items():                   # already pretrained: evaluate now
+    _EV += _downstream(key, name, [], sleep_lp=False, ft=True)
+# 10-10: every comparison run was trained with SIGReg 0.05 -> re-run the controls without it
+# so that they match the (no-SIGReg) main model. Priority: (1) linear raw recon, the main
+# comparison, with the full downstream set; (2) multitaper s43/44; (3) filterbank raw recon;
+# (4) band-waveform recon -- (2)-(4) only need the sleep linear probe (target-study table).
+_CTRL = [("lr", "abl_linear_rawrecon_nosig_s{s}_sub2100", ["tokenizer_type=linear", "target_type=raw_recon"],
+          (42, 43, 44), True),
+         ("mt", "abl_linear_fftstdmt_nosig_s{s}_sub2100",
+          ["tokenizer_type=linear", "target_type=fft_bandpower", "fft_bands=standard",
+           "fft_taper=multitaper", "target_log=log"], (43, 44), False),
+         ("fr", "abl_fb_rawrecon_nosig_s{s}_sub2100", ["tokenizer_type=filterbank", "target_type=raw_recon"],
+          (42, 43, 44), False),
+         ("br", "abl_fb_bandrecon_nosig_s{s}_sub2100", ["tokenizer_type=filterbank", "target_type=band_recon"],
+          (42, 43, 44), False)]
+_port = 29611
+for tag, pat, ov, seeds, full in _CTRL:
+    for s in seeds:
+        name = pat.format(s=s)
+        p = pretrain(name, _port, ov + [f"seed={s}", "subset_seed=42", *_NOSIG])
+        _port += 1
+        _PRE.append(p)
+        if full:
+            _EV += _downstream(f"{tag}_s{s}", name, [p.name], ft=True)
+        else:
+            LP2_GROUPS[name] = {f"{tag}_s{s}_ep16": _CK(name)}
+            for ds in ("isruc", "hmc"):
+                j = lp2(ds, "specbram", name)
+                j.deps = [p.name]
+                _EV.append(j)
+# 10-12: scale-matched control -- our architecture at CBraMod's parameter count
+# (d_model 144 -> ~4.2M parameters vs CBraMod ~4.0M), band power vs raw recon,
+# no SIGReg, seed 42; frozen probes only. Placed ahead of the remaining queue.
+_SMALL_PRE, _SMALL_EV = [], []
+for key, name, tgt in (("sbp_s42", "abl_small144_fftstdlog_nosig_s42_sub2100",
+                        ["target_type=fft_bandpower", "fft_bands=standard", "target_log=log"]),
+                       ("srr_s42", "abl_small144_rawrecon_nosig_s42_sub2100", ["target_type=raw_recon"])):
+    p = pretrain(name, _port, ["tokenizer_type=linear", "d_model=144", *tgt, "seed=42",
+                                "subset_seed=42", *_NOSIG])
+    _port += 1
+    _SMALL_PRE.append(p)
+    _SMALL_EV += _downstream(key, name, [p.name], ft=False)
+# 10-12 (cont.): more seeds for the scale-matched pair and the no-delta target
+for s in (43, 44):
+    for key, name, ov in ((f"sbp_s{s}", f"abl_small144_fftstdlog_nosig_s{s}_sub2100",
+                           ["d_model=144", "target_type=fft_bandpower", "fft_bands=standard",
+                            "target_log=log"]),
+                          (f"srr_s{s}", f"abl_small144_rawrecon_nosig_s{s}_sub2100",
+                           ["d_model=144", "target_type=raw_recon"])):
+        # (no-delta seeds 43/44 dropped 10-13: SEED-VIG removed from the paper)
+        p = pretrain(name, _port, ["tokenizer_type=linear", *ov, f"seed={s}", "subset_seed=42", *_NOSIG])
+        _port += 1
+        _SMALL_PRE.append(p)
+        _SMALL_EV += _downstream(key, name, [p.name], ft=False)
+_N = _SMALL_PRE + _PRE + _SMALL_EV + _EV
+LP2_GROUPS["d1curve"] = {f"d1_s42_ep{e}": _CK("abl_linear_fftstdlog_s42_sub2100", e)
+                         for e in (1, 2, 4, 8, 12)}
+LP2_GROUPS["d1curve"].update({f"linraw_s42_ep{e}": _CK("abl_linear_rawrecon_sub2100", e)
+                              for e in (1, 2, 4, 8, 12)})
+_N += [lp2(ds, "specbram", "d1curve") for ds in ("isruc", "hmc")]
+# handcrafted spectral features beyond sleep, same probe (CPU only)
+for t in ("ma", "mumtaz", "physio", "faced", "tuev", "tuab"):
+    o = LPT_DIR / f"lp_{t}_hc.json"
+    _N.append(Job(f"lphc_{t}", 0, f"OMP_NUM_THREADS=1 {PY} eval_handcrafted_tasks.py --task {t} "
+                  f"--workers 8 --output {o} && touch {o}.done",
+                  Path(f"{o}.done"), short=True, key=f"--output {o}"))
+_VIG += _N
+# 10-12: REVE measured under our strict probe (no more quoted linear-probe numbers)
+_REVE = [lp2(ds, m) for m in ("reve_base", "reve_large") for ds in ("isruc", "hmc")]
+_RB = "--baselines reve_base reve_large"
+for t in ("ma", "mumtaz", "physio", "faced"):
+    o = LPT_DIR / f"lp_{t}_reve.json"
+    _REVE.append(Job(f"lptask_{t}_reve", 1, f"OMP_NUM_THREADS=8 {PY} eval_linear_probe_tasks.py --task {t} "
+                     f"{_RB} --output {o} && touch {o}.done", Path(f"{o}.done"), short=True,
+                     key=f"--output {o}", light=True))
+for task in ("tuev", "tuab"):
+    o = LPT_DIR / f"lp_{task}_reve.json"
+    _REVE.append(Job(f"lp{task}_reve", 1, f"OMP_NUM_THREADS=8 {PY} eval_linear_probe_tuab.py --task {task} "
+                     f"{_RB} --output {o} && touch {o}.done", Path(f"{o}.done"), short=True,
+                     key=f"--output {o}"))
+o = VIG_DIR / "lp_reve.json"
+_REVE.append(Job("seedvig_lp_reve", 1, f"mkdir -p {VIG_DIR} && {PY} eval_seedvig.py --mode lp {_RB} "
+                 f"--output {o} && touch {o}.done", Path(f"{o}.done"), short=True,
+                 key=f"--output {o}", light=True))
+# 10-12 (cont.): (a) linear probe along pretraining for the no-SIGReg main model and
+# its matched raw recon (seed 42); (b) input-convention check for CBraMod/LaBraM;
+# (c) label-free k-means clustering of frozen sleep features for every model
+LP2_GROUPS["mcurve"] = {f"m_s42_ep{e}": _CK("abl_linear_fftstdlog_nosig4g_s42_sub2100", e)
+                        for e in (1, 2, 4, 8, 12)}
+LP2_GROUPS["mcurve"].update({f"lr_s42_ep{e}": _CK("abl_linear_rawrecon_nosig_s42_sub2100", e)
+                             for e in (1, 2, 4, 8, 12)})
+_REVE += [lp2(ds, "specbram", "mcurve") for ds in ("isruc", "hmc")]
+_REVE += [lp2(ds, m) for m in ("cbramod_rn", "labram_rn") for ds in ("isruc", "hmc")]
+CL_DIR = Path("/home/pxieaf/home2/eval_results/cluster")
+_main_ck = {f"m_s{s}": _CK(d) for s, d in ((42, "abl_linear_fftstdlog_nosig4g_s42_sub2100"),
+                                          (43, "abl_linear_fftstdlog_nosig_s43_sub2100"),
+                                          (44, "abl_linear_fftstdlog_nosig_s44_sub2100"))}
+_main_ck.update({f"lr_s{s}": _CK(f"abl_linear_rawrecon_nosig_s{s}_sub2100") for s in (42, 43, 44)})
+for ds in ("isruc", "hmc"):
+    for m in ("specbram", "cbramod", "labram", "biot", "reve_base", "reve_large"):
+        o = CL_DIR / f"cl_{ds}_{m}.json"
+        ck = (" --checkpoints " + " ".join(f"{k}={v}" for k, v in _main_ck.items())) if m == "specbram" else ""
+        _REVE.append(Job(f"cluster_{ds}_{m}", 1, f"mkdir -p {CL_DIR} && OMP_NUM_THREADS=8 {PY} "
+                         f"eval_cluster_sleep.py --dataset {ds} --data_dir {DATA[ds]} --model {m}{ck} "
+                         f"--output {o}", Path(f"{o}.done"), short=True, key=f"--output {o}", light=True))
+# 10-12 (cont.): stronger frozen readout -- per-channel token means, concatenated
+# (spatial information kept; still logistic regression), full labels only
+for ds in ("isruc", "hmc"):
+    for m in ("specbram", "cbramod", "labram", "reve_base", "reve_large"):
+        o = LP2_DIR / f"lp2chan_{ds}_{m}.json"
+        ck = (" --checkpoints " + " ".join(f"{k}={v}" for k, v in _main_ck.items())) if m == "specbram" else ""
+        _REVE.append(Job(f"lp2chan_{ds}_{m}", 1, f"OMP_NUM_THREADS=8 {PY} eval_linear_probe_v2.py "
+                         f"--dataset {ds} --data_dir {DATA[ds]} --model {m}{ck} --readout chan "
+                         f"--modes avg3 --no_label_eff --output {o}", Path(f"{o}.done"), short=True,
+                         key=f"--output {o}", light=True))
+# 10-13: CSBrain (8.9M parameters, official weights) under every probe; replaces REVE-Large
+_CSB = [lp2(ds, "csbrain") for ds in ("isruc", "hmc")]
+for ds in ("isruc", "hmc"):
+    o = LP2_DIR / f"lp2chan_{ds}_csbrain.json"
+    _CSB.append(Job(f"lp2chan_{ds}_csbrain", 1, f"OMP_NUM_THREADS=8 {PY} eval_linear_probe_v2.py --dataset {ds} "
+                    f"--data_dir {DATA[ds]} --model csbrain --readout chan --modes avg3 --no_label_eff "
+                    f"--output {o}", Path(f"{o}.done"), short=True, key=f"--output {o}", light=True))
+    o = CL_DIR / f"cl_{ds}_csbrain.json"
+    _CSB.append(Job(f"cluster_{ds}_csbrain", 1, f"mkdir -p {CL_DIR} && OMP_NUM_THREADS=8 {PY} eval_cluster_sleep.py "
+                    f"--dataset {ds} --data_dir {DATA[ds]} --model csbrain --output {o}", Path(f"{o}.done"),
+                    short=True, key=f"--output {o}", light=True))
+for t in ("ma", "mumtaz", "physio", "faced"):
+    o = LPT_DIR / f"lp_{t}_csbrain.json"
+    _CSB.append(Job(f"lptask_{t}_csbrain", 1, f"OMP_NUM_THREADS=8 {PY} eval_linear_probe_tasks.py --task {t} "
+                    f"--baselines csbrain --output {o} && touch {o}.done", Path(f"{o}.done"), short=True,
+                    key=f"--output {o}", light=True))
+for task in ("tuev", "tuab"):
+    o = LPT_DIR / f"lp_{task}_csbrain.json"
+    _CSB.append(Job(f"lp{task}_csbrain", 1, f"OMP_NUM_THREADS=8 {PY} eval_linear_probe_tuab.py --task {task} "
+                    f"--baselines csbrain --output {o} && touch {o}.done", Path(f"{o}.done"), short=True,
+                    key=f"--output {o}"))
+_REVE = _CSB + _REVE
+
+# 10-14: re-run the overview probes once with --pred_dir (test predictions + subject ids)
+# for a subject-level bootstrap; scores are deterministic and must match the earlier runs
+BOOT = Path("/home/pxieaf/home2/eval_results/bootstrap")
+_mck = " ".join(f"{k}={v}" for k, v in _main_ck.items() if k.startswith("m_"))
+_BOOT = []
+for ds in ("isruc", "hmc"):
+    for m in ("specbram", "cbramod", "labram", "biot", "csbrain", "reve_base"):
+        o = BOOT / f"lp2_{ds}_{m}.json"
+        ck = f" --checkpoints {_mck}" if m == "specbram" else ""
+        _BOOT.append(Job(f"boot_{ds}_{m}", 1, f"mkdir -p {BOOT} && OMP_NUM_THREADS=8 {PY} eval_linear_probe_v2.py "
+                         f"--dataset {ds} --data_dir {DATA[ds]} --model {m}{ck} --modes avg3 --no_label_eff "
+                         f"--pred_dir {BOOT}/preds --output {o}", Path(f"{o}.done"), short=True,
+                         key=f"--output {o}", light=True))
+_BL = "--baselines cbramod labram csbrain reve_base"
+for t in ("ma", "mumtaz", "physio", "faced"):
+    o = BOOT / f"lp_{t}.json"
+    _BOOT.append(Job(f"boot_{t}", 1, f"mkdir -p {BOOT} && OMP_NUM_THREADS=8 {PY} eval_linear_probe_tasks.py --task {t} "
+                     f"--checkpoints {_mck} {_BL} --pred_dir {BOOT}/preds --output {o} && touch {o}.done",
+                     Path(f"{o}.done"), short=True, key=f"--output {o}", light=True))
+for task in ("tuev", "tuab"):
+    o = BOOT / f"lp_{task}.json"
+    _BOOT.append(Job(f"boot_{task}", 1, f"mkdir -p {BOOT} && OMP_NUM_THREADS=8 {PY} eval_linear_probe_tuab.py "
+                     f"--task {task} --checkpoints {_mck} {_BL} --pred_dir {BOOT}/preds --output {o} && touch {o}.done",
+                     Path(f"{o}.done"), short=True, key=f"--output {o}"))
+_REVE = _BOOT + _REVE
+
+# 10-13: full fine-tuning on the non-sleep tasks (appendix only): main model and matched
+# raw recon (no SIGReg), three pretraining seeds each; lowest priority
+FTT_DIR = Path("/home/pxieaf/home2/eval_results/finetune_tasks")
+_FTT = []
+for t in ("ma", "mumtaz", "physio", "faced", "tuev", "tuab"):
+    for nm, ck in _main_ck.items():
+        o = FTT_DIR / f"ft_{t}_{nm}.json"
+        _FTT.append(Job(f"fttask_{t}_{nm}", 1, f"mkdir -p {FTT_DIR} && {PY} eval_finetune_tasks.py "
+                        f"--task {t} --checkpoint {ck} --name {nm} --output {o}", o, short=True,
+                        key=f"--output {o}"))
+JOBS = _REVE + _VIG + JOBS + _FTT
 _seen = set()                              # drop repeats, keep first (highest priority)
 JOBS = [j for j in JOBS if not (j.name in _seen or _seen.add(j.name))]
 

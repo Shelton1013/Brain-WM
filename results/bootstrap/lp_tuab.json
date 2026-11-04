@@ -1,0 +1,62 @@
+{
+  "task": "tuab",
+  "results": {
+    "m_s42": {
+      "C": 0.01,
+      "val_ba": 0.8270423339703958,
+      "test": {
+        "balanced_accuracy": 0.8126524767566767,
+        "auc_pr": 0.8971880960053418,
+        "auroc": 0.8905265925100844
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig4g_s42_sub2100/checkpoint_ep16.pt"
+    },
+    "m_s43": {
+      "C": 0.01,
+      "val_ba": 0.8226296303406007,
+      "test": {
+        "balanced_accuracy": 0.7988401097973283,
+        "auc_pr": 0.8814719269285292,
+        "auroc": 0.8690878543673911
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "m_s44": {
+      "C": 0.01,
+      "val_ba": 0.8247784560834064,
+      "test": {
+        "balanced_accuracy": 0.8020338343104096,
+        "auc_pr": 0.8902091984303862,
+        "auroc": 0.8789070138699242
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "cbramod": {
+      "C": 0.1,
+      "val_ba": 0.7817107161623176,
+      "test": {
+        "balanced_accuracy": 0.7775400845177876,
+        "auc_pr": 0.8567389606491773,
+        "auroc": 0.8555221915726652
+      }
+    },
+    "labram": {
+      "C": 1.0,
+      "val_ba": 0.7707435315296296,
+      "test": {
+        "balanced_accuracy": 0.7759970881856177,
+        "auc_pr": 0.8509080557243721,
+        "auroc": 0.8559614804214642
+      }
+    },
+    "csbrain": {
+      "C": 1.0,
+      "val_ba": 0.7575644567750345,
+      "test": {
+        "balanced_accuracy": 0.7717148828211531,
+        "auc_pr": 0.8361485285010009,
+        "auroc": 0.8453236207833499
+      }
+    }
+  }
+}

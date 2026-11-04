@@ -1,0 +1,15 @@
+{
+  "task": "faced",
+  "results": {
+    "nd_s42": {
+      "C": 0.1,
+      "val_ba": 0.22376543209876543,
+      "test": {
+        "balanced_accuracy": 0.21752549651100378,
+        "cohen_kappa": 0.11930648816082157,
+        "weighted_f1": 0.21565440681206902
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftnodelta_nosig_s42_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

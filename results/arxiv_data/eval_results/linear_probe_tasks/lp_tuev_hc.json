@@ -1,0 +1,23 @@
+{
+  "task": "tuev",
+  "results": {
+    "hc_basic": {
+      "C": 0.01,
+      "val_ba": 0.3480886656581656,
+      "test": {
+        "balanced_accuracy": 0.4977593067975942,
+        "cohen_kappa": 0.43284653330472456,
+        "weighted_f1": 0.6926775723322744
+      }
+    },
+    "hc_rich": {
+      "C": 0.01,
+      "val_ba": 0.31998010737525395,
+      "test": {
+        "balanced_accuracy": 0.4691071726121408,
+        "cohen_kappa": 0.4257784545593666,
+        "weighted_f1": 0.6951595890506743
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "task": "mumtaz",
+  "results": {
+    "fbd1_s42": {
+      "C": 1.0,
+      "val_ba": 0.9378008021390374,
+      "test": {
+        "balanced_accuracy": 0.9558492964585595,
+        "auc_pr": 0.9956097068526608,
+        "auroc": 0.9956161648125618
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_fb_fftstdlog_nosig_s42_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

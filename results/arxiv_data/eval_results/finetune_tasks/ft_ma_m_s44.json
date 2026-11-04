@@ -1,0 +1,15 @@
+{
+  "task": "ma",
+  "results": {
+    "m_s44": {
+      "test": {
+        "balanced_accuracy": 0.7708333333333333,
+        "auc_pr": 0.6272159351715989,
+        "auroc": 0.8551070601851851
+      },
+      "val_ba": 0.7852822580645161,
+      "epochs": 21,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s44_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

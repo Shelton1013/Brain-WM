@@ -1,0 +1,15 @@
+{
+  "task": "physio",
+  "results": {
+    "nd_s42": {
+      "C": 0.01,
+      "val_ba": 0.3662989158496821,
+      "test": {
+        "balanced_accuracy": 0.3819778377270196,
+        "cohen_kappa": 0.1760764007536374,
+        "weighted_f1": 0.3795470740864559
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftnodelta_nosig_s42_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "task": "mumtaz",
+  "results": {
+    "srr_s44": {
+      "C": 0.01,
+      "val_ba": 0.9135639483065954,
+      "test": {
+        "balanced_accuracy": 0.9351304238707601,
+        "auc_pr": 0.9874249664040713,
+        "auroc": 0.9862674384980932
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_small144_rawrecon_nosig_s44_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

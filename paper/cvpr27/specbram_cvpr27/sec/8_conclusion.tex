@@ -1,0 +1,14 @@
+\section{Conclusion}
+SpecBraM shows that what an EEG foundation model predicts matters as much as how large it is.
+Predicting the log power of masked patches in the classical frequency bands, a physical
+quantity that summarizes spectral levels without requiring local phase prediction, makes pretraining
+efficient: with backbone, data and steps fixed it reaches the quality of waveform
+reconstruction with far fewer steps and a much smaller model, and with $2{,}388$ hours of data
+it has higher point estimates than CBraMod, LaBraM and CSBrain on nearly all tasks and REVE on
+most tasks under an identical linear probe, with strong low-label results on sleep staging.
+We hope this encourages choosing the pretraining
+targets of physiological signals by what the signal means rather than by what other modalities
+predict.
+
+
+% ======================================================================

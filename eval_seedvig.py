@@ -149,7 +149,8 @@ def finetune(base_model, data, device, max_epochs=50, batch_size=64, base_lr=5e-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--checkpoints", nargs="*", default=[], help="name=path ...")
-    p.add_argument("--baselines", nargs="*", default=[], choices=["cbramod", "labram"],
+    p.add_argument("--baselines", nargs="*", default=[],
+                   choices=["cbramod", "labram", "reve_base", "reve_large", "csbrain"],
                    help="lp only: official foundation-model weights")
     p.add_argument("--root", default="/home/pxieaf/home2/datasets/SEED-VIG")
     p.add_argument("--cache_dir", default="/home/pxieaf/home2/dataset_cache")
@@ -191,7 +192,27 @@ def main():
         raw, _ = get_data(a.root, a.cache_dir, raw=True)
         for b in a.baselines:
             print(f"  [{b}]", flush=True)
-            feats = {k: baseline_features(b, X, device) for k, (X, _) in raw.items()}
+            if b.startswith("reve"):                 # two frozen readouts, one forward pass
+                from dataset_seedvig import VIG_CHANNELS, N_PER_SESSION
+                from eval_linear_probe_v2 import reve_features
+                per = {k: reve_features(b.split("_")[1], X, VIG_CHANNELS,
+                                        np.arange(len(X)) // N_PER_SESSION, device)
+                       for k, (X, _) in raw.items()}
+                for pl in ("mean", "attn"):
+                    res["results"][f"{b}_{pl}"] = linear_probe(
+                        None, raw, device, feats={k: per[k][pl] for k in per})
+                json.dump(res, open(out, "w"), indent=2)
+                continue
+            if b == "csbrain":
+                from dataset_seedvig import VIG_CHANNELS
+                from eval_linear_probe_v2 import csbrain_encoder
+                enc = csbrain_encoder(device, "seedvig")[0]
+                with torch.no_grad():
+                    feats = {k: np.concatenate([enc(torch.from_numpy(X[i:i + 64]).to(device), list(range(X.shape[2])),
+                                                    names=VIG_CHANNELS).float().cpu().numpy()
+                                                for i in range(0, len(X), 64)]) for k, (X, _) in raw.items()}
+            else:
+                feats = {k: baseline_features(b, X, device) for k, (X, _) in raw.items()}
             res["results"][b] = linear_probe(None, raw, device, feats=feats)
             json.dump(res, open(out, "w"), indent=2)
     print(f"-> {out}")

@@ -1,4 +1,5 @@
-"""Smoke test for EEG-LeJEPA v3 (filterbank + cross-frequency). Run before pilot.
+"""Historical filterbank/frequency-mask smoke test (not the current paper config).
+For the current classical-band model run python -m unittest discover -s tests -v.
 
     python smoke_v3.py
 Checks: forward runs, cf/jepa losses are non-trivial (>0), backward works,

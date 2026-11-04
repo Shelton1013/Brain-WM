@@ -1,0 +1,63 @@
+{
+  "dataset": "isruc",
+  "results": {
+    "reve_base_mean": {
+      "avg3": {
+        "C": 1.0,
+        "val_ba": 0.7263238514345172,
+        "test": {
+          "balanced_accuracy": 0.78976432421884,
+          "cohen_kappa": 0.7378273013777159,
+          "weighted_f1": 0.7964834939617697
+        },
+        "label_eff": {
+          "1.00": {
+            "balanced_accuracy": [
+              0.7900566266537262,
+              0.0
+            ],
+            "cohen_kappa": [
+              0.738404217296671,
+              0.0
+            ],
+            "weighted_f1": [
+              0.7968918499284571,
+              0.0
+            ]
+          }
+        },
+        "dim": 512
+      },
+      "checkpoint": null
+    },
+    "reve_base_attn": {
+      "avg3": {
+        "C": 0.01,
+        "val_ba": 0.7312655881085439,
+        "test": {
+          "balanced_accuracy": 0.7927512435151683,
+          "cohen_kappa": 0.736179597467418,
+          "weighted_f1": 0.7947974102175467
+        },
+        "label_eff": {
+          "1.00": {
+            "balanced_accuracy": [
+              0.792485994433021,
+              0.0
+            ],
+            "cohen_kappa": [
+              0.7354972030162996,
+              0.0
+            ],
+            "weighted_f1": [
+              0.79426572940713,
+              0.0
+            ]
+          }
+        },
+        "dim": 512
+      },
+      "checkpoint": null
+    }
+  }
+}

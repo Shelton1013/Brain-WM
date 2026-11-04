@@ -210,8 +210,7 @@ def main():
                         help="anti-collapse weight; use 0.0 for no-reg baseline")
     parser.add_argument("--pajr_weight", type=float, default=0.1)
     parser.add_argument("--arch", type=str, default="v2", choices=["v2", "v3"],
-                        help="v3 = frequency-native (filterbank tokenizer + real "
-                             "cross-frequency spectral prediction, no MAE)")
+                         help="v3 supports SpecBraM; select the explicit paper flags in README.md")
     parser.add_argument("--drop_short_recording_min", type=float, default=0.0)
     parser.add_argument("--trim_start_end_sec", type=int, default=0)
     parser.add_argument("--notch_freq", type=float, default=0.0)
@@ -221,9 +220,7 @@ def main():
     parser.add_argument("--filt_kernel", type=int, default=65)
     parser.add_argument("--mask_axis", type=str, default="frequency",
                         choices=["frequency", "time"],
-                        help="v3 ablation: 'frequency' masks bands (cross-freq, "
-                             "our model) vs 'time' masks whole time-patches "
-                             "(cross-time). Only the mask axis differs.")
+                         help="'time' masks whole patches (paper); 'frequency' is a legacy ablation")
     parser.add_argument("--cf_learnable_target", action="store_true",
                         help="ablation: use the LEARNABLE filterbank as the CF "
                              "target (collapse-prone; demonstrates why a fixed "
@@ -232,11 +229,17 @@ def main():
                         choices=["bandpower", "fft_bandpower", "raw_recon",
                                  "band_recon"],
                         help="v3 ablation: pretext target on the SAME backbone "
-                             "(bandpower = paper model)")
+                              "(fft_bandpower with standard/log = current paper target)")
     parser.add_argument("--tokenizer_type", type=str, default="filterbank",
                         choices=["filterbank", "linear"],
                         help="v3 ablation: linear = plain patch embedding (no "
                              "spectral input bias); target is unaffected")
+    parser.add_argument("--fft_bands", type=str, default="standard",
+                        choices=["standard", "narrow", "nodelta"],
+                        help="fft_bandpower target: standard δθαβγ edges, or the "
+                             "measured passbands of the default 65-tap target filters")
+    parser.add_argument("--fft_taper", type=str, default="rect", choices=["rect", "multitaper"])
+    parser.add_argument("--target_log", type=str, default="log1p", choices=["log1p", "log"])
     parser.add_argument("--patch_local_filter", action="store_true",
                         help="v3 ablation: filter each patch in isolation "
                              "(no cross-patch leakage through the conv kernel)")
@@ -415,6 +418,9 @@ def main():
             target_type=args.target_type,
             patch_local_filter=args.patch_local_filter,
             tokenizer_type=args.tokenizer_type,
+            fft_bands=args.fft_bands,
+            fft_taper=args.fft_taper,
+            target_log=args.target_log,
         ).to(device)
     else:
         model = EEGLeJEPA_v2(**model_kwargs).to(device)

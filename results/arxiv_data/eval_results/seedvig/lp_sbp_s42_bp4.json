@@ -1,0 +1,55 @@
+{
+  "mode": "lp",
+  "seed": 0,
+  "bandpass": [
+    4.0,
+    45.0
+  ],
+  "split": {
+    "train": [
+      "1_20151124_noon_2.mat",
+      "2_20151106_noon.mat",
+      "3_20151024_noon.mat",
+      "4_20151105_noon.mat",
+      "4_20151107_noon.mat",
+      "5_20141108_noon.mat",
+      "5_20151012_night.mat",
+      "6_20151121_noon.mat",
+      "7_20151015_night.mat",
+      "8_20151022_noon.mat",
+      "9_20151017_night.mat",
+      "10_20151125_noon.mat",
+      "11_20151024_night.mat",
+      "12_20150928_noon.mat",
+      "13_20150929_noon.mat"
+    ],
+    "val": [
+      "14_20151014_night.mat",
+      "15_20151126_night.mat",
+      "16_20151128_night.mat",
+      "17_20150925_noon.mat"
+    ],
+    "test": [
+      "18_20150926_noon.mat",
+      "19_20151114_noon.mat",
+      "20_20151129_night.mat",
+      "21_20151016_noon.mat"
+    ]
+  },
+  "results": {
+    "sbp_s42": {
+      "test": {
+        "pearson": 0.5137724649771604,
+        "r2": 0.17823588848114014,
+        "rmse": 0.28790954103268906
+      },
+      "val": {
+        "pearson": 0.6504278618174811,
+        "r2": 0.4173073172569275,
+        "rmse": 0.19226985849232633
+      },
+      "alpha": 1000.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_small144_fftstdlog_nosig_s42_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

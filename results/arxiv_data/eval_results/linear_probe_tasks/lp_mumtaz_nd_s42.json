@@ -1,0 +1,15 @@
+{
+  "task": "mumtaz",
+  "results": {
+    "nd_s42": {
+      "C": 1.0,
+      "val_ba": 0.9794674688057041,
+      "test": {
+        "balanced_accuracy": 0.9683501830462609,
+        "auc_pr": 0.9974839803828186,
+        "auroc": 0.9973838842907572
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftnodelta_nosig_s42_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

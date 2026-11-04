@@ -1,4 +1,4 @@
-# EEG-LeJEPA v3 — Model Usage Guide
+# SpecBraM — Model Usage Guide
 
 How to load a pretrained checkpoint and use the encoder to extract features for
 your own downstream EEG task (frozen probe or fine-tuning).
@@ -49,7 +49,9 @@ eeg_lejepa_v2.py      # provides CrissCrossBlock, MLP (imported by v3)
 regularizers.py       # provides distribution_reg (imported by v3)
 ```
 
-Dependencies: `torch`, `numpy`, (`mne` only for reading EDF/preprocessing).
+Dependencies: `torch`, `numpy`, and `scikit-learn` for the probe (`mne` for EDF/preprocessing).
+The paper model uses a linear tokenizer and patch-local FFT log-power targets. Legacy
+constructor defaults are retained for older checkpoints; always restore the saved args.
 
 ---
 
@@ -57,32 +59,18 @@ Dependencies: `torch`, `numpy`, (`mne` only for reading EDF/preprocessing).
 
 ```python
 import torch
-from eeg_lejepa_v3 import EEGLeJEPA_v3
+from eeg_lejepa_v3 import EEGLeJEPA_v3, v3_kwargs_from_args
 
 def load_model(ckpt_path, device="cuda"):
-    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     a = ckpt.get("args", {})
-    model = EEGLeJEPA_v3(
-        d_model=a.get("d_model", 512),
-        encoder_layers=a.get("encoder_layers", 12), n_heads=8,
-        patch_len=a.get("patch_len", 200),
-        max_time_patches=a.get("max_time_patches", 64),
-        max_channels=a.get("max_channels", 32),
-        n_bands=a.get("n_bands", 5),
-        d_band=a.get("cf_d_band", 64),
-        filt_kernel=a.get("filt_kernel", 65),
-        sample_rate=256,
-        band_mask_ratio=a.get("band_mask_ratio", 0.30),
-        jepa_weight=a.get("jepa_weight", 0.3),
-        cf_weight=a.get("cf_weight", 1.0),
-        sigreg_lambda=a.get("sigreg_lambda", 0.05),
-        reg_type=a.get("reg_type", "sigreg"),
-    ).to(device)
-    model.load_state_dict(ckpt["model_state_dict"])
+    model = EEGLeJEPA_v3(**v3_kwargs_from_args(a))
+    model.load_state_dict(ckpt["model_state_dict"], strict=True)
+    model = model.to(device)
     model.eval()
     return model
 
-model = load_model("checkpoint_ep15.pt")
+model = load_model("checkpoint_ep16.pt")
 ```
 
 ---
@@ -139,12 +127,21 @@ def extract_features(model, x, device="cuda", batch=64):
         feats.append(f.cpu())
     return torch.cat(feats).numpy()
 
-# frozen linear probe with sklearn
+# Strict linear probe: select regularization on validation, score test once.
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import balanced_accuracy_score
 Ftr = extract_features(model, X_train)       # [N_tr, 512]
+Fva = extract_features(model, X_val)
 Fte = extract_features(model, X_test)         # [N_te, 512]
-clf = LogisticRegression(max_iter=1000, class_weight="balanced").fit(Ftr, y_train)
-acc = clf.score(Fte, y_test)
+scaler = StandardScaler().fit(Ftr)
+Ftr, Fva, Fte = [scaler.transform(f) for f in (Ftr, Fva, Fte)]
+candidates = []
+for C in (0.01, 0.1, 1.0):
+    clf = LogisticRegression(C=C, max_iter=3000, class_weight="balanced").fit(Ftr, y_train)
+    candidates.append((balanced_accuracy_score(y_val, clf.predict(Fva)), C, clf))
+_, _, clf = max(candidates, key=lambda row: (row[0], row[1]))
+test_ba = balanced_accuracy_score(y_test, clf.predict(Fte))
 ```
 
 `model._encode(model._tokenize(x))` returns `[B, 228, 512]` token embeddings;
@@ -189,7 +186,9 @@ opt = torch.optim.AdamW(clf.parameters(), lr=1e-4, weight_decay=5e-2)
 | `model._encode(tok)` | `[B, 228, 512]` | encoded tokens |
 | `.mean(1)` | `[B, 512]` | **per-window feature (use this)** |
 
-`228 = 19 channels × 12 time-patches` (`12 = 2560 / patch_len 200`).
+`228 = 19 channels × 12 time-patches` (`12 = floor(2560 / 200)`).
+The last 160 samples of each 10-s window are discarded. For the sleep-staging
+paper protocol, average the features of three 10-s windows before fitting the probe.
 
 ---
 

@@ -1,0 +1,55 @@
+\section{Introduction}
+EEG is central to clinical neuroscience---sleep staging, screening for abnormal background
+activity, studies of depression and cognitive load---but expert labels are scarce, which
+motivates foundation models pretrained once on large unlabeled corpora such as the TUH EEG
+Corpus (TUEG) \cite{obeid2016tuh} and transferred to many tasks
+\cite{jiang2024labram,wang2025cbramod,csbrain,reve2025}. Their pretraining objectives are
+borrowed from other modalities. LaBraM \cite{jiang2024labram} trains a vector-quantized
+tokenizer and predicts its discrete codes, as BEiT does for images \cite{bao2022beit}; CBraMod
+\cite{wang2025cbramod}, CSBrain \cite{csbrain} and REVE \cite{reve2025} reconstruct the raw
+waveform of masked patches, as masked autoencoders reconstruct pixels \cite{he2022mae}. Progress
+has come mainly from larger models and more data: REVE pretrains on about 60{,}000 hours.
+
+We present \textbf{SpecBraM}, an EEG foundation model whose pretraining target is a physical
+quantity rather than the signal. Spectral power informs many EEG labels: AASM sleep
+stages are specified by the amount of delta activity, spindles and alpha
+\cite{berry2017aasm}, clinical reports describe ``background slowing'', and quantitative EEG
+uses band powers and their ratios. SpecBraM therefore keeps the standard masked-patch
+transformer but, for each masked (channel, time) patch, predicts its log power in the five
+classical frequency bands, computed from the patch's own spectrum (Fig.~\ref{fig:contrast}). The
+target needs no tokenizer and no target network and costs one FFT per patch.
+
+This target makes pretraining efficient, and we motivate a possible mechanism
+(Sec.~\ref{sec:theory}). Under squared error, variation remaining after conditioning on the
+visible context contributes gradient variance but no expected gradient. In an idealized
+stationary-Gaussian Whittle model, marginal Fourier phases are ancillary for spectral
+parameters; this does not imply that context cannot predict phase. With exactly flat bands
+and observation restricted to those bands, the band-averaged periodogram is sufficient for
+the band levels and is their maximum-likelihood estimate. Its zero-floor logarithm has
+state-independent conditional sampling variance. These properties motivate a compact spectral
+target, but do not prove lower gradient noise or faster optimization for the implemented model.
+
+The experiments establish the efficiency gains. With backbone, data and steps fixed, band power reaches after one to two
+pretraining epochs the linear-probe quality that waveform reconstruction reaches after sixteen,
+and a band-power model with 4.2M parameters surpasses a waveform model with 51.3M. Pretrained on
+2{,}388 hours, SpecBraM is evaluated with an identical strict linear probe on eight datasets
+from six task types. Our contributions are:
+\begin{itemize}
+\item \textbf{SpecBraM}, an EEG foundation model pretrained by masked band-power prediction, a
+parameter-free physical target that replaces waveform reconstruction (Sec.~\ref{sec:method}).
+\item \textbf{An idealized rationale for the target}: band power summarizes state-associated
+spectral levels without requiring phase prediction; risk and gradient decompositions clarify
+the role of contextual uncertainty and target noise (Sec.~\ref{sec:theory},
+Appendix~\ref{app:theory}).
+\item \textbf{Evidence across tasks and in efficiency.} Under a strict linear probe SpecBraM
+has higher point estimates than CBraMod, LaBraM and CSBrain on (nearly) all tasks and REVE on
+most of them, using less pretraining data than several baselines. Matched target studies show
+gains in pretraining steps, model size and low-label sleep probing
+(Sec.~\ref{sec:results}).
+\end{itemize}
+
+\noindent We do not claim a new paradigm: masked prediction of hand-crafted features is
+established in vision \cite{wei2022maskfeat} and speech \cite{hsu2021hubert}, and spectral
+information enters the targets of several EEG models (Sec.~\ref{sec:related}).
+FAME \cite{yu2026fame} and MANAS-2 \cite{kulkarni2026manas2}, which also use band
+log-power targets, are concurrent work.

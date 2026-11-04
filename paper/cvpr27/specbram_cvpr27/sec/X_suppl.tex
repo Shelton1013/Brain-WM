@@ -1,0 +1,294 @@
+\clearpage
+\setcounter{page}{1}
+\maketitlesupplementary
+\appendix
+\section{Idealized Analysis: Statements and Proofs}\label{app:theory}
+Let $\bm{x}=(x_0,\dots,x_{N-1})$ be one channel of a patch, $f_k=kf_s/N$, and consider
+$1\le k\le K=\lfloor(N-1)/2\rfloor$. Define $X_k=\sum_t x_te^{-i2\pi kt/N}$,
+$I_k=|X_k|^2/N$, $\varphi_k=\arg X_k$.
+
+\begin{assumption}[stationary Gaussian; state acts through the spectrum]\label{as:gauss}
+Given the state $\theta$, $\bm{x}$ is a segment of a zero-mean weakly stationary Gaussian
+process with positive spectral density $S_\theta$, continuous except at finitely many points
+and continuous at the $f_k$ used.
+\end{assumption}
+
+\begin{lemma}[Brillinger 1981, Thm.~4.4.1]\label{lem:dft}
+Under Assumption~\ref{as:gauss}, as $N\to\infty$, for a fixed set of frequencies,
+$X_k/\sqrt{NS_\theta(f_k)}$ converges in distribution to independent standard circular complex
+Gaussians. Hence approximately $I_k\approx S_\theta(f_k)E_k$ with $E_k$ i.i.d.\
+$\mathrm{Exp}(1)$, and $\varphi_k$ i.i.d.\ uniform on $[0,2\pi)$, independent of $\{I_k\}$,
+with a distribution that does not depend on $\theta$.
+\end{lemma}
+\noindent The Whittle approximation \cite{whittle1953} follows:
+\begin{equation}\label{eq:whittle}
+-\log p(\bm{x}\mid\theta)\approx\sum_{k=1}^{K}\Bigl[\log S_\theta(f_k)+\frac{I_k}{S_\theta(f_k)}\Bigr]+\text{const}.
+\end{equation}
+
+\begin{proposition}[phase is ancillary]\label{prop:suff}
+In the Whittle model of \eqref{eq:whittle}, $(I_1,\dots,I_K)$ is sufficient for
+$\theta$, and the distribution of $(\varphi_1,\dots,\varphi_K)$ does not depend on $\theta$.
+\end{proposition}
+\begin{proof}
+The data enter \eqref{eq:whittle} only through $\{I_k\}$ (Fisher--Neyman factorization); the
+phase distribution is given by Lemma~\ref{lem:dft}.
+\end{proof}
+\noindent This is a statement about a patch's marginal spectral likelihood. It does not
+imply that its phase is independent of visible context. Both the magnitude and phase of a
+Fourier coefficient fluctuate conditional on the state; correlations with neighbouring
+samples or other channels can make part of that realization predictable.
+
+\begin{assumption}[approximately flat bands; in-band observation]\label{as:band}
+Let $\mathcal{F}=[0.5,45]$\,Hz contain disjoint bands $B_1,\dots,B_5$, possibly separated by
+transition regions. (i) For $f_k\in B_b$, $S_\theta(f_k)\approx s_b(\theta)$. (ii) The
+observation consists only of the in-band coefficients $\{X_k:f_k\in\bigcup_bB_b\}$
+(equivalently, the signal is first band-passed to $\bigcup_bB_b$). Let
+$m_b=\#\{k:f_k\in B_b\}$.
+\end{assumption}
+\noindent Part (ii) avoids any conflict with the continuity in Assumption~\ref{as:gauss}: the
+spectrum may vary continuously everywhere; (i) only requires it to be nearly constant within
+each band.
+
+\begin{proposition}[band power in the restricted Whittle model]\label{prop:mle}
+Under Assumption~\ref{as:band} with equality in (i), in the Whittle model of \eqref{eq:whittle},
+$P_b=m_b^{-1}\sum_{f_k\in B_b}I_k$ is sufficient for $\bm{s}=(s_b)_b$, $\hat s_b=P_b$ is the
+maximum-likelihood estimate, and $\log P_b$ is the MLE of $\log s_b$.
+\end{proposition}
+\begin{proof}
+By (ii) the likelihood involves only in-band bins; by (i),
+$-\log p(\bm{x}\mid\bm{s})\approx\sum_b[m_b\log s_b+m_bP_b/s_b]+\text{const}$. The data enter
+only through $P_b$; setting the derivative in $s_b$ to zero gives $\hat s_b=P_b$.
+\end{proof}
+\begin{remark}
+Prop.~\ref{prop:mle} is exact within this restricted likelihood; it is an idealization for
+non-flat spectra and finite EEG patches. It does not establish sufficiency for spectral
+information outside the observed bands or for arbitrary downstream labels. For an
+ideal circular band-pass $\tilde h_b$, Parseval gives
+$\frac1N\sum_t((\tilde h_b*\bm{x})_t)^2=\frac{2m_b}{N}P_b$, a per-band constant factor. The
+main target (Eq.~\eqref{eq:target}, with $N{=}P$) uses
+$\log(a_bP_b+\varepsilon)$, where $a_b=2m_b/N$. At zero floor this is $\log P_b+\log a_b$.
+At positive floor the transformation remains invertible, but its noise distribution is no
+longer a constant shift of the zero-floor log distribution.
+\end{remark}
+
+\begin{proposition}[conditional noise of zero-floor log power]\label{prop:var}
+In the independent-bin Whittle model with exactly flat bands,
+$P_b=s_b(\theta)G_b$ conditional on $\theta$, where
+$G_b\sim\mathrm{Gamma}(m_b,1/m_b)$ (shape, scale). Thus
+\begin{align*}
+\Var[P_b\mid\theta]&=s_b(\theta)^2/m_b,\\
+\E[\log P_b\mid\theta]&=\log s_b(\theta)+\psi(m_b)-\log m_b,\\
+\Var[\log P_b\mid\theta]&=\psi'(m_b)\approx1/m_b.
+\end{align*}
+\end{proposition}
+\begin{proof}
+A sum of $m$ i.i.d.\ $\mathrm{Exp}(1)$ is $\mathrm{Gamma}(m,1)$, whose logarithm has mean
+$\psi(m)$ and variance $\psi'(m)$.
+\end{proof}
+\noindent For Eq.~\eqref{eq:target}, the additional term
+$\log(G_b+\varepsilon/[a_bs_b(\theta)])$ generally has a state-dependent mean and variance.
+The zero-floor identities are therefore reference calculations, not exact noise identities
+for the implemented target; no negligible-floor approximation is assumed for all observations.
+
+\begin{assumption}[shared state and independent-patch idealization]\label{as:persist}
+The context $\bm{c}$ and the masked patch share the state $\theta$, and given $\theta$ the
+target of the masked patch is independent of $\bm{c}$.
+\end{assumption}
+\noindent This is an additional idealization used below for band power, not a consequence of
+phase ancillarity or patch-local target computation. Adjacent patches and other channels may
+remain correlated conditional on the state. The correlated waveform model below does not
+impose this independence assumption.
+
+\begin{proposition}[risk decomposition for any target]\label{prop:decomp}
+For a square-integrable target $Y$, let $g(\bm{c})=\E[Y\mid\bm{c}]$ and
+$V(\bm{c})=\operatorname{Cov}(Y\mid\bm{c})$. Under squared Euclidean loss,
+\begin{align*}
+R(f)&=\E\|f(\bm{c})-Y\|^2,\\
+R^*&=\inf_f R(f)=\E\operatorname{tr}V(\bm{c}),\\
+R(f)-R^*&=\E\|f(\bm{c})-g(\bm{c})\|^2.
+\end{align*}
+For scalar $Y$ under Assumption~\ref{as:persist}, writing
+$\mu(\theta)=\E[Y\mid\theta]$ and $\sigma^2(\theta)=\Var(Y\mid\theta)$ gives
+$R^*=\E[\Var(\mu(\theta)\mid\bm{c})]+\E[\sigma^2(\theta)]$.
+\end{proposition}
+\begin{proof}
+Expanding $f-Y=(f-g)+(g-Y)$, the cross term vanishes after conditioning on $\bm{c}$.
+The last identity follows from conditional independence:
+$\E[Y\mid\bm{c}]=\E[\mu(\theta)\mid\bm{c}]$ and
+$\Var(Y\mid\bm{c})=\Var(\mu(\theta)\mid\bm{c})+\E[\sigma^2(\theta)\mid\bm{c}]$; take
+expectations over $\bm{c}$.
+\end{proof}
+\noindent For zero-floor $Y_b=\log P_b$ under Assumption~\ref{as:persist} and the exact
+flat-band Whittle model, let $k_b=\psi(m_b)-\log m_b$. Then
+\begin{align*}
+g_b(\bm{c})&=\E[\log s_b(\theta)\mid\bm{c}]+k_b,\\
+V_b(\bm{c})&=\psi'(m_b)+\Var(\log s_b(\theta)\mid\bm{c}).
+\end{align*}
+Both terms in the Bayes risk are irreducible for a fixed observed context. Only excess
+prediction error above this risk is reducible by improving $f$. Predicting a posterior average
+of spectral levels need not identify $\theta$ or a downstream label.
+
+\noindent\emph{A separate correlated waveform model.} Applying the independence assumption
+to a zero-mean waveform would give $g(\bm{c})=\bm{0}$. Instead, for a fixed mask suppose
+$(\bm{x}_M,\bm{c})$ is jointly zero-mean Gaussian conditional on $\theta$, allowing nonzero
+cross-covariance. Its conditional mean and innovation covariance are
+\begin{align*}
+\bm{m}_\theta(\bm{c})&=\Sigma_{Mc,\theta}\Sigma_{cc,\theta}^{-1}\bm{c},\\
+Q_\theta&=\Sigma_{MM,\theta}
+-\Sigma_{Mc,\theta}\Sigma_{cc,\theta}^{-1}\Sigma_{cM,\theta},
+\end{align*}
+assuming $\Sigma_{cc,\theta}$ is invertible. With the state unknown, total expectation and
+covariance give
+\begin{align*}
+g_{\mathrm{raw}}(\bm{c})&=\E[\bm{m}_\theta(\bm{c})\mid\bm{c}],\\
+V_{\mathrm{raw}}(\bm{c})&=\E[Q_\theta\mid\bm{c}]
++\operatorname{Cov}(\bm{m}_\theta(\bm{c})\mid\bm{c}).
+\end{align*}
+Thus the known-state innovation alone omits posterior state uncertainty. For per-coordinate
+waveform MSE, the Bayes risk is $\E\operatorname{tr}V_{\mathrm{raw}}(\bm{c})/|M|$.
+
+\begin{proposition}[the irreducible part adds gradient noise, not signal]\label{prop:grad}
+Let $Y=g(\bm{c})+\xi$ with $g(\bm{c})=\E[Y\mid\bm{c}]$, $\E[\xi\mid\bm{c}]=0$ and
+$\mathrm{Cov}(\xi\mid\bm{c})=\Sigma(\bm{c})$. For a model $f_w$ with Jacobian
+$J=\partial f_w(\bm{c})/\partial w$ and loss $\ell=\tfrac12\|f_w(\bm{c})-Y\|^2$, the stochastic
+gradient $G=J^\top(f_w(\bm{c})-Y)$ satisfies
+$\E[G]=\nabla_w\tfrac12\E\|f_w(\bm{c})-g(\bm{c})\|^2$ and
+$\mathrm{Cov}(G)=\mathrm{Cov}\bigl(J^\top(f_w-g)\bigr)+\E\bigl[J^\top\Sigma(\bm{c})J\bigr]$.
+\end{proposition}
+\begin{proof}
+$G=J^\top(f_w-g)-J^\top\xi$. Conditioning on $\bm{c}$, $\E[J^\top\xi\mid\bm{c}]=0$, so the
+second term has mean zero and is uncorrelated with the first; its covariance is
+$\E[J^\top\E[\xi\xi^\top\mid\bm{c}]J]$.
+\end{proof}
+\noindent The expected gradient depends only on the excess prediction error $f_w-g$; the
+conditional residual contributes $\E[J^\top\Sigma J]$. Here $\Sigma(\bm{c})=V(\bm{c})$ is
+the \emph{full} conditional covariance. For the vector of zero-floor log band powers under
+the independent-patch, flat-band Whittle model, let
+$\bm{\lambda}(\theta)=(\log s_b(\theta))_{b=1}^5$. Then
+\[
+\Sigma_{\mathrm{BP}}(\bm{c})=\operatorname{diag}_{b}\{\psi'(m_b)\}
++\operatorname{Cov}(\bm{\lambda}(\theta)\mid\bm{c}).
+\]
+For the correlated waveform model it is $V_{\mathrm{raw}}(\bm{c})$ above. The positive floor
+changes the band-power noise identities, and neither target's gradient covariance is determined
+by its marginal target variance alone.
+
+For an $L$-smooth, lower-bounded population risk $\mathcal{R}(w)$, unbiased stochastic gradients
+with variance bounded by $\sigma_G^2$, independent mini-batch samples of size $B$, and suitable
+step sizes, a standard upper bound for returning an iterate with
+$\E\|\nabla_w\mathcal{R}\|^2\le\epsilon$ has order
+$L\Delta/\epsilon+L\Delta\sigma_G^2/(B\epsilon^2)$, where $\Delta$ is the initial risk gap
+\cite{ghadimi2013}. This upper bound can worsen with gradient variance; it does not establish
+that one target necessarily needs proportionally more steps, or bound steps to a downstream
+score. Comparing the targets also changes $g$, $J$, loss scale and smoothness. The gradient
+identity therefore motivates a possible mechanism rather than proving the observed speedup.
+
+\noindent\emph{Empirical comparison.} On TUAB evaluation windows (Table~\ref{tab:target_r2}) the
+band-power model's error at epoch 16 is $0.16/0.12/0.10/0.06/0.08$ for
+$\delta/\theta/\alpha/\beta/\gamma$, against an idealized noise $\psi'(m_b)$ of
+$0.40/0.40/0.28/0.08/0.09$ (Table~\ref{tab:bins}). Errors below these reference values show
+that the idealized calculation is not a quantitative noise floor for this setting. Contextual
+dependence, non-flat spectra, finite patches and the positive floor can all affect the
+comparison; these measurements do not isolate a cause or establish a general bound on Bayes
+risk. The waveform model explains $3\%$ of its target's variance. Achieved $R^2$ measures the
+trained predictor, not the maximum predictability of either target.
+
+\begin{table}[h]\centering\small
+\caption{Ideal rectangular bands at our patch length ($N{=}200$, $f_s{=}256$\,Hz,
+$\Delta f{=}1.28$\,Hz): number of Fourier bins and idealized conditional sampling noise of
+zero-floor $\log P_b$ (Prop.~\ref{prop:var}). These are the bands and bin counts of the main
+target; the noise values are not measured conditional variances for Eq.~\eqref{eq:target}.}
+\label{tab:bins}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{l c c c}
+\toprule
+Band & Range (Hz) & $m_b$ & $\mathrm{sd}[\log P_b\mid\theta]=\sqrt{\psi'(m_b)}$\\
+\midrule
+$\delta$ & 0.5--4 & 3 & 0.63\\
+$\theta$ & 4--8 & 3 & 0.63\\
+$\alpha$ & 8--13 & 4 & 0.53\\
+$\beta$ & 13--30 & 13 & 0.28\\
+$\gamma$ & 30--45 & 12 & 0.29\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Downstream Data Details}\label{app:data}
+\noindent\textbf{Beyond-sleep tasks.} For MA, Mumtaz and PhysioNet-MI we reproduce CBraMod's
+\texttt{preprocessing\_*.py} scripts line by line (file ordering, split slices, channel
+selection, filtering, resampling to 200\,Hz and window length) and store the samples once;
+every model is probed on these samples. FACED's official processed release was not
+reachable from our region; we rebuilt it from the public raw BIDS recordings following the
+FACED paper (last 30\,s of each clip, 0.05--47\,Hz, common average reference, 250\,Hz,
+bad-channel interpolation; no ICA) and then applied CBraMod's FACED preprocessing. Our input
+convention adds, for our model only, 0.5--45\,Hz band-pass, resampling to 256\,Hz and
+per-recording robust scaling of the same samples, restricted to the 19 standard leads, which
+all four tasks contain.
+
+\input{tables/appendix_detail}
+
+\section{Band Power versus Waveform Reconstruction beyond Sleep}\label{app:targettasks}
+\input{tables/target_tasks}
+Table~\ref{tab:target_tasks} extends the target study of Sec.~\ref{sec:targetstudy} to the other
+tasks. Band power has higher mean scores on mental arithmetic ($+6.2$), depression screening
+($+1.8$) and event classification ($+2.8$), and close mean scores on emotion recognition, motor
+imagery and abnormality detection; these comparisons do not establish equivalence.
+
+\section{Fine-Tuning}\label{app:fttasks}
+\input{tables/ft30}
+\noindent\textbf{Sleep staging.} Following CBraMod and CSBrain, 30-s epochs are grouped in
+sequences of 20; each epoch is encoded (mean of its three 10-s windows), and a shared one-layer
+transformer predicts one stage per epoch. Encoder and head are trained with AdamW (learning
+rate $10^{-4}$, weight decay $0.05$) for up to 50 epochs with early stopping on validation
+balanced accuracy (patience 10). SpecBraM reaches $0.8177{\pm}0.0032$ balanced accuracy on
+ISRUC and $0.7696{\pm}0.0012$ on HMC (Table~\ref{tab:ft30}), above the listed published point estimates
+(CSBrain $0.7925$/$0.7345$, REVE $0.7819$ on ISRUC), with the highest Cohen's $\kappa$ on both
+datasets among the listed methods. The models differ in architecture, data and training recipe, and our standard
+deviations are across pretraining seeds, unlike the baselines' fine-tuning seeds. After
+fine-tuning, the gap to the matched raw-reconstruction model narrows to about $1.14$/$1.45$ points
+($0.8062$/$0.7551$). In these sleep experiments, the target differences are larger for frozen
+and low-label probes than after full fine-tuning.
+
+\input{tables/ft_tasks}
+\noindent\textbf{Other tasks.} Table~\ref{tab:ft_tasks} fine-tunes the encoder on the non-sleep
+tasks, for SpecBraM and the matched raw-reconstruction model (layer-wise learning-rate decay,
+early stopping on validation balanced accuracy). Band power has higher mean scores on mental
+arithmetic, motor imagery, abnormality detection and event classification, and the mean scores
+are close on depression screening and emotion recognition.
+
+\section{Variants of the Band-Power Target}\label{app:variants}
+\input{tables/variants}
+Table~\ref{tab:variants} varies the spectral estimator while keeping the main model otherwise
+unchanged. With $0.78$-s patches the $\delta$ and $\theta$ bands contain only
+three Fourier bins, motivating variance reduction (Table~\ref{tab:bins}). A multitaper estimate
+(three DPSS tapers, $NW{=}2$) averages eigenspectra with ${\pm}2.6$\,Hz smoothing; the variance
+reduction of the integrated log-band target is not measured here. It gives nearby full-label
+mean scores and higher means with $1\%$ of the training epochs. Both estimators support strong
+sleep representations, without identifying target-noise reduction as the cause.
+
+\section{Factors besides the Target}\label{app:confounds}
+\input{tables/confounds}
+The comparison with external models (Sec.~\ref{sec:lpfm}) also differs in model size, input
+convention and readout. Table~\ref{tab:confounds} varies each in turn. \emph{Readout}: averaging
+tokens within each channel and concatenating the channels, still followed by a logistic
+regression, raises CBraMod by $4.3$/$6.5$ points and LaBraM by $1.2$/$6.3$, while SpecBraM is
+unchanged on ISRUC and gains $0.7$ on HMC; mean pooling therefore under-reads these models, but
+SpecBraM still leads them by $2.5$--$6.6$ points. REVE-Base reaches $0.7995$ on ISRUC with this
+readout, close to SpecBraM's point estimate. \emph{Input}: normalizing CBraMod's and LaBraM's input per
+recording, as for our model, helps CBraMod ($+1.4$/$+5.4$) and is mixed for LaBraM
+($-2.0$/$+2.0$). \emph{Scale}: at CBraMod's size (4.2M parameters) our band-power model loses
+only $0.8$/$1.5$ points and still exceeds CBraMod by $6.0$/$10.9$, while raw reconstruction
+loses $1.6$/$4.2$ points. Model size thus explains little of the gap to CBraMod and LaBraM, and
+the target matters more at small scale.
+
+\section{Handcrafted Spectral Features}\label{app:handcrafted}
+\input{tables/handcrafted}
+Since the target is a spectral feature, a natural question is what self-supervision adds over
+computing spectral features directly. Table~\ref{tab:handcrafted} probes two handcrafted feature
+sets with the same protocol. The rich set is a strong reference: on sleep staging it exceeds
+CBraMod and LaBraM and the raw-reconstruction model on HMC, but SpecBraM exceeds it by
+$3.3$/$2.1$ points with all labels; with $1\%$ of the labels the two are close
+($0.765$/$0.670$ vs.\ $0.747$/$0.674$). Beyond sleep, SpecBraM is clearly ahead on depression
+screening and the two clinical tasks and about level on emotion recognition and motor imagery.
+The handcrafted probes select the lower edge of the shared grid $C\in\{0.01,0.1,1\}$, so a
+wider grid might raise them slightly.

@@ -1,0 +1,41 @@
+{
+  "task": "tuev",
+  "results": {
+    "reve_base_mean": {
+      "C": 0.01,
+      "val_ba": 0.42063971276106454,
+      "test": {
+        "balanced_accuracy": 0.5716976750185547,
+        "cohen_kappa": 0.5633554016863203,
+        "weighted_f1": 0.7771252236686634
+      }
+    },
+    "reve_base_attn": {
+      "C": 0.01,
+      "val_ba": 0.440908293333546,
+      "test": {
+        "balanced_accuracy": 0.5458188185222729,
+        "cohen_kappa": 0.5658487090464133,
+        "weighted_f1": 0.7783195276772391
+      }
+    },
+    "reve_large_mean": {
+      "C": 0.01,
+      "val_ba": 0.41533586743112666,
+      "test": {
+        "balanced_accuracy": 0.5675289531973527,
+        "cohen_kappa": 0.548284330051386,
+        "weighted_f1": 0.7659870876454072
+      }
+    },
+    "reve_large_attn": {
+      "C": 0.01,
+      "val_ba": 0.4133069067745312,
+      "test": {
+        "balanced_accuracy": 0.5709456140654091,
+        "cohen_kappa": 0.5476517838888764,
+        "weighted_f1": 0.7690238257524897
+      }
+    }
+  }
+}

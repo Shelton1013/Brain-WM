@@ -20,6 +20,7 @@ compared here (CBraMod's main TUAB result also pretrains on TUEG incl. TUAB).
 import argparse
 import json
 import os
+import warnings
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -36,6 +37,20 @@ TCP_IDX = [(MONO.index(a), MONO.index(b)) for a, b in TCP]
 WIN = 2000
 
 
+def validate_patient_splits(files):
+    """Preserve the reference protocol, but reject test leakage and expose val overlap."""
+    patients = {s: {p.stem.split("_")[0] for p, _, split in files if split == s}
+                for s in ("train", "val", "test")}
+    if patients["test"] & (patients["train"] | patients["val"]):
+        raise ValueError("TUAB test patients overlap training or validation")
+    overlap = patients["train"] & patients["val"]
+    if overlap:
+        warnings.warn(f"Reference per-class TUAB split shares {len(overlap)} patients between "
+                      "train and validation; test patients remain disjoint. Report this limitation.",
+                      RuntimeWarning)
+    return len(overlap)
+
+
 def split_files():
     out = []
     for cls, lab in (("abnormal", 1), ("normal", 0)):
@@ -46,6 +61,7 @@ def split_files():
         out += [(d / f, lab, part[f.split("_")[0]]) for f in sorted(os.listdir(d)) if f.endswith(".edf")]
         e = ROOT / "eval" / cls / "01_tcp_ar"
         out += [(e / f, lab, "test") for f in sorted(os.listdir(e)) if f.endswith(".edf")]
+    validate_patient_splits(out)
     return out
 
 
@@ -94,17 +110,22 @@ def main():
         done = [r for r in pool.imap(process, [(f, l, s, tmp) for f, l, s in files], chunksize=4) if r]
     print(f"{len(done)} usable", flush=True)
     # concatenate (sorted = deterministic) into single arrays for fast full loads
-    parts = [np.load(f) for f in sorted(done)]
-    N = sum(len(q["mono"]) for q in parts)
+    parts = sorted(done)
+    # open one npz at a time: ~3k lazily-held handles exceed the fd limit
+    N = 0
+    for f in parts:
+        with np.load(f) as q:
+            N += q["mono"].shape[0]
     mono = np.lib.format.open_memmap(out / "mono200.tmp.npy", "w+", np.float16, (N, 19, WIN))
     ours = np.lib.format.open_memmap(out / "ours256.tmp.npy", "w+", np.float16, (N, 2560, 19))
     meta = {"y": [], "rec": [], "split": []}
     i = 0
-    for q in parts:
-        n = len(q["mono"])
-        mono[i:i + n] = q["mono"]; ours[i:i + n] = q["ours"]
-        meta["y"] += [int(q["lab"])] * n; meta["rec"] += [str(q["rec"])] * n
-        meta["split"] += [str(q["sp"])] * n
+    for f in parts:
+        with np.load(f) as q:
+            n = q["mono"].shape[0]
+            mono[i:i + n] = q["mono"]; ours[i:i + n] = q["ours"]
+            meta["y"] += [int(q["lab"])] * n; meta["rec"] += [str(q["rec"])] * n
+            meta["split"] += [str(q["sp"])] * n
         i += n
     mono.flush(); ours.flush(); del mono, ours
     np.savez(out / "meta.npz", y=np.asarray(meta["y"], np.int64), rec=np.asarray(meta["rec"]),

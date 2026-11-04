@@ -1,0 +1,15 @@
+{
+  "task": "faced",
+  "results": {
+    "sbp_s43": {
+      "C": 0.01,
+      "val_ba": 0.20462962962962963,
+      "test": {
+        "balanced_accuracy": 0.19122383252818034,
+        "cohen_kappa": 0.08984724098513974,
+        "weighted_f1": 0.1856982231085045
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_small144_fftstdlog_nosig_s43_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

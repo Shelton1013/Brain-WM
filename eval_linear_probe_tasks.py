@@ -18,6 +18,7 @@ Input contract per model (same samples, each model's own convention):
         --checkpoints linbp_s42=.../checkpoint_ep16.pt --output lp_ma.json
 """
 import argparse
+import os
 import json
 from pathlib import Path
 
@@ -32,6 +33,23 @@ from sklearn.preprocessing import StandardScaler
 from dataset_mumtaz import OUR_19CH_ORDER
 
 C_GRID = (0.01, 0.1, 1.0)
+# set PRED_CTX["path"] (and "subj": test-sample subject ids) before probe() to save predictions
+PRED_CTX = {"path": None, "subj": None}
+
+
+def subject_of(task, rec):
+    """Subject id of each sample from its recording id (TUEV evaluation files are anonymized,
+    so the recording is the unit there)."""
+    rec = [str(r) for r in rec]
+    if task == "ma":
+        return np.array([r.split("_")[0] for r in rec])
+    if task == "mumtaz":
+        return np.array([" ".join(r.split()[:-1]) for r in rec])
+    if task == "physio":
+        return np.array([r[:4] for r in rec])
+    if task == "tuab":
+        return np.array([r.split("_")[0] for r in rec])
+    return np.array(rec)
 _ALIAS = {"T7": "T3", "T8": "T4", "P7": "T5", "P8": "T6"}      # new -> old 10-20 names
 
 
@@ -99,6 +117,12 @@ def probe(F, y, n_cls):
     clf = fit(C)
     res = {"C": C, "val_ba": float(val_ba),
            "test": score(y["test"], clf.predict(F["test"]), clf.predict_proba(F["test"]), n_cls)}
+    if PRED_CTX["path"]:
+        Path(PRED_CTX["path"]).parent.mkdir(parents=True, exist_ok=True)
+        np.savez(PRED_CTX["path"], y=y["test"], pred=clf.predict(F["test"]),
+                 proba=clf.predict_proba(F["test"]), subj=PRED_CTX["subj"], val_ba=float(val_ba),
+                 **({"feat": F["test"].astype(np.float16)} if os.environ.get("SAVE_FEAT") else {}))
+        PRED_CTX["path"] = None
     print(f"    C={C} val_ba={val_ba:.4f} test {res['test']}", flush=True)
     return res
 
@@ -106,11 +130,13 @@ def probe(F, y, n_cls):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--task", required=True, choices=["ma", "mumtaz", "physio", "faced"])
-    p.add_argument("--data_dir", default="/home/pxieaf/home2/datasets/lp_tasks")
+    p.add_argument("--data_dir", default=os.environ.get("SPECBRAM_TASK_DATA", "/home/pxieaf/home2/datasets/lp_tasks"))
     p.add_argument("--checkpoints", nargs="*", default=[], help="name=path ...")
     p.add_argument("--random_init", action="store_true")
-    p.add_argument("--baselines", nargs="*", default=[], choices=["cbramod", "labram"])
+    p.add_argument("--baselines", nargs="*", default=[],
+                   choices=["cbramod", "labram", "reve_base", "reve_large", "csbrain"])
     p.add_argument("--output", required=True)
+    p.add_argument("--pred_dir", default=None, help="save test predictions per model")
     a = p.parse_args()
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -119,6 +145,12 @@ def main():
     parts = {k: sp == k for k in ("train", "val", "test")}
     y = {k: y_all[m] for k, m in parts.items()}
     n_cls = int(y_all.max()) + 1
+    subj_test = subject_of(a.task, rec[parts["test"]])
+
+    def arm(name):
+        if a.pred_dir:
+            PRED_CTX["path"] = str(Path(a.pred_dir) / f"{a.task}__{name}.npz")
+            PRED_CTX["subj"] = subj_test
     print(f"{a.task}: X {X.shape}, classes {n_cls}, "
           + " ".join(f"{k}={m.sum()}" for k, m in parts.items()), flush=True)
 
@@ -140,14 +172,35 @@ def main():
                 model = build_random_init(cls, n_ch, args, dev)
             print(f"  [{name}]", flush=True)
             F = feats_ours(model, Xo, dev)
+            arm(name)
             res["results"][name] = probe({k: F[m] for k, m in parts.items()}, y, n_cls)
             res["results"][name]["checkpoint"] = None if name == "random_init" else ck
             save(); del model; torch.cuda.empty_cache()
     for b in a.baselines:
+        if b.startswith("reve"):                     # two frozen readouts, one forward pass
+            if all(f"{b}_{pl}" in res["results"] for pl in ("mean", "attn")):
+                continue
+            from eval_linear_probe_v2 import reve_features
+            print(f"  [{b}]", flush=True)
+            FF = reve_features(b.split("_")[1], X.transpose(0, 2, 1), ch, rec, dev)
+            for pl, F in FF.items():
+                arm(f"{b}_{pl}")
+                res["results"][f"{b}_{pl}"] = probe({k: F[m] for k, m in parts.items()}, y, n_cls)
+            save()
+            continue
         if b in res["results"]:
             continue
         print(f"  [{b}]", flush=True)
-        F = feats_baseline(b, X, ch, dev)
+        if b == "csbrain":
+            from eval_linear_probe_v2 import csbrain_encoder
+            enc = csbrain_encoder(dev, a.task)[0]
+            with torch.no_grad():
+                F = np.concatenate([enc(torch.from_numpy(np.ascontiguousarray(X[i:i + 64].transpose(0, 2, 1))).to(dev),
+                                        list(range(len(ch))), names=[c.upper() for c in ch]).float().cpu().numpy()
+                                    for i in range(0, len(X), 64)])
+        else:
+            F = feats_baseline(b, X, ch, dev)
+        arm(b)
         res["results"][b] = probe({k: F[m] for k, m in parts.items()}, y, n_cls)
         save()
     save()

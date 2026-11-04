@@ -11,3 +11,38 @@ dist/
 # Local logs / outputs
 *.log
 .DS_Store
+
+# Private project handoff and local experiment payloads (not publication artifacts)
+/handoff/
+/docs/specbram_handoff/
+/AGENTS.md
+/tools/export_specbram_handoff.py
+results/**/*.npz
+/results/bootstrap/boot_reviewed.json
+/results/bootstrap/boot_before_review_*.json
+*.pt
+*.pth
+*.ckpt
+
+# Rebuildable LaTeX state and superseded local deliveries
+*.aux
+*.blg
+*.brf
+*.out
+*.synctex.gz
+/paper/arxiv/specbram_draft*
+/paper/arxiv/arxiv_upload*.zip
+/paper/arxiv/specbram_arxiv_updated.pdf
+/paper/arxiv/submission_short_abstract/
+/paper/cvpr27/specbram_cvpr27_preview.pdf
+/specbram_overleaf.zip
+/paper/AnonymousSubmission2027.*
+/paper/CameraReady2027.*
+/paper/ReproducibilityChecklist.*
+/paper/arxiv/specbram_reviewed_2026-11-05.*
+/paper/arxiv/make_arxiv_tables_v1_backup.py
+/paper/cvpr27/review_build_2026-11-05/
+/paper/cvpr27/specbram_cvpr27_overleaf_reviewed.zip
+/report/*_reviewed.*
+*.fls
+*.fdb_latexmk

@@ -1,0 +1,219 @@
+% Detailed per-dataset results (REVE-style). Counts filled in from dataset_counts.json.
+\section{Detailed Results per Dataset}\label{app:fullmetrics}
+Table~\ref{tab:overview} reports balanced accuracy only. Here every dataset is described and
+given its own table with the metrics that prior EEG foundation models report: balanced accuracy,
+Cohen's $\kappa$ and weighted F1 for every task, and additionally AUROC and AUC-PR for the binary
+tasks. All numbers come from the strict linear probe of Sec.~\ref{sec:lpproto}, measured by us
+with the released weights on identical samples and splits; balanced accuracy on the validation
+split is the only selection criterion (the regularization $C$ and, for REVE, the readout).
+
+\noindent\textbf{Uncertainty.} The external models are released as single checkpoints, so we
+evaluate one checkpoint of SpecBraM as well, our main released model, and quantify the
+uncertainty of every model in the same way. For mixed-label or multiclass tasks we use ordinary
+cluster resampling of test subjects with replacement. For binary tasks whose subjects each
+have one true label, subjects are resampled within true-label strata. For TUEV the cluster unit
+is the recording, since its evaluation files are anonymized. Candidate resamples missing any
+test-set class are discarded until 1{,}000 valid replicates are obtained. Every metric is
+recomputed on the pooled samples of the drawn clusters; the 2.5th and 97.5th percentiles form
+the nominal 95\% confidence interval. These intervals describe test-cohort sampling variation
+conditional on the fitted checkpoint and probe, not pretraining-seed variability. To show the variation of our
+pretraining, each table also lists SpecBraM's mean and standard deviation over its three
+pretraining seeds; this row is not used for the comparison.
+
+\noindent\textbf{Confusion matrices.} For every dataset we also show the row-normalized confusion
+matrices of SpecBraM and of REVE, the strongest baseline, and their difference, to see which
+classes each model recognizes.
+
+\noindent\textbf{Paired differences.} Overlapping intervals do not imply that two models are
+equivalent, so we also bootstrap the difference itself: on each of the 1{,}000 resamples the
+score of every external model is subtracted from SpecBraM's on the same drawn clusters,
+preserving the pairing (Table~\ref{tab:paired}). The generated table gives the nominal,
+unadjusted 95\% intervals for each difference; no correction for multiple comparisons is
+applied. An interval excluding zero is evidence of a difference under this procedure. An
+interval containing zero indicates no detected difference, not equivalence or noninferiority.
+The intervals condition on the evaluated checkpoints and do not include training variability.
+\input{tables/paired}
+
+\noindent\textbf{Per-subject comparison.} A higher pooled score could come from a few subjects.
+Fig.~\ref{fig:per_subject} compares SpecBraM and REVE subject by subject, and
+Table~\ref{tab:per_subject} counts the subjects on which SpecBraM is better, equal or worse than
+each external model. SpecBraM is better than CBraMod and CSBrain on every sleep subject and than
+LaBraM and BIOT on all but one subject per sleep dataset; on every other dataset it is better than
+CBraMod, LaBraM and CSBrain on more subjects than it is worse. Against REVE it is better on $81\%$ of the HMC subjects and on three of the
+four MA subjects, and about even on ISRUC, Mumtaz, FACED and PhysioNet-MI. On the clinical
+corpora the comparison is close in both directions: REVE is better on slightly more TUAB
+patients ($41\%$ vs.\ $36\%$, $23\%$ ties) and SpecBraM on slightly more TUEV recordings ($45\%$
+vs.\ $37\%$).
+\begin{figure*}[t]\centering
+\includegraphics[width=\textwidth]{figures/per_subject.pdf}
+\caption{\textbf{Per-subject balanced accuracy}, SpecBraM's main checkpoint vs.\ REVE-Base
+(strict linear probe; one point per test subject, TUEV: per recording; dashed: equality).
+Titles: share of subjects on which SpecBraM is better / worse.}
+\label{fig:per_subject}
+\end{figure*}
+\input{tables/per_subject}
+
+\subsection{Sleep Staging: ISRUC}
+ISRUC subgroup~I \cite{khalighi2016isruc} contains one overnight polysomnography of each of
+100 adults with sleep complaints, scored by experts in 30-s epochs into five AASM stages (W, N1,
+N2, N3, REM). We use the six mastoid-referenced EEG leads (F3-A2, C3-A2, O1-A2, F4-A1, C4-A1,
+O2-A1; 200\,Hz), of which F3/F4 are missing in some recordings, and the subject split of CBraMod
+and CSBrain (subjects 1--80/81--90/91--100; @ISRUC_N@ epochs). A 30-s epoch is represented by
+the mean of the features of its three 10-s windows.
+\input{tables/detail_isruc}
+\begin{figure}[h]\centering
+\includegraphics[width=\columnwidth]{figures/cm_isruc.pdf}
+\caption{\textbf{Confusion matrices on ISRUC} (strict linear probe, row-normalized recall in \%): SpecBraM's main checkpoint, REVE-Base and their difference (blue: SpecBraM higher).}
+\label{fig:cm_isruc}
+\end{figure}
+Fig.~\ref{fig:cm_isruc}: The two models make the same kinds of errors: N1 is confused with N2 and REM, and N3 with N2. Per-class recall differs by at most $2.4$ points, consistent with the small difference in balanced-accuracy point estimates.
+
+\subsection{Sleep Staging: HMC}
+HMC \cite{alvarez2021hmc} contains 151 clinical polysomnographies from the Haaglanden Medisch
+Centrum, scored in 30-s epochs into the same five stages. We use the four EEG leads (F4-M1,
+C4-M1, O2-M1, C3-M2; 256\,Hz) and the split of CBraMod and CSBrain by sorted subject ID
+(100/25/26 recordings; @HMC_N@ epochs). Epochs are represented as for ISRUC.
+\input{tables/detail_hmc}
+\begin{figure}[h]\centering
+\includegraphics[width=\columnwidth]{figures/cm_hmc.pdf}
+\caption{\textbf{Confusion matrices on HMC} (strict linear probe, row-normalized recall in \%): SpecBraM's main checkpoint, REVE-Base and their difference (blue: SpecBraM higher).}
+\label{fig:cm_hmc}
+\end{figure}
+Fig.~\ref{fig:cm_hmc}: SpecBraM's lead over REVE comes from the transitional and REM stages: its recall is higher by $5.0$ points for N1, $6.0$ for N2 and $7.7$ for REM, while W and N3, the stages with the most distinct spectra, are recognized equally well by both.
+
+\noindent\textbf{Case study: one night per dataset.} Fig.~\ref{fig:hypnogram} shows the
+hypnograms of one test subject per sleep dataset, chosen by rule as the subject whose SpecBraM
+balanced accuracy is closest to the median of its dataset, with the stages predicted by
+SpecBraM, REVE and CBraMod from the frozen features of each 30-s epoch alone (no sequence
+model). All models follow the sleep cycles; their errors concentrate at stage transitions and in
+N1. On the ISRUC night the three models are close (balanced accuracy $0.800$, $0.776$ and $0.728$).
+On the HMC night SpecBraM reaches $0.750$ against $0.594$ for REVE, which scores almost a third
+of the N2 epochs as N3 (99 of 319 vs.\ 27 for SpecBraM) and half of the REM epochs as N2 (69 of
+132 vs.\ 12), the same errors that dominate REVE's confusion matrix on the whole dataset
+(Fig.~\ref{fig:cm_hmc}).
+\begin{figure*}[t]\centering
+\includegraphics[width=\textwidth]{figures/hypnogram.pdf}
+\caption{\textbf{Whole-night hypnograms} of one test subject per sleep dataset (left: ISRUC,
+right: HMC; the subject whose SpecBraM balanced accuracy is closest to the dataset median).
+Top: expert scoring; below: stages predicted by the strict linear probe on each model's frozen
+features, epoch by epoch. Red dots: errors.}
+\label{fig:hypnogram}
+\end{figure*}
+
+\subsection{Abnormal EEG Detection: TUAB}
+TUAB \cite{obeid2016tuh} contains clinical EEG recordings of the Temple University Hospital
+labeled normal or abnormal by neurologists. Following CBraMod, recordings are resampled to
+200\,Hz, filtered (0.3--75\,Hz, 60\,Hz notch), converted to 16 bipolar channels of the TCP
+montage and cut into non-overlapping 10-s windows that inherit the recording label. The official
+evaluation folder is the test set; the training folder is split 80/20 by sorted patient ID
+within each class (@TUAB_N@ windows). The prepared metadata show three patients shared
+between training and validation under this original per-class split. Test patients are disjoint
+from both training and validation. All models use these same samples and splits; the overlap
+limits validation independence. This downstream split issue is separate from possible TUEG
+pretraining overlap.
+\input{tables/detail_tuab}
+\begin{figure}[h]\centering
+\includegraphics[width=\columnwidth]{figures/cm_tuab.pdf}
+\caption{\textbf{Confusion matrices on TUAB} (strict linear probe, row-normalized recall in \%): SpecBraM's main checkpoint, REVE-Base and their difference (blue: SpecBraM higher).}
+\label{fig:cm_tuab}
+\end{figure}
+Fig.~\ref{fig:cm_tuab}: Both models recognize normal and abnormal recordings almost equally well (recall within one point of each other); REVE's slightly higher balanced accuracy is spread over both classes.
+
+\subsection{Event Classification: TUEV}
+TUEV \cite{obeid2016tuh} annotates clinical EEG with six event classes: spike and sharp wave
+(SPSW), generalized and lateralized periodic epileptiform discharges (GPED, PLED), eye movement
+(EYEM), artifact (ARTF) and background (BCKG). Following CBraMod, each annotated 1-s event is
+represented by a 5-s window centred on it, with the same filtering and 16-channel bipolar
+montage as TUAB. The official evaluation folder is the test set and the training folder is split
+80/20 by sorted patient ID (@TUEV_N@ windows), with no patient overlap among the three
+downstream splits. Background makes up 65\% of the windows; Cohen's
+$\kappa$ and weighted F1 are dominated by it, whereas balanced accuracy weights the rare
+epileptiform classes equally. This explains why REVE has the highest $\kappa$ and weighted F1
+here although its balanced accuracy is below SpecBraM's and CSBrain's.
+\input{tables/detail_tuev}
+\begin{figure}[h]\centering
+\includegraphics[width=\columnwidth]{figures/cm_tuev.pdf}
+\caption{\textbf{Confusion matrices on TUEV} (strict linear probe, row-normalized recall in \%): SpecBraM's main checkpoint, REVE-Base and their difference (blue: SpecBraM higher).}
+\label{fig:cm_tuev}
+\end{figure}
+Fig.~\ref{fig:cm_tuev}: The two models differ in kind. SpecBraM detects spike and sharp waves
+(SPSW recall $25\%$ vs.\ $0\%$; REVE never predicts this class) and eye movements ($73\%$ vs.\
+$48\%$), events with a distinct spectral signature. REVE is better on the periodic discharges
+(GPED $90\%$ vs.\ $61\%$, PLED $47\%$ vs.\ $32\%$), which involve waveform shape and repetition
+over seconds. This pattern is consistent with P4, but the models also differ in architecture
+and pretraining data, so it does not isolate the effect of phase invariance.
+
+\noindent\textbf{Examples.} Fig.~\ref{fig:tuev_cases} shows four test windows on which the two
+models disagree, chosen by rule: for each class, the window that the correct model classifies
+with the highest confidence. SpecBraM recognizes a spike and sharp wave that REVE labels as a
+lateralized periodic discharge, and an eye-movement window that REVE labels as background. REVE
+recognizes a generalized and a lateralized periodic discharge that SpecBraM labels as
+background. In the GPED window the discharges recur about every two seconds across all
+channels. Their waveform and repetition extend beyond the band power of a single 0.78-s patch.
+The patch-local target does not directly supervise this longer temporal pattern (P4), although
+the encoder can still represent temporal and waveform information.
+\begin{figure*}[t]\centering
+\includegraphics[width=\textwidth]{figures/tuev_cases.pdf}
+\caption{\textbf{TUEV examples on which SpecBraM and REVE disagree} (strict linear probe; for
+each class the window that the correct model classifies most confidently). Top: the 5-s window
+(19 monopolar leads, CBraMod's preprocessing; shaded: the annotated 1-s event; traces clipped to
+their row). Bottom: power spectral density averaged over channels, with the five bands of the
+target.}
+\label{fig:tuev_cases}
+\end{figure*}
+
+\subsection{Mental Workload: MA}
+The mental arithmetic dataset \cite{zyma2019mentalarith} records 36 subjects at rest and during
+serial subtraction with 20 leads (19 standard 10--20 leads and A2-A1; 500\,Hz). Following
+CBraMod, recordings are resampled to 200\,Hz and cut into 5-s windows labeled rest or task, and
+the sorted subjects are split 28/4/4 (@MA_N@ windows). With four test subjects, MA has by far
+the widest confidence intervals of all tasks.
+\input{tables/detail_ma}
+\begin{figure}[h]\centering
+\includegraphics[width=\columnwidth]{figures/cm_ma.pdf}
+\caption{\textbf{Confusion matrices on MA} (strict linear probe, row-normalized recall in \%): SpecBraM's main checkpoint, REVE-Base and their difference (blue: SpecBraM higher).}
+\label{fig:cm_ma}
+\end{figure}
+Fig.~\ref{fig:cm_ma}: SpecBraM is better on both conditions (rest $+9.0$, task $+10.4$ points recall), so its lead is not a shift of the decision threshold.
+
+\subsection{Depression: Mumtaz}
+Mumtaz \cite{mumtaz2016mdd} contains resting-state EEG (eyes open and closed) of patients with
+major depressive disorder and healthy controls, recorded with 19 linked-ear-referenced leads at
+256\,Hz. Following CBraMod, recordings are resampled to 200\,Hz, filtered (0.3--75\,Hz, 50\,Hz
+notch) and cut into 5-s windows that inherit the subject's diagnosis; recordings are split by
+subject within each group (@MUMTAZ_N@ windows).
+\input{tables/detail_mumtaz}
+\begin{figure}[h]\centering
+\includegraphics[width=\columnwidth]{figures/cm_mumtaz.pdf}
+\caption{\textbf{Confusion matrices on Mumtaz} (strict linear probe, row-normalized recall in \%): SpecBraM's main checkpoint, REVE-Base and their difference (blue: SpecBraM higher).}
+\label{fig:cm_mumtaz}
+\end{figure}
+Fig.~\ref{fig:cm_mumtaz}: SpecBraM's gain comes from fewer healthy subjects classified as depressed (recall of the healthy class $+12.6$ points), at a cost of $5.2$ points on the depressed class.
+
+\subsection{Emotion Recognition: FACED}
+FACED \cite{chen2023faced} records 123 subjects watching 28 video clips that elicit nine emotion
+categories (anger, disgust, fear, sadness, neutral, amusement, inspiration, joy, tenderness),
+with 32 leads at 250\,Hz. The last 30\,s of each clip are resampled to 200\,Hz and cut into three
+10-s windows labeled with the clip's category; the sorted subjects are split 80/20/23
+(@FACED_N@ windows; chance level $1/9$).
+\input{tables/detail_faced}
+\begin{figure*}[t]\centering
+\includegraphics[width=\textwidth]{figures/cm_faced.pdf}
+\caption{\textbf{Confusion matrices on FACED} (strict linear probe, row-normalized recall in \%): SpecBraM's main checkpoint, REVE-Base and their difference (blue: SpecBraM higher).}
+\label{fig:cm_faced}
+\end{figure*}
+Fig.~\ref{fig:cm_faced}: Both models are far from perfect on nine emotions. SpecBraM's gain is concentrated on neutral ($+11.2$ points) and tenderness ($+11.6$), the two categories at the low-arousal end, while the other categories differ by a few points in either direction.
+
+\subsection{Motor Imagery: PhysioNet-MI}
+PhysioNet-MI \cite{schalk2004bci2000} records 109 subjects with 64 leads at 160\,Hz while they
+imagine opening and closing the left fist, the right fist, both fists or both feet. Following
+CBraMod, the imagery runs are high-pass filtered at 0.3\,Hz, notch filtered at 60\,Hz and
+resampled to 200\,Hz, and the 4-s window after each cue is labeled with the imagined movement;
+the sorted subjects are split 70/19/20 (@PHYSIO_N@ windows; chance level $1/4$).
+\input{tables/detail_physio}
+\begin{figure}[h]\centering
+\includegraphics[width=\columnwidth]{figures/cm_physio.pdf}
+\caption{\textbf{Confusion matrices on PhysioNet-MI} (strict linear probe, row-normalized recall in \%): SpecBraM's main checkpoint, REVE-Base and their difference (blue: SpecBraM higher).}
+\label{fig:cm_physio}
+\end{figure}
+Fig.~\ref{fig:cm_physio}: SpecBraM is better on bilateral imagery (both fists $+4.2$, both feet $+4.9$ points) and slightly worse on the left fist ($-5.5$); distinguishing the left and right fist requires lateralized spatial patterns that a mean-pooled readout dilutes.

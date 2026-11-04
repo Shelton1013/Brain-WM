@@ -1,0 +1,15 @@
+{
+  "task": "tuab",
+  "results": {
+    "m_s44": {
+      "test": {
+        "balanced_accuracy": 0.8184331557754829,
+        "auc_pr": 0.8952535021039503,
+        "auroc": 0.8763370137154909
+      },
+      "val_ba": 0.8326378742074647,
+      "epochs": 5,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s44_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

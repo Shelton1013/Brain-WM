@@ -1,0 +1,80 @@
+{
+  "task": "mumtaz",
+  "results": {
+    "m_s42": {
+      "C": 0.1,
+      "val_ba": 0.9501504010695188,
+      "test": {
+        "balanced_accuracy": 0.9393314855936319,
+        "auc_pr": 0.9913142194545542,
+        "auroc": 0.9911122992901843
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig4g_s42_sub2100/checkpoint_ep16.pt"
+    },
+    "m_s43": {
+      "C": 1.0,
+      "val_ba": 0.9471758021390375,
+      "test": {
+        "balanced_accuracy": 0.9357619471102696,
+        "auc_pr": 0.9938643084405857,
+        "auroc": 0.9939057325396782
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "m_s44": {
+      "C": 1.0,
+      "val_ba": 0.9712845365418894,
+      "test": {
+        "balanced_accuracy": 0.9498736953520981,
+        "auc_pr": 0.9970998217335415,
+        "auroc": 0.9970374330967281
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "cbramod": {
+      "C": 1.0,
+      "val_ba": 0.9485294117647058,
+      "test": {
+        "balanced_accuracy": 0.8925292028348983,
+        "auc_pr": 0.9731071176861694,
+        "auroc": 0.9730013585251546
+      }
+    },
+    "labram": {
+      "C": 0.1,
+      "val_ba": 0.9483901515151516,
+      "test": {
+        "balanced_accuracy": 0.8762978279965301,
+        "auc_pr": 0.9603815309347198,
+        "auroc": 0.9628042359796385
+      }
+    },
+    "csbrain": {
+      "C": 0.1,
+      "val_ba": 0.8549632352941177,
+      "test": {
+        "balanced_accuracy": 0.8635541527767927,
+        "auc_pr": 0.9415064120068528,
+        "auroc": 0.9467583625679944
+      }
+    },
+    "reve_base_mean": {
+      "C": 1.0,
+      "val_ba": 1.0,
+      "test": {
+        "balanced_accuracy": 0.9024453452781703,
+        "auc_pr": 0.963000931022682,
+        "auroc": 0.967578169755629
+      }
+    },
+    "reve_base_attn": {
+      "C": 1.0,
+      "val_ba": 1.0,
+      "test": {
+        "balanced_accuracy": 0.9161069797639767,
+        "auc_pr": 0.9680475849919634,
+        "auroc": 0.9723766551910391
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "task": "tuab",
+  "results": {
+    "lr_s44": {
+      "C": 1.0,
+      "val_ba": 0.8067363172346205,
+      "test": {
+        "balanced_accuracy": 0.8038436438678026,
+        "auc_pr": 0.8868544292791105,
+        "auroc": 0.8824289814641252
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_nosig_s44_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

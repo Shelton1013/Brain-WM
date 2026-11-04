@@ -1,0 +1,47 @@
+\section{Why Predicting Band Power Is Efficient}\label{sec:theory}
+We motivate the target under an idealized model; the statements and proofs are in
+Appendix~\ref{app:theory}. Before the logarithm and numerical floor, the main target,
+Eq.~\eqref{eq:target}, is a per-band constant times the band-averaged periodogram. The exact
+log-noise identities below apply to the zero-floor idealization with independent Fourier bins
+and exactly flat in-band spectra. The implemented $\log(P+\varepsilon)$ and real EEG need not
+satisfy them. The analysis motivates the target and suggests empirical hypotheses; it is not a
+proof of optimality or an optimization-speed guarantee.
+
+\noindent\emph{Model.} Given a brain state $\theta$, a patch is a segment of a zero-mean
+stationary Gaussian process with spectral density $S_\theta$; the state acts on the data only
+through $S_\theta$. Asymptotically, the discrete Fourier coefficients at distinct frequencies
+are independent circular complex Gaussians, so the periodogram ordinates are $I_k\approx
+S_\theta(f_k)E_k$ with $E_k\sim\mathrm{Exp}(1)$, and the phases are uniform and independent of
+$\theta$ \cite{brillinger1981}. The Whittle likelihood \cite{whittle1953} depends on the data
+only through $\{I_k\}$.
+
+\noindent\emph{What band power keeps.} (i) In the Whittle model, the periodogram is sufficient
+for its spectral parameters and the marginal phases are ancillary (Prop.~\ref{prop:suff});
+this does not establish independence from visible context. (ii) With exactly constant in-band
+spectra and observation restricted to those bins, the band-averaged periodogram is sufficient
+for the band levels and is their maximum-likelihood estimate (Prop.~\ref{prop:mle}). (iii)
+For its zero-floor logarithm, $\Var[\log P_b\mid\theta]=\psi'(m_b)\approx 1/m_b$ is independent
+of the state (Prop.~\ref{prop:var}). This motivates variance stabilization, but neither
+sufficiency for arbitrary EEG labels nor an exact noise model for Eq.~\eqref{eq:target} follows.
+
+\noindent\emph{A possible learning advantage.} Under squared error, prediction risk splits
+into error relative to $g(\bm{c})=\E[Y\mid\bm{c}]$ and the Bayes risk given the fixed context
+(Prop.~\ref{prop:decomp}). Only the former can be reduced by improving the predictor.
+Under an additional independent-patch idealization, the zero-floor band-power predictor is
+$\E[\log s_b(\theta)\mid\bm{c}]+\text{const}$, a posterior average of spectral levels,
+rather than the state itself. Its conditional variance contains both $\psi'(m_b)$ and posterior
+uncertainty about $\log s_b(\theta)$. In this same independence model the zero-mean waveform
+predictor would be zero. A separate correlated Gaussian model instead yields Wiener
+interpolation conditional on the state, with additional uncertainty when the state is unknown.
+For either target, the full conditional covariance contributes Jacobian-weighted gradient
+noise (Prop.~\ref{prop:grad}). Standard SGD upper bounds can worsen with gradient variance
+\cite{ghadimi2013}, but the two targets also differ in conditional mean, dimension, scale and
+Jacobian. These identities suggest a possible advantage of a compact spectral target; they do
+not establish an ordering of gradient noise or steps to a given downstream score.
+
+\noindent\emph{Predictions.} (P1) At matched backbone, data and steps, band power should give
+representations that are easier to read out linearly, especially with few labels. (P2) It should
+reach a given quality with fewer pretraining steps and smaller models. (P3) Reconstructing
+band-filtered \emph{waveforms} need not yield the same gains, since they still require sample-level prediction.
+(P4) The advantage should shrink for tasks that depend on transient waveform shape or
+cross-channel phase relations. Sec.~\ref{sec:results} tests these.

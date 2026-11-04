@@ -1,0 +1,181 @@
+{
+ "ma": {
+  "channels": 20,
+  "samples_T": 1000,
+  "classes": [
+   1275,
+   432
+  ],
+  "train": {
+   "n": 1343,
+   "subjects": 28
+  },
+  "val": {
+   "n": 172,
+   "subjects": 4
+  },
+  "test": {
+   "n": 192,
+   "subjects": 4
+  }
+ },
+ "mumtaz": {
+  "channels": 19,
+  "samples_T": 1000,
+  "classes": [
+   3497,
+   3646
+  ],
+  "train": {
+   "n": 4891,
+   "subjects": 45
+  },
+  "val": {
+   "n": 1041,
+   "subjects": 9
+  },
+  "test": {
+   "n": 1211,
+   "subjects": 11
+  }
+ },
+ "faced": {
+  "channels": 32,
+  "samples_T": 2000,
+  "classes": [
+   1107,
+   1107,
+   1107,
+   1107,
+   1476,
+   1107,
+   1107,
+   1107,
+   1107
+  ],
+  "train": {
+   "n": 6720,
+   "subjects": 80
+  },
+  "val": {
+   "n": 1680,
+   "subjects": 20
+  },
+  "test": {
+   "n": 1932,
+   "subjects": 23
+  }
+ },
+ "physio": {
+  "channels": 64,
+  "samples_T": 800,
+  "classes": [
+   2479,
+   2438,
+   2465,
+   2455
+  ],
+  "train": {
+   "n": 6300,
+   "subjects": 70
+  },
+  "val": {
+   "n": 1734,
+   "subjects": 19
+  },
+  "test": {
+   "n": 1803,
+   "subjects": 20
+  }
+ },
+ "tuab": {
+  "classes": [
+   203616,
+   205839
+  ],
+  "train": {
+   "n": 297103,
+   "recordings": 2223,
+   "subjects": 1655
+  },
+  "val": {
+   "n": 75407,
+   "recordings": 494,
+   "subjects": 424
+  },
+  "test": {
+   "n": 36945,
+   "recordings": 276,
+   "subjects": 253
+  }
+ },
+ "tuev": {
+  "classes": [
+   1212,
+   15931,
+   8182,
+   1399,
+   13257,
+   73372
+  ],
+  "train": {
+   "n": 68445,
+   "recordings": 297,
+   "subjects": 297
+  },
+  "val": {
+   "n": 15487,
+   "recordings": 62,
+   "subjects": 62
+  },
+  "test": {
+   "n": 29421,
+   "recordings": 159,
+   "subjects": 159
+  }
+ },
+ "isruc": {
+  "classes": [
+   20979,
+   11513,
+   28287,
+   17480,
+   11928
+  ],
+  "channels_present": 6,
+  "train": {
+   "n": 71936,
+   "subjects": 80
+  },
+  "val": {
+   "n": 9438,
+   "subjects": 10
+  },
+  "test": {
+   "n": 8813,
+   "subjects": 10
+  }
+ },
+ "hmc": {
+  "classes": [
+   23686,
+   15548,
+   50083,
+   26671,
+   21255
+  ],
+  "channels_present": 4,
+  "train": {
+   "n": 91248,
+   "subjects": 100
+  },
+  "val": {
+   "n": 22124,
+   "subjects": 25
+  },
+  "test": {
+   "n": 23871,
+   "subjects": 26
+  }
+ }
+}

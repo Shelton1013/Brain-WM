@@ -1,0 +1,15 @@
+{
+  "task": "physio",
+  "results": {
+    "m_s42": {
+      "test": {
+        "balanced_accuracy": 0.593511803241456,
+        "cohen_kappa": 0.4579640909141244,
+        "weighted_f1": 0.593153467352214
+      },
+      "val_ba": 0.5133464695067977,
+      "epochs": 28,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig4g_s42_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

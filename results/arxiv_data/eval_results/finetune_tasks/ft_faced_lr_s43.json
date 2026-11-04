@@ -1,0 +1,15 @@
+{
+  "task": "faced",
+  "results": {
+    "lr_s43": {
+      "test": {
+        "balanced_accuracy": 0.27710681696188944,
+        "cohen_kappa": 0.1857175593192092,
+        "weighted_f1": 0.27507369558745826
+      },
+      "val_ba": 0.31003086419753084,
+      "epochs": 26,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_nosig_s43_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

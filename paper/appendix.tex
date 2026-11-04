@@ -1,0 +1,241 @@
+%% Technical appendix / supplementary material for SpecBraM.
+%% Compile as its own PDF; submit separately from the 7-page main paper.
+\documentclass[letterpaper]{article}
+\usepackage[submission]{aaai2027}
+\usepackage[hyphens]{url}
+\usepackage{graphicx}
+\urlstyle{rm}
+\def\UrlFont{\rm}
+\usepackage{natbib}
+\usepackage{caption}
+\frenchspacing
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\newcommand{\best}[1]{\textbf{#1}}
+\newcommand{\val}[2]{#1\,{\scriptsize$\pm$#2}}
+\newcommand{\snd}[1]{\underline{#1}}
+\newcommand{\na}{--}
+\pdfinfo{/TemplateVersion (2027.1)}
+
+\title{Technical Appendix\\SpecBraM: Predicting Band Power, Not Codes or Waveforms\\A Data- and
+Label-Efficient Spectral-Prediction Foundation Model for Clinical EEG}
+\author{Anonymous Submission}
+\affiliations{Paper under double-blind review}
+
+\begin{document}
+\maketitle
+\appendix
+
+\section{Datasets}\label{app:datasets}
+\noindent\textbf{Pretraining corpus.} We pretrain on the Temple University Hospital
+EEG Corpus (TUEG, v2.0.1) \cite{obeid2016tuh}. Every recording is mapped to the
+$19$-channel $10$--$20$ montage, resampled to $256$\,Hz, and cut into
+non-overlapping $10$\,s windows. Our primary model uses a random $2{,}100$-patient
+subset ($2{,}388$ hours; $859{,}606$ windows) drawn with a fixed seed; the
+full-data control uses the full corpus ($14{,}764$ patients,
+$\sim17{,}666$ hours). All four downstream benchmarks are separate corpora that are
+disjoint from TUEG at the patient level, so no benchmark leakage is possible for any
+TUEG-pretrained method.
+
+\noindent\textbf{Downstream benchmarks.} Table~\ref{tab:app_data} summarizes the
+four leak-free benchmarks; we adopt the subject-disjoint train/validation/test
+splits of CBraMod \cite{wang2025cbramod} and CSBrain \cite{csbrain}, described below.
+
+\noindent\emph{ISRUC-Sleep (subgroup~I)} \cite{khalighi2016isruc}: overnight
+polysomnography from $100$ subjects scored into five stages (W, N1, N2, N3, REM) on
+$30$\,s epochs. The six mastoid-referenced EEG derivations (F3/C3/O1--A2,
+F4/C4/O2--A1) are placed by name into our $19$-channel $10$--$20$ layout and the
+remaining channels are zero-padded; each $30$\,s epoch is cropped to its central
+$10$\,s to match the pretraining window. We use the subject-disjoint split
+(train $1$--$80$, val $81$--$90$, test $91$--$100$) and evaluate
+sequence-to-sequence.
+
+\noindent\emph{HMC} \cite{alvarez2021hmc}: the Haaglanden Medisch Centrum sleep
+database, $151$ whole-night recordings with the same five-stage, $30$\,s scoring. We
+select the four EEG derivations (F4--M1, C4--M1, O2--M1, C3--M2) by channel name,
+zero-pad the rest, and discard EMG/EOG/ECG; epochs are again cropped to their
+central $10$\,s. The split is $100$/$25$/$26$ (train/val/test), matching CSBrain.
+
+
+\noindent\emph{Mental Arithmetic (EEGMAT)} \cite{zyma2019mentalarith}: $36$ subjects
+recorded at rest and during serial-subtraction mental arithmetic (binary
+rest-vs.-arithmetic). Its discriminative signal is spectral (alpha suppression and
+frontal-midline theta), placing it in scope. The native $19$-channel $10$--$20$
+recordings ($500$\,Hz) map cleanly to our montage after resampling to $256$\,Hz; we
+use $5$\,s windows and the CSBrain split (subjects $1$--$28$/$29$--$32$/$33$--$36$
+for train/val/test).
+
+\begin{table*}[t]\centering\footnotesize
+\setlength{\tabcolsep}{6pt}
+\caption{Downstream benchmarks; test-subject counts in parentheses. ``seq2seq'' =
+sequence-to-sequence sleep staging over $30$\,s epochs.}
+\label{tab:app_data}
+\begin{tabular}{llccl}
+\toprule
+Dataset & Task & Cls. & Subjects & Window\,/\,runs\\
+\midrule
+ISRUC-I \cite{khalighi2016isruc}          & Sleep staging & 5 & 100 (10) & 30\,s seq2seq / 3 reps\\
+HMC \cite{alvarez2021hmc}                 & Sleep staging & 5 & 151 (26) & 30\,s seq2seq / 3 reps\\
+Ment.\ Arith.\ \cite{zyma2019mentalarith} & Rest vs.\ arith.\ & 2 & 36 (4) & 5\,s / 5 seeds\\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\section{Preprocessing}\label{app:preproc}
+All corpora pass through one uniform pipeline. Channels are mapped into a canonical
+$19$-channel $10$--$20$ order \emph{by name} (never by position), missing channels
+are zero-padded, and non-EEG channels (EMG/EOG/ECG) are discarded; this name-based
+matching avoids the positional-slicing errors that can silently mix in non-EEG or
+mis-ordered channels. Signals are resampled to $256$\,Hz and normalized per
+recording with a robust scaler, $x\mapsto(x-\mathrm{median})/(\mathrm{IQR}/1.349)$,
+computed on the \emph{full} recording before windowing; robust (median/IQR) scaling
+preserves the long-range amplitude structure that per-window $z$-scoring destroys.
+Artifact filtering follows CBraMod: recordings shorter than $5$\,min are dropped,
+$60$\,s are trimmed from each recording's start and end (to remove
+montage/settling artifacts), and windows whose samples exceed $\pm150\,\mu$V are
+rejected; no notch filter is applied.
+
+\noindent\textbf{Window length.} The tokenizer emits one token per $0.78$\,s patch,
+and the encoder's learned positional embeddings admit up to $64$ time patches, so the
+model accepts variable-length windows without any retraining: a $10$\,s window
+becomes $12$ patches and a $5$\,s window $6$. We therefore keep each benchmark's
+native window---Mental Arithmetic $5$\,s---and crop only the $30$\,s
+sleep epochs to their central $10$\,s, following the CBraMod/CSBrain sleep-staging
+protocol. No window is padded or stretched to a fixed $10$\,s length.
+
+\section{Architecture and Pretraining Hyperparameters}\label{app:hp}
+\noindent\textbf{Filterbank tokenizer.} Each channel is convolved with $N{=}5$
+learnable depthwise \texttt{Conv1d} band-pass filters (kernel $65$), initialized to
+Hann-windowed sinusoids centred at $2/6/10/21/38$\,Hz (the $\delta\theta\alpha\beta
+\gamma$ bands) and then trained freely, so the model may sharpen or shift the bands
+to fit the data. Each of the five band signals is cut into $12$ non-overlapping
+$200$-sample ($0.78$\,s) patches, linearly embedded to $d_b{=}64$, and the five
+per-band embeddings of a patch are concatenated and projected (with LayerNorm) to
+the $D{=}512$ token, yielding a $[19\times12\times512]$ token grid.
+
+\noindent\textbf{Criss-cross encoder.} Twelve transformer blocks each apply
+self-attention along the channel axis and then along the time axis, rather than full
+$19{\times}12$ attention; this models spatial (montage) and temporal structure at
+$O(C^2T+CT^2)$ instead of $O((CT)^2)$ cost, with learned positional embeddings on
+both axes. Masked time patches replace their band embeddings with a shared learnable
+mask token before encoding. A single linear head maps each encoded token to five
+predicted log band-powers, supervised only on masked patches against a \emph{fixed}
+(frozen, no-gradient) reference filterbank applied to the raw signal; this head is
+discarded after pretraining and only the encoder transfers downstream.
+
+\noindent\textbf{Hyperparameters.} Table~\ref{tab:app_hp} lists all architecture and
+pretraining hyperparameters. The objective is
+$\mathcal{L}=\mathcal{L}_{\mathrm{sp}}+0.05\,\mathcal{L}_{\mathrm{sig}}$, with no
+JEPA or reconstruction term. Pretraining runs for $105$ scheduled epochs, but the
+downstream model is the epoch-$16$ checkpoint at which pretraining loss converges;
+later checkpoints overfit the small subset (Sec.~4 of the main paper). This single
+checkpoint, selected by pretraining loss (blind to downstream test performance), is
+used for all tasks.
+
+\begin{table}[!ht]\centering\footnotesize
+\setlength{\tabcolsep}{4pt}
+\caption{Architecture and pretraining hyperparameters (SpecBraM).}
+\label{tab:app_hp}
+\begin{tabular}{ll}
+\toprule
+\multicolumn{2}{l}{\textit{Architecture}}\\
+\midrule
+Learnable filterbank        & $N{=}5$ depthwise Conv1d, kernel $65$\\
+Band centres (init)         & $2/6/10/21/38$\,Hz ($\delta\theta\alpha\beta\gamma$)\\
+Per-band embedding $d_b$    & $64$\\
+Token dimension $D$         & $512$\\
+Encoder                     & $12$ criss-cross layers, $8$ heads\\
+Input                       & $10$\,s, $256$\,Hz, $19$ ch ($2560$)\\
+Patch $P$ / \#patches $T_p$ & $200$ ($0.78$\,s) / $12$\\
+Parameters                  & $51.2$\,M\\
+\midrule
+\multicolumn{2}{l}{\textit{Objective}}\\
+\midrule
+Loss                        & $\mathcal{L}_{\mathrm{sp}}+0.05\,\mathcal{L}_{\mathrm{sig}}$\\
+Mask axis / ratio           & time patches / $0.30$\\
+Band-power weight           & $1.0$\\
+SIGReg $\lambda$            & $0.05$\\
+JEPA / reconstruction       & none\\
+\midrule
+\multicolumn{2}{l}{\textit{Optimization}}\\
+\midrule
+Optimizer                   & AdamW\\
+Learning rate               & $1.7{\times}10^{-3}$\\
+Weight decay                & $0.05$\\
+Warmup / schedule           & $7$ epochs / cosine\\
+Gradient clipping           & $3.0$\\
+Batch (per-GPU / effective) & $64$ / $512$\\
+Epochs (trained / reported) & $105$ / $16$\\
+Hardware                    & $8\times$ RTX A6000 (48\,GB)\\
+Seed                        & $42$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Fine-Tuning and Evaluation Protocols}\label{app:ft}
+For every downstream task we report both a \emph{frozen probe} and \emph{full
+fine-tuning}, and against a \emph{random-initialized} baseline that uses the
+identical architecture and protocol (isolating the contribution of pretraining).
+
+\noindent\textbf{Frozen probe.} We freeze the encoder and train only a linear/head
+classifier on its features. This is deterministic (no backbone stochasticity) and
+serves as our primary readout on the tiny clinical cohorts, where full fine-tuning
+is high-variance.
+
+\noindent\textbf{Full fine-tuning.} The whole network is updated with AdamW; the
+per-benchmark schedules are in Table~\ref{tab:app_ft}. Sleep (ISRUC/HMC) uses
+linear-probe-then-fine-tune: the head is first trained on frozen features, then the
+encoder is unfrozen and the model is optimized under a cosine schedule (base
+learning rate $10^{-4}$, batch size $8$). Mental Arithmetic follows the LaBraM-style protocol with
+layer-wise learning-rate decay ($0.65$) and a $5$-epoch warmup. All variants use up
+to $50$ epochs and select the checkpoint with the best validation balanced accuracy.
+Because Mental Arithmetic ($4$ test subjects) is
+tiny and thus high-variance, we run $5$ seeds and report mean$\pm$std, whereas the
+larger sleep sets use $3$ reps.
+
+\noindent\textbf{Metrics.} We report balanced accuracy (mean per-class recall) as
+the primary metric, since the clinical classes are imbalanced; for the five-class
+sleep tasks we additionally report Cohen's $\kappa$ and the sample-weighted F1, and
+for the binary tasks the areas under the precision-recall and ROC curves (AUC-PR,
+AUROC). Sleep staging is evaluated sequence-to-sequence over full nights.
+
+\begin{table}[t]\centering\scriptsize
+\setlength{\tabcolsep}{3pt}
+\caption{Fine-tuning protocol per benchmark. Protocols and subject-disjoint splits
+follow CBraMod/CSBrain \citep{wang2025cbramod,csbrain}, so SpecBraM and the reported
+baselines are fine-tuned under the same recipe. ``decay'' $=$ layer-wise
+learning-rate decay.}
+\label{tab:app_ft}
+\begin{tabular}{lcc}
+\toprule
+                & Sleep (ISRUC/HMC)  & Ment.\ Arith.\\
+\midrule
+Protocol        & LP\,$\to$\,full FT  & LaBraM-style\\
+Optimizer       & AdamW  & AdamW\\
+Base LR         & $1{\times}10^{-4}$ & $5{\times}10^{-4}$\\
+Schedule        & cosine  & decay $0.65$\\
+OneCycle max    & -- &  --\\
+Warmup epochs   & $0$  & $5$\\
+Max ep.\ / patience & $50$ / -- & $50$ / $50$\\
+Batch size      & $8$ & $64$\\
+Selection       & best-val BA &  best-val BA\\
+Window          & $30$\,s seq2seq  & $5$\,s\\
+Runs            & $3$ reps & $5$ seeds\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Code and Reproducibility}\label{app:code}
+All code for pretraining, preprocessing, and every downstream evaluation is provided
+as (anonymized) supplementary material and will be released publicly under the MIT
+license upon publication, with inline comments referencing the equations and
+sections of this paper. Experiments ran on $8\times$NVIDIA RTX A6000 ($48$\,GB) GPUs,
+an Intel Xeon Gold 5220R CPU, Ubuntu 22.04 (Linux 5.15), PyTorch 2.12.0 with
+CUDA 13.0, and MNE-Python 1.12.1. Random seeds (base $42$, with per-run offsets for
+the multi-seed evaluations) are set for NumPy, PyTorch, and CUDA.
+
+\bibliography{reference}
+
+\end{document}

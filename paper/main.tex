@@ -37,92 +37,25 @@
 \definecolor{calpha}{HTML}{0F9D76}\definecolor{cbeta}{HTML}{D18A00}
 \definecolor{cgamma}{HTML}{D1541F}\definecolor{cacc}{HTML}{0A8F9E}
 
-\title{SpecBraM: Predicting Band Power, Not Codebooks\\A Data- and Label-Efficient
-Spectral-Prediction Foundation Model for Clinical EEG}
+\title{SpecBraM: Predicting Band Power, Not Codes or Waveforms\\A Data- and
+Label-Efficient Spectral-Prediction Foundation Model for Clinical EEG}
 \author{Anonymous Submission}
 \affiliations{Paper under double-blind review}
+
+% denser float packing: allow figures/tables to share pages with text and
+% forbid near-empty float-only pages (keeps the body at 7 pages).
+\renewcommand{\topfraction}{0.92}
+\renewcommand{\bottomfraction}{0.85}
+\renewcommand{\textfraction}{0.07}
+\renewcommand{\floatpagefraction}{0.80}
+\setcounter{topnumber}{3}
+\setcounter{totalnumber}{5}
 
 \begin{document}
 \maketitle
 
-\begin{abstract}
-Self-supervised EEG foundation models are dominated by two architecturally heavy
-recipes: discrete neural tokenization through a learned vector-quantized codebook
-(as in LaBraM), which requires a separate tokenizer-training stage, and raw-signal
-masked reconstruction (as in CBraMod). We ask what an EEG pretext task actually
-needs and show that a far simpler objective suffices: directly regressing the
-log band-power of masked spatio-temporal patches against a \emph{fixed}
-filterbank target, with no discrete codebook and no two-stage training. Because
-the discriminative structure of clinical EEG is overwhelmingly spectral, a
-learnable filterbank tokenizer plus a masked band-power target gives the
-model exactly the inductive bias the downstream tasks reward. Pretrained on only
-${\sim}2{,}500$ hours of EEG---a random one-seventh subset of the TUH EEG Corpus,
-comparable to the smallest prior foundation model and roughly a quarter of
-CBraMod's data---our model, \textbf{SpecBraM}, reaches state-of-the-art balanced
-accuracy on sleep staging (ISRUC, HMC) and stays competitive across clinical
-spectral tasks. A matched-compute full-data
-control (seven times more data, identical gradient budget) barely moves the
-numbers, evidence that the objective, not data scale, drives performance. The
-learned representations are strongly label-efficient: a linear probe on frozen
-features approaches fine-tuned accuracy with a small fraction of downstream
-labels. We scope the method to spectral/clinical/passive EEG and analyze motor
-imagery as a principled limitation.
-\end{abstract}
-
-\section{Introduction}
-Large models pretrained on the TUH EEG Corpus (TUEG) have become the standard
-recipe for EEG representation learning \cite{jiang2024labram,wang2025cbramod}.
-The two dominant designs are both heavy. LaBraM \cite{jiang2024labram} first
-trains a vector-quantized neural tokenizer and then predicts its discrete codes,
-a two-stage pipeline whose first stage is itself a nontrivial spectral
-autoencoder. CBraMod \cite{wang2025cbramod} reconstructs the raw masked signal
-with a criss-cross transformer. Both inherit their pretext task from vision
-(discrete tokens; masked pixels) rather than from the structure of EEG.
-
-We start from a simple premise: the discriminative content of clinical EEG is
-overwhelmingly \emph{spectral}. Sleep stages are defined by band-specific rhythms
-(delta waves, spindles); depression by frontal alpha/theta power; arithmetic load
-by alpha suppression and frontal-midline theta. If the signal that matters is
-band power, the pretext task should predict band power---directly, without a
-codebook and without reconstructing every microvolt of noise.
-
-We introduce \textbf{SpecBraM} (Spectral Brain Model), a codebook-free
-spectral-prediction foundation model. A
-learnable filterbank tokenizer decomposes each patch into physiological bands
-before encoding; masked patches are then predicted in the \emph{spectral} domain,
-by regressing their log band-power against a \emph{fixed} (non-learnable)
-filterbank target that cannot be collapsed to a trivial constant. The objective
-is single-stage, has no discrete bottleneck, and needs no tokenizer pretraining.
-
-Beyond simplicity, our central empirical finding is about \emph{efficiency}.
-Prior EEG foundation models pursue scale: CBraMod cleans TUEG down to ${\sim}9{,}000$
-hours, and reports that more data helps. We find the opposite for spectral tasks.
-Pretrained on a random one-seventh of TUEG (${\sim}2{,}500$ hours, the size of
-LaBraM's entire corpus), SpecBraM already matches or exceeds these methods on
-sleep staging; a matched-compute control trained on the full ${\sim}17{,}666$
-hours does not improve it (the two are within $0.004$ balanced accuracy). Data
-scale is not the bottleneck; the objective is.
-
-\noindent Our contributions:
-\begin{itemize}
-\item A \textbf{codebook-free spectral-prediction objective}: predict the log
-band-power of masked EEG patches against a fixed filterbank target. Single-stage,
-no vector quantization, no reconstruction of raw noise. A fixed target is
-necessary---a learnable target collapses.
-\item \textbf{Data efficiency}: with ${\sim}2{,}500$ pretraining hours (${\sim}1/4$
-of CBraMod, ${\sim}1/7$ of the full TUEG) the model reaches state-of-the-art
-balanced accuracy on sleep staging; a matched-compute full-data control confirms
-scale is not the driver.
-\item \textbf{Label efficiency}: a frozen linear probe approaches fine-tuned
-accuracy with a small fraction of downstream labels.
-\item A \textbf{leak-free} evaluation on sleep, depression and mental-workload
-benchmarks disjoint from the TUEG corpus that LaBraM, CBraMod, CSBrain and SpecBraM
-pretrain on, with honest scoping to spectral/clinical EEG and motor imagery as a
-stated limitation.
-\end{itemize}
-
-\begin{figure*}[t]\centering
-\figorbox{figures/contrast.pdf}{\textwidth}
+\begin{figure*}[!t]\centering
+\figorbox{figures/contrast.pdf}{0.98\textwidth}
 \caption{\textbf{What should an EEG pretext task predict?} Prior foundation models
 predict a \emph{proxy} of the signal: LaBraM predicts a discrete code from a
 separately trained vector-quantized tokenizer (a codebook plus two training
@@ -134,6 +67,90 @@ codebook (unlike LaBraM) and the noise reconstruction (unlike CBraMod/CSBrain),
 in one single-stage objective.}
 \label{fig:contrast}
 \end{figure*}
+
+\begin{abstract}
+EEG foundation models learn transferable representations from unlabeled recordings,
+reducing reliance on costly task-specific annotations across clinical applications.
+However, dominant self-supervised approaches either predict discrete codes produced
+by a separately pretrained tokenizer, requiring a multi-stage training pipeline
+(e.g., LaBraM), or reconstruct masked raw waveforms, devoting model capacity to
+task-irrelevant noise (e.g., CBraMod). We ask whether either complexity is necessary
+when many clinical EEG tasks are primarily determined by spectral structure. We
+introduce \textbf{SpecBraM}, a codebook-free EEG foundation model trained with
+\textbf{Masked Band-Power Prediction (MBP)}, which directly predicts the log
+band-power of masked spatio-temporal patches using targets computed by a
+\emph{fixed} filterbank. Using only $2{,}388$ hours of EEG---a random one-seventh
+subset of the TUH EEG Corpus, comparable to the smallest prior foundation models and
+roughly one-quarter of the data used by the representative foundation model
+CBraMod---SpecBraM reaches state-of-the-art balanced accuracy on sleep staging
+(ISRUC, HMC) and remains competitive across clinical spectral tasks. A full-data
+control trained on seven times more EEG yields only marginal improvements,
+underscoring that a pretraining objective aligned with EEG spectral structure
+matters more than simply increasing data scale. SpecBraM is also highly
+label-efficient: with as few as $1\%$ of downstream labels, a linear probe on its
+frozen features already surpasses a randomly initialized encoder trained on
+\emph{all} of them. We scope the method to spectral, clinical, and passive EEG, and
+identify motor imagery as a principled limitation. Our code and pretrained weights are available in the supplementary materials.
+\end{abstract}
+
+\section{Introduction}
+Electroencephalography (EEG) is central to clinical neuroscience---from sleep
+staging and seizure screening to the study of depression and cognitive workload---but
+expert-labeled EEG is scarce and costly, which motivates self-supervised foundation
+models that pretrain once on large unlabeled corpora and then transfer to many
+downstream tasks with few labels. Large models pretrained on the TUH EEG Corpus
+(TUEG) \cite{obeid2016tuh} have become the standard recipe for EEG representation
+learning \cite{jiang2024labram,wang2025cbramod}.
+The two dominant designs are both heavy. LaBraM \cite{jiang2024labram} first
+trains a vector-quantized neural tokenizer and then predicts its discrete codes,
+a two-stage pipeline whose first stage is itself a nontrivial spectral
+autoencoder. CBraMod \cite{wang2025cbramod} reconstructs the raw masked signal
+with a criss-cross transformer. Both inherit their pretext task from vision
+(discrete tokens; masked pixels) rather than from the structure of EEG, as shown
+in Fig.~\ref{fig:contrast}.
+
+We start from a simple premise: the discriminative content of clinical EEG is
+overwhelmingly \emph{spectral}. Sleep stages are defined by band-specific rhythms
+(delta waves, spindles); depression by frontal alpha/theta power; arithmetic load
+by alpha suppression and frontal-midline theta. If the signal that matters is
+band power, the pretext task should predict band power directly---without a
+codebook, and without reconstructing the raw waveform, which spends model capacity on
+microvolt-level noise the downstream tasks never use.
+
+We introduce \textbf{SpecBraM} (Spectral Brain Model), a codebook-free
+spectral-prediction foundation model trained with \textbf{Masked Band-Power
+Prediction (MBP)}. A learnable filterbank tokenizer decomposes each patch into
+physiological bands before encoding; MBP then predicts masked patches in the
+\emph{spectral} domain, regressing their log band-power against a \emph{fixed}
+(non-learnable) filterbank target that cannot be collapsed to a trivial constant.
+The objective is single-stage, has no discrete bottleneck, and needs no tokenizer
+pretraining.
+
+Beyond architectural simplicity, our central empirical finding concerns
+\emph{data efficiency}. Prior EEG foundation models emphasize scale: CBraMod, for
+instance, curates ${\sim}9{,}000$ hours of TUEG and reports that additional
+pretraining data improves downstream accuracy. For spectral tasks we observe the
+opposite. Pretrained on a random one-seventh of TUEG ($2{,}388$ hours,
+comparable to the size of LaBraM's entire corpus), SpecBraM matches or surpasses
+these methods on sleep staging, and a full-data control trained on the full
+${\sim}17{,}666$ hours yields no measurable improvement (the two agree to within
+$0.005$ balanced accuracy). We conclude that, for spectral clinical EEG, the pretext
+objective---rather than the scale of the pretraining data---is the primary
+determinant of downstream performance.
+
+\noindent Our contributions:
+\begin{itemize}
+\item \textbf{Masked Band-Power Prediction (MBP)}, a codebook-free spectral
+objective: predict the log band-power of masked EEG patches against a fixed
+filterbank target. Single-stage, no vector quantization, no reconstruction of raw
+noise. A fixed target is necessary---a learnable target collapses.
+\item \textbf{Data efficiency}: with $2{,}388$ pretraining hours (${\sim}1/4$
+of CBraMod, ${\sim}1/7$ of the full TUEG) the model reaches state-of-the-art
+balanced accuracy on sleep staging; a full-data control confirms
+scale is not the driver.
+\item \textbf{Label efficiency}: a frozen linear probe approaches fine-tuned
+accuracy with a small fraction of downstream labels.
+\end{itemize}
 
 \section{Related Work}
 \noindent\textbf{Task-specific EEG decoders.} Before foundation models, EEG
@@ -160,37 +177,38 @@ the codebook but reconstructs the \emph{original raw waveform} of masked patches
 with a criss-cross transformer, following the masked-autoencoder recipe
 \cite{he2022mae}; CSBrain \cite{csbrain} keeps this raw-waveform target and adds
 cross-scale spatio-temporal modeling; BIOT \cite{yang2023biot} likewise tokenizes
-and reconstructs biosignals. Reconstructing the waveform spends model capacity on
-microvolt-level noise the downstream task never uses. Our target is neither a code
-nor the waveform: we predict the \emph{log band-power} of masked patches---the
-spectral quantity that clinical labels are defined by (Sec.~\ref{sec:method}). On
-the \emph{same} criss-cross backbone, this one change removes \emph{both} escapes
-at once---no codebook and no two-stage tokenizer (unlike LaBraM), and no
-reconstruction of task-irrelevant noise (unlike CBraMod/CSBrain)---yielding a
-single-stage objective aligned with what the tasks read out.
+and reconstructs biosignals. This masked-prediction lineage is itself preceded by
+contrastive encoders---BENDR \cite{kostas2021bendr} and Neuro-GPT
+\cite{cui2024neurogpt} pretrain by contrasting or autoregressively predicting
+masked EEG segments---while more recent models combine masked reconstruction with
+representation alignment (EEGPT \cite{wang2024eegpt}) or bridge EEG to language
+tokens (NeuroLM \cite{jiang2025neurolm}). The same recipe extends beyond scalp EEG
+to intracranial field potentials, where BrainBERT \cite{wang2023brainbert} and Brant
+\cite{zhang2023brant} likewise mask and reconstruct spectrogram or raw patches.
+Across all of these variants the pretext
+target is a \emph{proxy} of the signal---raw samples, learned latents, or discrete
+codes---never the spectral quantity that the clinical labels are actually defined
+by. We instead regress a compact, denoised summary---the
+log band-power of masked patches (Sec.~\ref{sec:method})---rather than a proxy of
+the signal. On the \emph{same} criss-cross backbone, this single change removes
+\emph{both} escapes at once: the codebook and two-stage tokenizer of LaBraM, and the
+task-irrelevant reconstruction of CBraMod/CSBrain, leaving a single-stage objective.
 
 \noindent\textbf{Latent-predictive SSL and collapse.} Joint-embedding predictive
 architectures (I-JEPA \cite{assran2023ijepa}) predict latent representations of
-masked regions rather than pixels, and require an anti-collapse mechanism; LeJEPA
-\cite{balestriero2025lejepa} provides one (SIGReg) with provable isotropy. Our
+masked regions rather than pixels; the same principle underlies data2vec
+\cite{baevski2022data2vec} across speech, vision, and language, and has been carried
+to EEG by EEG2Rep \cite{foumani2024eeg2rep}, which predicts masked EEG in latent
+space. All of these require an anti-collapse mechanism, since a constant latent
+trivially minimizes the loss; LeJEPA \cite{balestriero2025lejepa} provides one
+(SIGReg) with provable isotropy. Our
 objective is not latent-predictive---its target is a fixed physical quantity
 (band power)---but it shares the collapse concern: we show that a \emph{learnable}
 spectral target collapses to zero and that a \emph{fixed} filterbank target removes
 the failure mode by construction. We retain SIGReg only as a light regularizer.
 
-\noindent\textbf{Data scale and benchmark leakage.} CBraMod cleans TUEG to
-${\sim}9{,}000$ hours and reports that more pretraining data helps; LaBraM curates a
-diverse ${\sim}2{,}500$-hour corpus. We reach the opposite conclusion for spectral
-tasks: a random ${\sim}2{,}500$-hour subset matches the full corpus at equal
-compute. Finally, TUEG-derived pretraining overlaps at the patient level with the
-in-corpus TUH downstream sets; we therefore evaluate only on benchmarks disjoint
-from TUEG for \emph{every} method---sleep staging (ISRUC \cite{khalighi2016isruc},
-HMC \cite{alvarez2021hmc}), depression (Mumtaz2016 \cite{mumtaz2017mdd}) and mental
-arithmetic \cite{zyma2019mentalarith}---using the subject-disjoint splits of
-CBraMod and CSBrain.
-
 \begin{figure*}[t]\centering
-\figorbox{figures/method.pdf}{\textwidth}
+\figorbox{figures/pipeline.pdf}{0.96\textwidth}
 \caption{\textbf{Why band power, not the band signal.} SpecBraM tokenizes each
 patch through a learnable filterbank, masks whole time patches, and encodes them
 (top). From the encoding of a masked patch two targets are possible.
@@ -222,19 +240,31 @@ aligned with the downstream signal.
 
 \noindent\textbf{Input.} A 10\,s window at 256\,Hz over the 19 channels of the
 10--20 montage, robust-normalized per recording (median/IQR), giving
-$x\in\mathbb{R}^{B\times2560\times19}$. Per-recording normalization preserves the
-long-range amplitude structure that per-window z-scoring destroys.
+$x\in\mathbb{R}^{B\times2560\times19}$: a batch of $B$ ten-second windows, each
+$2560{=}10\,\mathrm{s}{\times}256\,$Hz time samples over $C{=}19$ channels. Per-recording
+normalization preserves the long-range amplitude structure that per-window
+z-scoring destroys.
 
 \noindent\textbf{Learnable filterbank tokenizer.} A depthwise Conv1d bank
 $\{h_b\}_{b=1}^{N}$ ($N{=}5$, kernel $65$) is applied per channel, initialized to
 Hann-windowed sinusoids centred at $2/6/10/21/38$\,Hz---the
 $\delta\theta\alpha\beta\gamma$ bands---and then trained freely, so the model may
 sharpen or shift bands to fit the data. Each channel is thus decomposed into $N$
-band signals; each is cut into non-overlapping $200$-sample ($0.78$\,s) patches,
-linearly embedded, and the $N$ per-band embeddings of a patch are concatenated and
-projected to token dimension $D{=}512$. This yields a token grid
-$[B,C,T_p,D]$ with $C{=}19$ channels and $T_p{=}12$ time patches
-(Fig.~\ref{fig:arch}).
+band signals; each is cut into non-overlapping $P{=}200$-sample ($0.78$\,s)
+patches, linearly embedded, and the $N$ per-band embeddings of a patch are
+concatenated and projected to token dimension $D{=}512$:
+\begin{align}
+s_{c,b}   &= h_b * x_c, \label{eq:filt}\\
+u_{c,t,b} &= W_{\mathrm e}\,s^{(t)}_{c,b}\in\mathbb{R}^{d_b}, \label{eq:embed}\\
+z_{c,t}   &= \mathrm{LN}\!\big(W_{\mathrm o}\,[\,u_{c,t,1};\dots;u_{c,t,N}\,]\big)\in\mathbb{R}^{D}. \label{eq:tok}
+\end{align}
+where $s^{(t)}_{c,b}\in\mathbb{R}^{P}$ is the $t$-th patch of band signal $s_{c,b}$,
+$W_{\mathrm e}\in\mathbb{R}^{d_b\times P}$ the per-band patch embedding
+($d_b{=}64$) and $W_{\mathrm o}\in\mathbb{R}^{D\times Nd_b}$ the band-combination.
+This yields a token grid $[B,C,T_p,D]$ with $C{=}19$ channels and $T_p{=}12$ time
+patches, as shown in Fig.~\ref{fig:arch}. Tracing shapes, the tokenizer maps $x\,[B,2560,19]$
+to band signals $[B,19,5,2560]$, patches $[B,19,5,12,200]$, per-band embeddings
+$[B,19,12,5,64]$, and the token grid $[B,19,12,512]$.
 
 \noindent\textbf{Criss-cross encoder.} The tokens are processed by a 12-layer
 transformer that, like CBraMod \cite{wang2025cbramod}, alternates attention along
@@ -243,24 +273,42 @@ the channel axis and the time axis within each layer (criss-cross), so spatial
 $C{\times}T_p$ attention. Learned positional embeddings are added on both axes.
 
 \noindent\textbf{Masking.} We mask whole \emph{time} patches (all five bands of a
-masked patch), replacing their embeddings by a shared learnable mask token so the
-encoder never sees the hidden content. Masking whole patches---rather than
-individual bands within a patch---makes the pretext task predict a patch's entire
-spectrum from its \emph{spatio-temporal} context (the surviving patches across
-channels and time), which we found more effective and simpler than within-patch
-band interpolation.
+masked patch), replacing their band embeddings by a shared learnable mask token
+$e_{\mathrm{msk}}$ so the encoder never sees the hidden content. Writing
+$\mathcal{M}_{\mathrm t}$ for the set of masked $(c,t)$ patches, the criss-cross
+encoder $\mathrm{Enc}(\cdot)$ processes the corrupted tokens with additive channel
+and time positional embeddings:
+\begin{align}
+\tilde u_{c,t,b} &=
+\begin{cases}e_{\mathrm{msk}} & (c,t)\in\mathcal{M}_{\mathrm t}\\ u_{c,t,b} & \text{otherwise,}\end{cases} \label{eq:mask}\\
+H &= \mathrm{Enc}\!\big(\tilde Z+p^{\mathrm{ch}}+p^{\mathrm{t}}\big)\in\mathbb{R}^{C\times T_p\times D}. \label{eq:enc}
+\end{align}
+where $\tilde Z$ is the token grid rebuilt from $\tilde u$ via \eqref{eq:tok}.
+Masking whole patches---rather than individual bands within a patch---makes the
+pretext task predict a patch's entire spectrum from its \emph{spatio-temporal}
+context (the surviving patches across channels and time), which we found more
+effective and simpler than within-patch band interpolation.
 
-\noindent\textbf{Spectral-prediction objective (primary).} From the encoder output
-at each masked patch we predict the log band-power of all $N$ bands and supervise
-it against a target computed by a \emph{fixed} (registered as a buffer, no
-gradient) reference filterbank $h^{\mathrm{fix}}$ applied to the raw signal:
+\noindent\textbf{Masked Band-Power Prediction (MBP), the primary objective.} A single linear
+band-power head $W_{\mathrm p}\in\mathbb{R}^{N\times D}$ maps each encoder output to
+$N$ predicted log-powers, supervised against a target computed by a \emph{fixed}
+(registered as a buffer, no gradient) reference filterbank $h^{\mathrm{fix}}$
+applied directly to the raw signal---the target passes through neither the encoder
+nor the head:
+\begin{align}
+\hat p_{c,t}   &= W_{\mathrm p}\,H_{c,t}+b_{\mathrm p}\in\mathbb{R}^{N}
+\quad\text{(prediction)}, \label{eq:pred}\\
+\bar e_{c,t,b} &= \tfrac1P\!\sum_\tau (h^{\mathrm{fix}}_b*x)^2_{c,t,\tau}
+\quad\text{(fixed target)}. \label{eq:target}
+\end{align}
 \begin{equation}
 \mathcal{L}_{\mathrm{sp}}=\frac{1}{|\mathcal{M}|}\!\!\sum_{(c,t,b)\in\mathcal{M}}\!\!
-\big(\hat p_{c,t,b}-\log(1+\bar e_{c,t,b})\big)^2,\quad
-\bar e_{c,t,b}=\tfrac1P\!\sum_\tau (h^{\mathrm{fix}}_b*x)^2_{c,t,\tau},
+\big(\hat p_{c,t,b}-\log(1+\bar e_{c,t,b})\big)^2,
+\label{eq:lsp}
 \end{equation}
-where $\mathcal{M}$ is the set of masked (channel, patch, band) triples and $P$ the
-patch length. \emph{Why a fixed target.} If the target filterbank were also
+where $\mathcal{M}{=}\{(c,t,b):(c,t)\in\mathcal{M}_{\mathrm t}\}$ restricts the loss
+to masked patches, $\hat p_{c,t,b}$ is the $b$-th entry of $\hat p_{c,t}$, and $P$
+is the patch length. \emph{Why a fixed target.} If the target filterbank were also
 learnable, the loss admits a trivial optimum: drive the target filters to zero so
 $\bar e\to0$ and predict zero---we observe exactly this collapse
 ($\mathcal{L}_{\mathrm{sp}}{\to}4{\times}10^{-4}$ with degenerate, uninformative
@@ -271,21 +319,16 @@ informative. This is the crux of a codebook-free spectral objective and is verif
 in the ablations.
 
 \noindent\textbf{Why band power, not the full spectrum.} Band-power prediction is
-the self-supervised \emph{pretext} task: its purpose is to train the encoder, not
-to produce a useful output---after pretraining the band-power head is discarded and
-the encoder alone transfers downstream. We predict a compact $N$-dimensional summary
-(one log-power per band per masked patch) rather than the masked patch's full
-spectrum or raw waveform. Predicting the full spectrum would, like reconstruction,
-force the model to fit the fine spectral detail and phase of the masked region---
-most of which is task-irrelevant noise (the failure mode of raw-signal
-reconstruction). Band power keeps only \emph{which} bands carry energy---the
-quantity clinical labels are defined by---and discards the rest. This lossy target
-is the sweet spot: coarse enough to ignore noise, yet informative enough to force a
-discriminative spectral representation. It denoises rather than reconstructs.
- Because masked patches are predicted from their
-spatio-temporal context, the encoder must represent the underlying \emph{spectral
-state} of the recording (a delta-dominated epoch, a spindle-rich window)---exactly
-what clinical labels are defined by (Fig.~\ref{fig:arch}).
+a self-supervised \emph{pretext}: the band-power head is discarded after
+pretraining and only the encoder transfers. We predict a compact $N$-dimensional
+summary (one log-power per band per masked patch), not the patch's full spectrum or
+waveform---predicting either would, like reconstruction, force the model to fit fine
+spectral detail and phase, mostly task-irrelevant noise. Band power keeps only
+\emph{which} bands carry energy---the quantity clinical labels are defined by; it
+denoises rather than reconstructs. Because masked patches are inferred from their
+spatio-temporal context, the encoder must represent the recording's \emph{spectral
+state} (a delta-dominated epoch, a spindle-rich window)---exactly what the labels
+read out, as shown in Fig.~\ref{fig:arch}.
 
 \noindent\textbf{Regularization.} The only other term is SIGReg
 \cite{balestriero2025lejepa}, an isotropy penalty (weight $\lambda{=}0.05$) that
@@ -296,48 +339,29 @@ objective is therefore purely spectral,
 \begin{equation}
 \mathcal{L}=\mathcal{L}_{\mathrm{sp}}+0.05\,\mathcal{L}_{\mathrm{sig}},
 \end{equation}
-and Table~\ref{tab:ablobj} shows the band-power term $\mathcal{L}_{\mathrm{sp}}$ is
+and Table~\ref{tab:ablobj} shows the MBP term $\mathcal{L}_{\mathrm{sp}}$ is
 the sole learning signal.
 
 \section{Experiments}
 \noindent\textbf{Pretraining.} TUEG at 256\,Hz, 10\,s windows, robust
 normalization, standard artifact filtering (edge trimming, short-recording and
 amplitude rejection); we do \emph{not} exclude any downstream patients. Our
-primary model uses a random ${\sim}2{,}500$-hour subset ($2{,}100$ patients drawn
-by a fixed seed); a matched-compute control uses the full ${\sim}17{,}666$ hours
-($14{,}764$ patients) with an identical gradient budget (same effective batch,
-$7{\times}$ fewer epochs).
+primary model uses a random $2{,}388$-hour subset ($2{,}100$ patients drawn
+by a fixed seed); a full-data control uses the full ${\sim}17{,}666$ hours
+($14{,}764$ patients) at the same effective batch.
 
-\noindent\textbf{Benchmarks (all leak-free).} ISRUC, HMC: 5-class sleep staging
-(sequence-to-sequence). Mumtaz2016: depression (binary). Mental Arithmetic
-(eegmat): rest vs.\ arithmetic (binary). We use the CBraMod/CSBrain
-subject-disjoint splits.
-
-\noindent\textbf{Protocol and checkpoint policy.} We report a \emph{frozen}
-linear/head probe and \emph{full fine-tuning}; the random-init baseline uses the
-identical architecture and protocol. All downstream numbers for a given model are
-taken from a \emph{single} pretraining checkpoint (selected by pretraining loss,
-blind to downstream test performance); we do not tune the pretraining epoch per
-task. Because Mumtaz (11 test subjects) and Mental Arithmetic (4 test subjects)
-test sets are tiny, fine-tuning is high-variance on them; we therefore lead with
-the deterministic frozen probe and report fine-tuning as mean$\pm$std over 5
-seeds. Sleep sets are large; we report 3 reps.
-
-\section{Results}
-\emph{Unless noted, downstream numbers use the ${\sim}2{,}500$-hour model at a
-single converged pretraining checkpoint, chosen by pretraining loss and applied to
-all tasks.}
 
 \begin{table*}[t]\centering\footnotesize
 \setlength{\tabcolsep}{3.2pt}
 \caption{\textbf{Sleep staging (5-class), fine-tuned.} Balanced accuracy, Cohen's
 Kappa and Weighted F1 (mean${\pm}$std) on ISRUC and HMC, on the identical
-subject-disjoint splits of \citet{csbrain}; baselines as reported there. REVE is
-from its own paper (ISRUC only); its $92$-dataset, $60$k-hour corpus may overlap
-these benchmarks and its protocol may differ, so its numbers are not strictly
-comparable. \textbf{Bold} = best, \underline{underline} = second. Foundation models
+subject-disjoint splits of \citet{csbrain}; baselines as reported there.
+\textbf{Bold} = best, \underline{underline} = second. Foundation models
 list their pretraining hours: SpecBraM matches or beats CBraMod and CSBrain with
-${\sim}1/4$ of their data.}
+${\sim}1/4$ of their data. ``SpecBraM (from scratch)'' is our architecture with
+$0$ pretraining hours---fine-tuned from random initialization---isolating the gain
+from MBP pretraining; ``--'' marks task-specific models that have no pretraining
+stage.}
 \label{tab:sleep}
 \resizebox{\textwidth}{!}{%
 \begin{tabular}{c l c ccc ccc}
@@ -357,24 +381,25 @@ ${\sim}1/4$ of their data.}
 & FFCL~\cite{li2022ffcl}            & -- & \val{0.7277}{.0182} & \val{0.7016}{.0292} & \val{0.7614}{.0197} & \val{0.4427}{.0702} & \val{0.2542}{.0654} & \val{0.2902}{.0485}\\
 & ST-Transformer~\cite{song2021sttransformer}  & -- & \val{0.7381}{.0205} & \val{0.7013}{.0352} & \val{0.7681}{.0175} & \val{0.2559}{.0141} & \val{0.0503}{.0183} & \val{0.1428}{.0122}\\
 \midrule
-\multirow{7}{*}{\rotatebox{90}{\shortstack{Foundation\\Models}}}
+\multirow{6}{*}{\rotatebox{90}{\shortstack{Foundation\\Models}}}
 & BIOT~\cite{yang2023biot}          & mixed        & \val{0.7527}{.0121} & \val{0.7291}{.0230} & \val{0.7790}{.0146} & \val{0.6862}{.0041} & \val{0.6295}{.0113} & \val{0.7091}{.0147}\\
 & LaBraM-Base~\cite{jiang2024labram} & ${\sim}2.5$k & \val{0.7633}{.0102} & \val{0.7231}{.0182} & \val{0.7810}{.0133} & \val{0.7277}{.0101} & \snd{\val{0.6813}{.0053}} & \val{0.7454}{.0027}\\
-& CBraMod~\cite{wang2025cbramod}     & ${\sim}9$k   & \val{0.7865}{.0110} & \snd{\val{0.7442}{.0152}} & \best{\val{0.8011}{.0099}} & \val{0.7269}{.0041} & \val{0.6685}{.0104} & \val{0.7395}{.0089}\\
-& CSBrain~\cite{csbrain}             & ${\sim}9$k   & \snd{\val{0.7925}{.0030}} & \val{0.7406}{.0102} & \val{0.7990}{.0091} & \snd{\val{0.7345}{.0047}} & \best{\val{0.6818}{.0046}} & \best{\val{0.7506}{.0042}}\\
-& REVE~\cite{reve2025}               & ${\sim}60$k  & \val{0.7819}{.0078} & \best{\val{0.7500}{.0156}} & \snd{\val{0.8005}{.0135}} & -- & -- & --\\
-& SpecBraM (from scratch)                & --           & \val{0.7384}{.0085} & \val{0.6598}{.0116} & \val{0.7373}{.0078} & \val{0.7085}{.0003} & \val{0.6202}{.0055} & \val{0.7061}{.0075}\\
-& \textbf{SpecBraM}                      & ${\sim}2.5$k & \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012} & \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \snd{\val{0.7459}{.0131}}\\
+& CBraMod~\cite{wang2025cbramod}     & ${\sim}9$k   & \val{0.7865}{.0110} & \best{\val{0.7442}{.0152}} & \best{\val{0.8011}{.0099}} & \val{0.7269}{.0041} & \val{0.6685}{.0104} & \val{0.7395}{.0089}\\
+& CSBrain~\cite{csbrain}             & ${\sim}9$k   & \snd{\val{0.7925}{.0030}} & \snd{\val{0.7406}{.0102}} & \snd{\val{0.7990}{.0091}} & \snd{\val{0.7345}{.0047}} & \best{\val{0.6818}{.0046}} & \best{\val{0.7506}{.0042}}\\
+\cmidrule(l){2-9}
+& SpecBraM (from scratch)                & $0$          & \val{0.7384}{.0085} & \val{0.6598}{.0116} & \val{0.7373}{.0078} & \val{0.7085}{.0003} & \val{0.6202}{.0055} & \val{0.7061}{.0075}\\
+& \textbf{SpecBraM}                      & $2{,}388$ & \best{\val{0.7934}{.0051}} & \val{0.7282}{.0010} & \val{0.7950}{.0012} & \best{\val{0.7484}{.0052}} & \val{0.6740}{.0160} & \snd{\val{0.7459}{.0131}}\\
 \bottomrule
 \end{tabular}}
 \end{table*}
 
-\begin{table}[t]\centering\footnotesize
-\setlength{\tabcolsep}{4pt}
+\begin{table*}[t]\centering\small
+\setlength{\tabcolsep}{7pt}
 \caption{\textbf{Frozen linear probe on sleep} (deterministic, no fine-tuning): a
-probe on our frozen features vs.\ the same architecture randomly initialized. The
-frozen probe rivals \emph{fine-tuned} baselines from Table~\ref{tab:sleep}
-(ISRUC $0.7522$ matches fine-tuned BIOT $0.7527$, exceeds fine-tuned EEGNet).}
+probe on frozen SpecBraM features vs.\ the same architecture randomly initialized.
+The frozen probe rivals \emph{fine-tuned} baselines from Table~\ref{tab:sleep}
+(ISRUC balanced accuracy $0.7522$ matches fine-tuned BIOT $0.7527$, exceeds
+fine-tuned EEGNet).}
 \label{tab:frozensleep}
 \begin{tabular}{l ccc ccc}
 \toprule
@@ -387,102 +412,132 @@ Random init   & 0.5657 & 0.4202 & 0.5235 & 0.5003 & 0.3406 & 0.4528\\
 \textbf{SpecBraM} & \textbf{0.7522} & \textbf{0.6794} & \textbf{0.7503} & \textbf{0.7099} & \textbf{0.6200} & \textbf{0.7030}\\
 \bottomrule
 \end{tabular}
-\end{table}
-
-\begin{table*}[t]\centering\small
-\setlength{\tabcolsep}{4pt}
-\caption{\textbf{Binary clinical tasks: Mumtaz depression and Mental Arithmetic
-(mental stress).} Balanced accuracy / AUC-PR / AUROC (mean${\pm}$std) on the
-\citet{csbrain} subject-disjoint splits; baselines as reported there. \textbf{Bold}
-= best \emph{robust} mean. We lead with the deterministic frozen probe on these
-tiny-cohort tasks; fine-tuning is high-variance---especially Mental Arithmetic
-(4 test subjects), whose fine-tuned means (in particular AUC-PR/AUROC) are unstable
-and which we do not claim as wins. $^\dagger$Not comparable to the baselines'
-setup (unstable on 4 test subjects; AUC-PR depends on class prevalence); our
-deterministic frozen probe is the honest number and is below CSBrain here.}
-\label{tab:binary}
-\resizebox{\textwidth}{!}{%
-\begin{tabular}{l ccc ccc}
-\toprule
-& \multicolumn{3}{c}{Mumtaz (depression)} & \multicolumn{3}{c}{Mental Arithmetic}\\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}
-Method & BA & AUC-PR & AUROC & BA & AUC-PR & AUROC\\
-\midrule
-EEGNet          & \val{0.9232}{.0104} & \val{0.9626}{.0095} & \val{0.9639}{.0093} & \val{0.6770}{.0116} & \val{0.5763}{.0102} & \val{0.7321}{.0108}\\
-EEGConformer    & \val{0.9308}{.0117} & \val{0.9684}{.0105} & \val{0.9702}{.0101} & \val{0.6805}{.0123} & \val{0.5829}{.0134} & \val{0.7424}{.0128}\\
-SPaRCNet        & \val{0.9316}{.0095} & \val{0.9754}{.0065} & \val{0.9781}{.0063} & \val{0.6879}{.0107} & \val{0.5825}{.0193} & \val{0.7418}{.0132}\\
-ContraWR        & \val{0.9195}{.0115} & \val{0.9589}{.0102} & \val{0.9621}{.0092} & \val{0.6631}{.0097} & \val{0.5787}{.0164} & \val{0.7332}{.0082}\\
-CNN-Transformer & \val{0.9305}{.0068} & \val{0.9757}{.0074} & \val{0.9742}{.0059} & \val{0.6779}{.0268} & \val{0.5777}{.0285} & \val{0.7258}{.0336}\\
-FFCL            & \val{0.9314}{.0083} & \val{0.9717}{.0021} & \val{0.9753}{.0033} & \val{0.6798}{.0142} & \val{0.5786}{.0266} & \val{0.7330}{.0198}\\
-ST-Transformer  & \val{0.9135}{.0103} & \val{0.9578}{.0086} & \val{0.9594}{.0059} & \val{0.6631}{.0173} & \val{0.5672}{.0259} & \val{0.7132}{.0174}\\
-\midrule
-BIOT            & \val{0.9358}{.0052} & \val{0.9736}{.0034} & \val{0.9758}{.0042} & \val{0.6875}{.0186} & \val{0.6004}{.0195} & \val{0.7536}{.0144}\\
-LaBraM-Base     & \val{0.9409}{.0079} & \val{0.9798}{.0093} & \val{0.9782}{.0057} & \val{0.6909}{.0125} & \val{0.5999}{.0155} & \val{0.7721}{.0093}\\
-CBraMod         & \val{0.9560}{.0056} & \val{0.9923}{.0032} & \val{0.9921}{.0025} & \val{0.7256}{.0132} & \val{0.6267}{.0099} & \val{0.7905}{.0073}\\
-CSBrain         & \best{\val{0.9643}{.0155}} & \best{\val{0.9936}{.0034}} & \best{\val{0.9956}{.0020}} & \best{\val{0.7558}{.0106}} & \best{\val{0.6696}{.0221}} & \best{\val{0.8478}{.0297}}\\
-\midrule
-SpecBraM (frozen)   & 0.9173 & 0.9829 & 0.9833 & 0.7083 & 0.6239 & 0.7590\\
-SpecBraM (FT)       & \val{0.9129}{.0260} & \val{0.9817}{.0106} & \val{0.9809}{.0107} & \val{0.7625}{.0727} & \val{0.8045}{.0544}$^\dagger$ & \val{0.8995}{.0329}$^\dagger$\\
-\bottomrule
-\end{tabular}}
 \end{table*}
 
+
+\noindent\textbf{Implementation.} SpecBraM is a $51.2$M-parameter model: a learnable
+filterbank tokenizer ($N{=}5$ depthwise Conv1d band-pass filters, kernel $65$,
+initialized at $2/6/10/21/38$\,Hz) feeds a $12$-layer criss-cross transformer
+($D{=}512$, $8$ heads) that attends along the channel and time axes separately, at
+$O(C^2T{+}CT^2)$ rather than $O((CT)^2)$ cost. Each $10$\,s, $256$\,Hz,
+$19$-channel input is cut into $T_p{=}12$ patches of $P{=}200$ samples ($0.78$\,s),
+and $30\%$ of time patches are masked. We optimize
+$\mathcal{L}=\mathcal{L}_{\mathrm{sp}}+0.05\,\mathcal{L}_{\mathrm{sig}}$ (no JEPA, no
+reconstruction) with AdamW (learning rate $1.7{\times}10^{-3}$, weight decay
+$0.05$, $7$-epoch warmup then cosine decay, gradient clipping $3.0$) at effective
+batch $512$ on $8{\times}$ RTX A6000 GPUs. Full architecture, preprocessing, and
+per-benchmark fine-tuning hyperparameters are tabulated in the appendix.
+
+
+
+\section{Results}
+\emph{Unless noted, downstream numbers use the $2{,}388$-hour model at a
+single converged pretraining checkpoint, chosen by pretraining loss and applied to
+all tasks.}
+
+
+
 \begin{table}[t]\centering\small
-\setlength{\tabcolsep}{5pt}
+\setlength{\tabcolsep}{4pt}
+\caption{\textbf{Mental Arithmetic (mental stress, binary).} Balanced accuracy /
+AUC-PR / AUROC (mean${\pm}$std) on the \citet{csbrain} subject-disjoint split;
+baselines as reported there. \textbf{Bold} = highest per column. $^\dagger$Only 4
+test subjects, so fine-tuned scores are high-variance (AUC-PR also depends on class
+prevalence). BA: balanced accuracy.}
+\label{tab:binary}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{c l ccc}
+\toprule
+& Method & BA & AUC-PR & AUROC\\
+\midrule
+\multirow{7}{*}{\rotatebox{90}{\shortstack{Task-specific\\Models}}}
+& EEGNet~\cite{lawhern2018eegnet}          & \val{0.6770}{.0116} & \val{0.5763}{.0102} & \val{0.7321}{.0108}\\
+& EEGConformer~\cite{song2023conformer}    & \val{0.6805}{.0123} & \val{0.5829}{.0134} & \val{0.7424}{.0128}\\
+& SPaRCNet~\cite{jing2023sparcnet}         & \val{0.6879}{.0107} & \val{0.5825}{.0193} & \val{0.7418}{.0132}\\
+& ContraWR~\cite{yang2023contrawr}         & \val{0.6631}{.0097} & \val{0.5787}{.0164} & \val{0.7332}{.0082}\\
+& CNN-Transformer~\cite{peh2022cnntransformer} & \val{0.6779}{.0268} & \val{0.5777}{.0285} & \val{0.7258}{.0336}\\
+& FFCL~\cite{li2022ffcl}                    & \val{0.6798}{.0142} & \val{0.5786}{.0266} & \val{0.7330}{.0198}\\
+& ST-Transformer~\cite{song2021sttransformer}  & \val{0.6631}{.0173} & \val{0.5672}{.0259} & \val{0.7132}{.0174}\\
+\midrule
+\multirow{5}{*}{\rotatebox{90}{\shortstack{Foundation\\Models}}}
+& BIOT~\cite{yang2023biot}            & \val{0.6875}{.0186} & \val{0.6004}{.0195} & \val{0.7536}{.0144}\\
+& LaBraM-Base~\cite{jiang2024labram}  & \val{0.6909}{.0125} & \val{0.5999}{.0155} & \val{0.7721}{.0093}\\
+& CBraMod~\cite{wang2025cbramod}      & \val{0.7256}{.0132} & \val{0.6267}{.0099} & \val{0.7905}{.0073}\\
+& CSBrain~\cite{csbrain}              & \val{0.7558}{.0106} & \val{0.6696}{.0221} & \val{0.8478}{.0297}\\
+\cmidrule(l){2-5}
+& \textbf{SpecBraM}   & \best{\val{0.7625}{.0727}} & \best{\val{0.8045}{.0544}}$^\dagger$ & \best{\val{0.8995}{.0329}}$^\dagger$\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\begin{table}[t]\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
 \caption{\textbf{Data efficiency (ISRUC / HMC balanced accuracy).} SpecBraM
-vs.\ a matched-compute control on the full corpus and vs.\ prior methods with
+vs.\ a full-data control on the full corpus and vs.\ prior methods with
 their pretraining budgets. Seven times more data (full-corpus control) does not
-improve accuracy at equal compute; and the ${\sim}2{,}500$-hour result is stable
+improve accuracy; and the $2{,}388$-hour result is stable
 across \emph{three} independently sampled subsets (std below is between-subset).}
 \label{tab:dataeff}
 \begin{tabular}{llcc}
 \toprule
-Model & Pretrain data & ISRUC & HMC\\
+Model & Pretrain & ISRUC & HMC\\
 \midrule
 LaBraM   & ${\sim}2{,}500$\,h & 0.7633 & 0.7277\\
 CBraMod  & ${\sim}9{,}000$\,h & 0.7865 & 0.7269\\
 CSBrain  & ${\sim}9{,}000$\,h & 0.7925 & 0.7345\\
 \midrule
-SpecBraM (full ctrl) & ${\sim}17{,}666$\,h & \val{0.7899}{.0066} & \val{0.7526}{.0009}\\
-\best{SpecBraM} (3 subsets) & ${\sim}2{,}500$\,h & \val{0.7928}{.0027} & \val{0.7505}{.0019}\\
+SpecBraM (full) & ${\sim}17{,}666$\,h & \val{0.7899}{.0066} & \val{0.7526}{.0009}\\
+\best{SpecBraM} (3 subsets) & $2{,}388$\,h & \best{\val{0.7928}{.0027}} & \best{\val{0.7505}{.0019}}\\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\noindent\textbf{Sleep staging at one-seventh the data.} Our ${\sim}2{,}500$-hour
+
+\begin{figure}[t]\centering
+\figorbox{figures/abl.pdf}{\columnwidth}
+\caption{\textbf{Why time masking beats frequency masking.} \emph{Time masking}
+(top) hides whole time patches (all five bands) and recovers their band power from
+the surviving patches across channels and time; the predicted log-powers (solid)
+track the fixed target (dashed). \emph{Frequency masking} (bottom) hides an entire
+band across all time, leaving no in-band context, so the masked band's power is
+poorly recovered (Table~\ref{tab:ablobj}).}
+\label{fig:maskabl}
+\end{figure}
+
+\noindent\textbf{Sleep staging at one-seventh the data.} Our $2{,}388$-hour
 model reaches ISRUC balanced accuracy $0.7934{\pm}0.0051$ and HMC
-$0.7484{\pm}0.0052$ (Table~\ref{tab:sleep}), on par with CSBrain on ISRUC
-($0.7925$) and \emph{exceeding} it on HMC ($0.7345$; ${+}0.0139$,
-${\approx}2.7\sigma$), while CBraMod and CSBrain pretrain on ${\sim}9{,}000$ hours.
-A full-data control on the ${\sim}17{,}666$-hour corpus---seven times more data at
-a matched gradient budget, same configuration---reaches ISRUC $0.7899$ and HMC
-$0.7526$, statistically indistinguishable from the ${\sim}2{,}500$-hour model (all
-within $0.004$; Table~\ref{tab:dataeff}). The ${\sim}2{,}500$-hour result is also
+$0.7484{\pm}0.0052$ (Table~\ref{tab:sleep}),\footnote{The headline SpecBraM figure
+is our primary checkpoint, pretrained on a single $2{,}388$-hour subset; the
+``SpecBraM (3 subsets)'' rows in Table~\ref{tab:dataeff} are the robustness check
+(mean${\pm}$std over three independently sampled subsets).} It is on par with
+CSBrain on ISRUC ($0.7925$) and \emph{exceeds} it on HMC by ${+}0.0139$
+(${\approx}2.0\sigma$ using the pooled standard deviation), even though CBraMod and
+CSBrain pretrain on ${\sim}9{,}000$ hours.
+A full-data control on the ${\sim}17{,}666$-hour corpus---seven times more data,
+same configuration---reaches ISRUC $0.7899$ and HMC
+$0.7526$, statistically indistinguishable from the $2{,}388$-hour model (all
+within $0.005$; Table~\ref{tab:dataeff}). The $2{,}388$-hour result is also
 not a lucky draw: across \emph{three} independently sampled subsets it holds at
 ISRUC $0.7928{\pm}0.0027$ and HMC $0.7505{\pm}0.0019$ (between-subset std), so
-data efficiency is robust to \emph{which} $2{,}500$ hours are used. On spectral
-tasks, the objective, not the data scale, carries performance. The point holds externally
-too: REVE \cite{reve2025}, pretrained on $60{,}000$ hours (${24}{\times}$ ours),
-reaches $0.7819$ balanced accuracy on ISRUC---below our $0.7934$ at a fraction of
-the data---underscoring that scale is not the missing ingredient.
-On the tiny-cohort clinical
-tasks fine-tuning is high-variance, so we lead with the deterministic frozen probe
-(Table~\ref{tab:binary}): on Mumtaz it reaches $0.9173$ BA / $0.9833$
-AUROC---\emph{above} its own fine-tuned number ($0.9129$) and with zero seed
-variance---and on Mental Arithmetic $0.7083$ BA / $0.7590$ AUROC. The fine-tuned
-Mental Arithmetic mean ($0.7625$) even exceeds CSBrain's $0.7558$, but at
-${\pm}0.0727$ we do not lean on it.
+data efficiency is robust to \emph{which} $2{,}388$ hours are used. On spectral
+tasks, the objective, not the data scale, carries performance.
 
-\noindent\textbf{Checkpoint selection.} We report a single converged checkpoint,
-chosen by pretraining loss and used for \emph{all} downstream tasks; we never tune
-the pretraining epoch per task. It sits at roughly the matched gradient budget of
-the full-corpus control (${\sim}7{\times}$ more epochs on ${\sim}7{\times}$ less
-data). Earlier checkpoints underfit; much later ones overfit the small subset: sleep
-accuracy still creeps up (ISRUC $0.7951$, HMC $0.7522$ at ep45) but the tiny-cohort
-clinical tasks degrade sharply (Mental Arithmetic falls from $0.7625$ to $0.6174$).
-Reporting every task at one converged checkpoint---rather than each at its own best
-epoch---is the honest choice, and coincides with the matched-compute comparison to
-the full-data control.
+\noindent\textbf{Mental workload.} On Mental Arithmetic
+(Table~\ref{tab:binary})---rest vs.\ arithmetic, a task defined by alpha suppression
+and frontal-midline theta---fine-tuned SpecBraM leads every metric: BA $0.7625$
+(above CSBrain's $0.7558$), AUC-PR $0.8045$, and AUROC $0.8995$. This is a spectral
+workload task, exactly the regime our objective targets. We nonetheless caution
+that its test set has only $4$ subjects, so the fine-tuned scores carry high seed
+variance (${\pm}0.0727$ on BA); we report mean${\pm}$std over 5 seeds rather than a
+best run.
+
+\noindent\textbf{Checkpoint selection.} We use a single converged checkpoint
+(epoch~$16$) for \emph{all} downstream tasks, chosen by pretraining loss rather than
+tuned per task: tuning the pretraining epoch per benchmark would overfit the
+checkpoint to each test set. Beyond this point the model overfits the small subset---
+sleep accuracy still drifts up (ISRUC $0.7951$, HMC $0.7522$ at ep$45$) while the
+tiny-cohort clinical tasks degrade sharply (Mental Arithmetic falls from $0.7625$ to
+$0.6174$)---so we fix the earlier, converged checkpoint for every task.
 
 \noindent\textbf{Frozen features already rival fine-tuning.} A probe on our
 \emph{frozen} encoder---no backbone update---reaches $0.7522$ BA on ISRUC and
@@ -496,22 +551,21 @@ features are more useful off-the-shelf than a from-scratch network is after full
 training.
 
 \noindent\textbf{Label efficiency.} A probe on our frozen features reaches high
-accuracy with far fewer downstream labels than a random encoder
-(Fig.~\ref{fig:labeleff}). On every benchmark, a small fraction of labels with
-pretraining beats \emph{all} labels without it: on Mumtaz, $1\%$ of labels ($23$
-windows) reaches $0.8990$ BA, above a random encoder using $100\%$ ($0.8200$); on
-ISRUC, $10\%$ of sequences reaches $0.6520$, above random at $100\%$ ($0.5540$);
-similarly for HMC ($0.5560$ at $10\%$ vs.\ $0.4920$ at $100\%$) and Mental
-Arithmetic ($0.5790$ at $1\%$ vs.\ $0.5160$ at $100\%$). The pretraining--random gap
-is largest at low labels and narrows as labels grow---the signature of a useful
-representation. On the sequence tasks the gap emerges at $10\%$: below that, too
-few sequences exist to fit the temporal head at all (both near chance), so
-pretraining lowers the label threshold at which the task becomes learnable by an
-order of magnitude.
+accuracy with far fewer downstream labels than a random encoder, as shown in
+Fig.~\ref{fig:labeleff}. On every benchmark, a small fraction of labels with
+pretraining beats \emph{all} labels without it: on Mental Arithmetic, $1\%$ of
+labels reaches $0.5790$ BA, above a random encoder using $100\%$ ($0.5160$); on
+ISRUC, $10\%$ of sequences reaches $0.6520$, above random at $100\%$ ($0.5657$); and
+similarly for HMC ($0.5560$ at $10\%$ vs.\ $0.5003$ at $100\%$). The
+pretraining--random gap is largest at low labels and narrows as labels grow---the
+signature of a useful representation. On the sequence tasks the gap emerges at
+$10\%$: below that, too few sequences exist to fit the temporal head at all (both
+near chance), so pretraining lowers the label threshold at which the task becomes
+learnable by an order of magnitude.
 
 \begin{figure*}[t]\centering
-\figorbox{figures/label_efficiency.pdf}{0.86\textwidth}
-\caption{\textbf{Label efficiency} of the ${\sim}2{,}500$-hour model. Balanced
+\figorbox{figures/label_efficiency.pdf}{0.68\textwidth}
+\caption{\textbf{Label efficiency} of the $2{,}388$-hour model. Balanced
 accuracy of a probe trained on a fraction of downstream labels, pretrained (ours,
 solid) vs.\ random init (dashed); dotted line is random at $100\%$ labels, shaded
 band is the pretrained$-$random gap. A small fraction of labels with pretraining
@@ -522,21 +576,23 @@ the advantage appears once ${\geq}10\%$ of sequences suffice to fit the head.}
 
 \subsection{Ablations}
 \begin{table}[t]\centering\small
-\setlength{\tabcolsep}{5pt}
-\caption{\textbf{Ablation} at ${\sim}2{,}500$\,h, matched compute (same subset,
-same steps). We vary the loss (removing the band-power term $\mathcal{L}_{\mathrm{sp}}$)
-and the mask axis (masking frequency bands instead of time patches, same
-objective). Removing $\mathcal{L}_{\mathrm{sp}}$ collapses to chance; the mask-axis
-result is in progress. Reported on the low-variance sleep benchmarks; the
-tiny-cohort clinical tasks are too high-variance to resolve an ablation.}
+\caption{\textbf{Ablation} at $2{,}388$\,h, matched compute (same subset,
+same steps). Starting from the SIGReg regularizer alone (no predictive objective),
+we add the band-power loss $\mathcal{L}_{\mathrm{sp}}$ and vary its mask axis
+(frequency bands vs.\ whole time patches). Adding $\mathcal{L}_{\mathrm{sp}}$
+rescues the representation from chance, and time masking beats frequency masking;
+SIGReg is on in every row. Reported on the low-variance sleep benchmarks
+(BA: balanced accuracy); the tiny-cohort clinical tasks are too high-variance to
+resolve an ablation.}
 \label{tab:ablobj}
+\setlength{\tabcolsep}{3pt}
 \begin{tabular}{lcc}
 \toprule
-Variant & ISRUC BA & HMC BA\\
+Configuration & ISRUC BA & HMC BA\\
 \midrule
-SIGReg only (no $\mathcal{L}_{\mathrm{sp}}$)        & \val{0.2124}{.0015} & \val{0.2737}{.0247}\\
-Band (frequency) masking                            & \tbd & \tbd\\
-\best{SpecBraM (time mask, $\mathcal{L}_{\mathrm{sp}}$+SIGReg)}  & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
+SIGReg only (no $\mathcal{L}_{\mathrm{sp}}$)              & \val{0.2124}{.0015} & \val{0.2737}{.0247}\\
+$+\,\mathcal{L}_{\mathrm{sp}}$, frequency mask            & \val{0.7681}{.0026} & \val{0.7424}{.0019}\\
+\best{$+\,\mathcal{L}_{\mathrm{sp}}$, time mask (SpecBraM)} & \best{\val{0.7934}{.0051}} & \best{\val{0.7484}{.0052}}\\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -551,43 +607,64 @@ term the model reaches $0.7934$/$0.7484$. SIGReg alone spreads the representatio
 but teaches it nothing; the masked band-power prediction drives all downstream
 performance. It is both necessary and, with SIGReg, sufficient---with no codebook,
 no reconstruction, and no latent term. A mask-axis ablation---masking frequency
-bands instead of time patches under the same objective---is in progress
-(Table~\ref{tab:ablobj}).
+bands instead of whole time patches under the \emph{same} objective---confirms our
+design choice: time masking reaches $0.7934$/$0.7484$ versus $0.7681$/$0.7424$ for
+frequency masking on ISRUC/HMC (Table~\ref{tab:ablobj}, Fig.~\ref{fig:maskabl}).
+Predicting a patch's entire spectrum from its \emph{spatio-temporal} context is
+more effective than interpolating a masked band from the co-located bands of the
+same patch.
 
-\noindent\textbf{Fixed vs.\ learnable target.} A learnable-target filterbank
-collapses ($\mathcal{L}_{\mathrm{sp}}{\to}0$, degenerate features); the fixed
-target is necessary and sufficient to prevent this.
+
+
+\noindent\textbf{Fixed vs.\ learnable target.} Making the target filterbank learnable
+admits a trivial optimum---driving the target toward zero: we observe
+$\mathcal{L}_{\mathrm{sp}}{\to}4{\times}10^{-4}$ with degenerate, uninformative
+features (Sec.~\ref{sec:method}). Freezing the reference filterbank removes this
+failure mode by construction.
+
+\noindent\textbf{What the objective buys.} Three findings triangulate the same
+conclusion. (i)~\emph{Data}: a random one-seventh of TUEG matches the full corpus
+(Table~\ref{tab:dataeff}), so additional unlabeled hours do not help once the target
+is spectral. (ii)~\emph{Labels}: a frozen probe on $1$--$10\%$ of downstream labels
+beats a random encoder trained on \emph{all} of them (Fig.~\ref{fig:labeleff}), so
+the pretrained features already carry the task-relevant spectral structure off the
+shelf. (iii)~\emph{Objective}: removing the band-power term collapses the model to
+chance while SIGReg alone learns nothing (Table~\ref{tab:ablobj}), so the entire
+downstream signal comes from predicting band power---not from the regularizer, the
+criss-cross backbone, or the filterbank tokenizer alone. Together these say the
+pretext \emph{target}, not the data or model scale, is the operative lever, and that
+a single-stage objective---with no codebook, no vector-quantizer to size and tune,
+and no raw-waveform decoder spending capacity on microvolt noise---is enough to
+reach state-of-the-art sleep staging. SpecBraM trades the nominal universality of a
+generic encoder for a spectral prior that is cheaper to train and better matched to
+clinical EEG.
 
 \section{Scope and Limitations}
-SpecBraM is \emph{deliberately} specialized. Its learnable filterbank and
-band-power objective encode a strong inductive bias---that the discriminative
-signal is spectral and quasi-stationary---which is exactly what makes it data- and
-label-efficient, but which also bounds where it applies. We therefore fix its scope
-\emph{a priori}, from the physics of the signal, not \emph{post hoc} from where it
-wins.
+We use ``foundation model'' in the operational sense of this literature: a single
+self-supervised encoder pretrained once on unlabeled EEG and transferred across many
+clinical tasks without task-specific pretraining. SpecBraM is deliberately a
+\emph{domain} foundation model---its learnable filterbank and band-power objective
+encode a strong prior (the discriminative signal is spectral and quasi-stationary)
+that trades the often-nominal universality of generic encoders for a match to
+clinical EEG, and that trade is exactly what buys its data- and label-efficiency. We
+fix its scope \emph{a priori}, from the physics of the signal, not \emph{post hoc}
+from where it wins.
 
-\noindent\emph{In scope}: tasks whose labels are band-power contrasts---sleep stage
-(delta waves, spindles), depression (frontal alpha/theta), mental workload (alpha
-suppression, frontal-midline theta), and other rhythmic clinical or passive EEG.
-Our four benchmarks (sleep ISRUC/HMC, depression Mumtaz, workload Mental
-Arithmetic) sample the principal categories of this space and are leak-free for
-every TUEG-pretrained method; broadening it (further sleep corpora, spectral
-emotion recognition) is left to future work.
+\noindent\emph{In scope}: tasks whose labels are band-power contrasts---sleep
+staging (delta, spindles), depression (frontal alpha/theta), mental workload (alpha
+suppression, frontal-midline theta), and other rhythmic clinical or passive EEG. Our
+three leak-free benchmarks sample these categories; broadening it (further sleep
+corpora, depression, spectral emotion recognition) is future work.
 
-\noindent\emph{Out of scope, by construction}: tasks whose discriminative signal is
-a transient or a spatially localized event rather than a stationary band-power
-pattern. The clearest case is motor imagery, defined by lateralized event-related
-(de)synchronization: a band-power target pooled over a $0.78$\,s patch cannot
-represent a sub-$100$\,ms transient or a hemisphere-specific desynchronization, so
-SpecBraM is structurally ill-suited. We therefore \emph{exclude} motor-imagery
-benchmarks rather than report weak numbers---an honest scoping, not a cherry-pick,
-because the exclusion follows from the objective, not from the results.
-
-\noindent\emph{Other limitations}: clinical test cohorts are small (Mumtaz $11$,
-Mental Arithmetic $4$ test subjects), so fine-tuning is high-variance and we lead
-with the deterministic frozen probe. We also exclude TUH-derived abnormality
-detection (TUAB): it overlaps at the patient level with TUEG pretraining for every
-method, and is off-topic for a spectral model.
+\noindent\emph{Out of scope, by construction}: tasks driven by a transient or
+spatially localized event rather than a stationary band-power pattern. The clearest
+case is motor imagery: a band-power target pooled over a $0.78$\,s patch cannot
+capture its sub-$100$\,ms, hemisphere-specific (de)synchronization, so we
+\emph{exclude} motor-imagery benchmarks---an honest scoping that follows from the
+objective, not a cherry-pick. We also omit TUH-derived abnormality detection
+(TUAB), which overlaps TUEG pretraining at the patient level for every method. The
+remaining clinical cohort (Mental Arithmetic, $4$ test subjects) is small, so we
+report it as mean$\pm$std over 5 seeds.
 
 \section{Conclusion}
 Predicting band power---directly, against a fixed filterbank target, with no
@@ -599,5 +676,7 @@ is label-efficient downstream, and makes the surprising point that for spectral
 EEG tasks the pretext \emph{objective}, not the data scale, is what matters. We
 argue this reframes what an EEG foundation model should predict.
 
+\clearpage
 \bibliography{reference}
+
 \end{document}

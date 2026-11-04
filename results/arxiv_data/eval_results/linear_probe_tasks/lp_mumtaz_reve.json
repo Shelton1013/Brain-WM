@@ -1,0 +1,41 @@
+{
+  "task": "mumtaz",
+  "results": {
+    "reve_base_mean": {
+      "C": 1.0,
+      "val_ba": 1.0,
+      "test": {
+        "balanced_accuracy": 0.9024453452781703,
+        "auc_pr": 0.963000931022682,
+        "auroc": 0.967578169755629
+      }
+    },
+    "reve_base_attn": {
+      "C": 1.0,
+      "val_ba": 1.0,
+      "test": {
+        "balanced_accuracy": 0.9161069797639767,
+        "auc_pr": 0.9680475849919634,
+        "auroc": 0.9723766551910391
+      }
+    },
+    "reve_large_mean": {
+      "C": 0.1,
+      "val_ba": 1.0,
+      "test": {
+        "balanced_accuracy": 0.891350723182768,
+        "auc_pr": 0.9570653284339565,
+        "auroc": 0.960709161042518
+      }
+    },
+    "reve_large_attn": {
+      "C": 0.01,
+      "val_ba": 0.9958333333333333,
+      "test": {
+        "balanced_accuracy": 0.9016092248768326,
+        "auc_pr": 0.9558103975344084,
+        "auroc": 0.9588705145482221
+      }
+    }
+  }
+}

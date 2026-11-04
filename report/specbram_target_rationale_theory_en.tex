@@ -1,0 +1,430 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsthm,bm}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage[hidelinks]{hyperref}
+
+\newtheorem{assumption}{Assumption}
+\newtheorem{proposition}{Proposition}
+\newtheorem{remark}{Remark}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Cov}{\operatorname{Cov}}
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\CN}{\mathcal{CN}}
+
+\title{Choosing a Spectral Prediction Target for EEG:\\
+An Idealized Analysis of Five Classical Frequency Bands}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This note develops a theoretical rationale for masked prediction of EEG band power rather
+than sample-wise waveform reconstruction. The target is defined using five \emph{ideal,
+non-overlapping classical frequency bands}: $\delta$ (0.5--4 Hz), $\theta$ (4--8 Hz),
+$\alpha$ (8--13 Hz), $\beta$ (13--30 Hz), and $\gamma$ (30--45 Hz). In an idealized
+Gaussian spectral model, Fourier phases are ancillary for a state that changes only the
+power spectrum. If the spectrum is constant within each band, the five band-power
+statistics are sufficient for the five spectral levels; averaging within a band reduces
+periodogram noise, and the logarithm makes the target's variance independent of those
+levels. A conditional-risk decomposition then identifies the state-dependent and
+irreducible components of masked prediction. These are statements about an explicitly
+specified model, not a proof that a particular EEG encoder or training objective must
+outperform waveform reconstruction in practice.
+\end{abstract}
+
+\section{Question and target}
+
+A masked EEG encoder receives a context $C$ containing visible channel--time patches and
+predicts a property of a masked patch $x_M$. Which property should it predict? For a
+downstream label that depends primarily on sustained rhythmic activity, a natural
+candidate is the patch's spectral energy in a small number of physiologically meaningful
+bands. This choice removes the requirement to reproduce the precise sample-by-sample
+realization of the masked waveform. It does \emph{not} assert that all EEG labels are
+determined by band power: transient morphology, spatial relationships, and phase coupling
+can also be essential.
+
+\subsection{Why power? Rhythmic strength without exact phase}
+
+Consider first a single oscillation,
+$x(t)=A\cos(2\pi ft+\phi)$. Its mean square over a window containing an integer
+number $q\geq1$ of periods, $T=q/f$, is
+\begin{align}
+\frac{1}{T}\int_0^T x(t)^2\,dt
+&=\frac{A^2}{T}\int_0^T\cos^2(2\pi ft+\phi)\,dt\nonumber\\
+&=\frac{A^2}{2}
+ +\frac{A^2}{2T}\int_0^T\cos(4\pi ft+2\phi)\,dt
+ =\frac{A^2}{2}.
+\label{eq:sinusoidpower}
+\end{align}
+Thus mean-square power measures the oscillation's squared amplitude but does not
+depend on where its peak happens to fall within a complete-cycle window.
+Squaring alone does \emph{not} remove phase: $x(t)^2$ still oscillates and still
+depends on $\phi$. Phase invariance comes from averaging over complete periods,
+or, for an ideal frequency-domain target, from taking squared Fourier magnitudes.
+For a finite window containing a non-integer number of periods, the boundary
+term need not vanish. This matters especially for slow rhythms in short patches.
+
+For a multi-frequency signal, ideal band-pass filtering isolates a classical
+rhythm range. Parseval's identity equates the filtered signal's mean square
+with the spectral energy in that range; the precise finite-DFT normalization
+appears in Eq.~\eqref{eq:parseval}. This is why the power in, for example,
+the $\alpha$ or $\delta$ band is a natural measure of that rhythm's strength.
+Power does not preserve the phase relations among frequency components or
+channels, which may themselves carry information for other tasks.
+
+The quantity expected to persist across neighbouring patches is the
+\emph{state-dependent spectral level}, not each patch's exact measured power.
+If a state lasts longer than one patch, visible patches can provide information
+about the expected energy of a masked patch. Its realized power still fluctuates,
+and a stable oscillator may have partly predictable phase across adjacent
+patches. The formal shared-state and conditional-independence conditions needed
+for the masked-prediction argument are stated separately in
+Assumption~\ref{as:context}; they are not consequences of Eq.~\eqref{eq:sinusoidpower}.
+
+\subsection{Why take the logarithm?}
+
+Power is nonnegative and often spans a wide range. For positive values, a
+logarithm compresses this range and makes a difference in log power approximately
+a \emph{relative} difference in power:
+\begin{equation}
+\log(P+\Delta P)-\log P\approx\frac{\Delta P}{P}
+\qquad (|\Delta P|\ll P).
+\label{eq:relativechange}
+\end{equation}
+If amplitude is multiplied by $g>0$, power is multiplied by $g^2$, and log
+power is shifted by $2\log g$. This turns a multiplicative factor into an
+additive one; it does not by itself remove the factor. A fixed reference power
+or normalization makes the argument of the logarithm dimensionless.
+
+There is also a statistical reason. Individual periodogram powers fluctuate
+roughly in proportion to their spectral level. Under the ideal model developed
+below, band-averaged power has conditional variance proportional to the
+\emph{square} of that level, whereas log band power has conditional variance
+that depends only on the number of frequency bins (Proposition~\ref{prop:log}).
+Thus logarithmic power is a natural target when squared error should not be
+dominated solely by the bands or states with the largest absolute power.
+This argument applies exactly to $\log P$ in that model. An offset transform
+such as $\log(a+P)$ behaves differently at low power, as
+Eq.~\eqref{eq:logoffset} will show.
+
+We adopt the following conventional, half-open positive-frequency bands throughout:
+\begin{equation}
+\begin{aligned}
+B_{\delta}&=[0.5,4), & B_{\theta}&=[4,8), & B_{\alpha}&=[8,13),\\
+B_{\beta}&=[13,30), & B_{\gamma}&=[30,45]\quad\text{Hz}.
+\end{aligned}
+\label{eq:bands}
+\end{equation}
+The exact boundary convention is stipulated for the analysis; physiological rhythms do
+not have sharp boundaries. In particular, the word ``classical'' refers to these five
+\emph{ideal rectangular bands}, not to five generic or overlapping spectral filters.
+
+For one real-valued, mean-zero patch $x=(x_0,\ldots,x_{N-1})$ sampled at $f_s$, let
+\begin{equation}
+X_k=\sum_{n=0}^{N-1}x_n e^{-2\pi i kn/N},\qquad
+I_k=\frac{|X_k|^2}{N},\qquad f_k=\frac{kf_s}{N}.
+\label{eq:dft}
+\end{equation}
+We use positive-frequency bins $1\leq k\leq\lfloor(N-1)/2\rfloor$, excluding DC and,
+when present, Nyquist. For $\mathcal K_b=\{k:f_k\in B_b\}$ and
+$m_b=|\mathcal K_b|>0$, define the \emph{mean band periodogram}
+\begin{equation}
+P_b=\frac{1}{m_b}\sum_{k\in\mathcal K_b}I_k,
+\qquad Y_b=\log P_b.
+\label{eq:bandpower}
+\end{equation}
+The vector $(Y_{\delta},Y_{\theta},Y_{\alpha},Y_{\beta},Y_{\gamma})$ is the
+idealized five-dimensional prediction target. Since the Gaussian model below has
+$P_b>0$ almost surely, its logarithm is well-defined once power is expressed
+relative to a fixed reference unit. Such a reference adds only a fixed offset
+to $Y_b$ and does not alter the results below.
+
+For illustration, at $N=200$ and $f_s=256$ Hz, the spacing is $\Delta f=1.28$ Hz.
+The number of represented positive-frequency bins is small in the slow bands:
+\begin{table}[h]
+\centering
+\caption{Classical bands and represented DFT bins for a 200-sample patch at 256 Hz.
+The last column is the theoretical standard deviation of $\log P_b$ under
+Assumption~\ref{as:spectral}; it is not an empirical EEG measurement.}
+\label{tab:bins}
+\begin{tabular}{lccc}
+\toprule
+Band & Range (Hz) & $m_b$ & $\sqrt{\psi_1(m_b)}$ \\
+\midrule
+$\delta$ & $[0.5,4)$ & 3 & 0.63 \\
+$\theta$ & $[4,8)$ & 3 & 0.63 \\
+$\alpha$ & $[8,13)$ & 4 & 0.53 \\
+$\beta$ & $[13,30)$ & 13 & 0.28 \\
+$\gamma$ & $[30,45]$ & 12 & 0.29 \\
+\bottomrule
+\end{tabular}
+\end{table}
+There is no bin between 0.5 and 1.28 Hz in this example. Calling the first statistic
+``$\delta$ power'' therefore does not imply that a short patch resolves the entire
+0.5--4 Hz band. Longer windows or a different estimator are required for finer
+low-frequency resolution.
+
+\section{An idealized spectral model}
+
+The following finite-dimensional model is chosen so that its conclusions are exact
+within the stated observation space. For a weakly stationary Gaussian process on a
+long window, a Fourier-diagonal likelihood is instead an approximation, commonly
+associated with the Whittle likelihood. Nothing below assumes that real EEG is
+exactly stationary or Gaussian.
+
+\begin{assumption}[Five-band Gaussian spectral state]\label{as:spectral}
+Let $\Theta$ denote a latent state. Conditional on $\Theta=\theta$, the positive-frequency
+Fourier coefficients of a real, mean-zero patch in the five bands are independent and
+\begin{equation}
+X_k\mid\theta\sim\CN\!\left(0,Ns_b(\theta)\right)
+\quad\text{for }k\in\mathcal K_b,\qquad s_b(\theta)>0.
+\label{eq:complexnormal}
+\end{equation}
+The negative-frequency coefficients are their complex conjugates. The observation for
+the sufficiency statement consists only of coefficients in
+$\bigcup_b\mathcal K_b$; any omitted frequencies are either unobserved or have a
+distribution independent of $\theta$. The state affects this observation only through
+$\bm s(\theta)=(s_{\delta},s_{\theta},s_{\alpha},s_{\beta},s_{\gamma})$.
+\end{assumption}
+
+This is a \emph{piecewise-flat, ideal rectangular-band} model. In a continuous-time
+interpretation, $s_b$ describes the spectral level within band $B_b$. An actual
+spectrum may vary within a band and may change smoothly at its boundaries. In that
+case, the exact sufficiency result below no longer follows.
+
+\subsection{Phase carries no state information in the model}
+
+Write $X_k=R_ke^{i\Phi_k}$. Circular symmetry of the complex normal in
+Eq.~\eqref{eq:complexnormal} gives
+\begin{equation}
+I_k\mid\theta\sim s_b(\theta)\,\mathrm{Exp}(1),\qquad
+\Phi_k\mid\theta\sim\mathrm{Unif}[0,2\pi),
+\label{eq:exponential}
+\end{equation}
+with independent magnitudes and phases. The phase distribution does not depend on
+$\theta$.
+
+\begin{proposition}[Ancillarity of phase]\label{prop:phase}
+Under Assumption~\ref{as:spectral}, the phase vector of the observed positive-frequency
+coefficients is ancillary for $\bm s(\theta)$. The likelihood for $\theta$ depends on
+the observation only through the periodogram values $\{I_k\}$.
+\end{proposition}
+\begin{proof}
+Each conditional complex-normal density is proportional to
+$s_b(\theta)^{-1}\exp[-I_k/s_b(\theta)]$. In polar coordinates, its angular factor
+is constant. Multiplication across the observed bins leaves no phase term that
+depends on $\theta$.
+\end{proof}
+
+This statement does \emph{not} say that Fourier phase is always useless in EEG.
+It says that phase is uninformative about a state \emph{defined to act only through
+the five spectral levels} in this model. Nor does it say that every aspect of
+amplitude is predictable: each $I_k$ retains an exponential fluctuation even if
+$\theta$ is known.
+
+\subsection{Why band averaging is sufficient under piecewise flatness}
+
+\begin{proposition}[Band-power sufficiency and estimation]\label{prop:sufficient}
+Under Assumption~\ref{as:spectral}, $(P_b)_{b\in\{\delta,\theta,\alpha,\beta,\gamma\}}$
+is sufficient for $\bm s$ in the observed, band-limited Fourier data. For each band,
+the maximum-likelihood estimate is $\widehat{s}_b=P_b$; by invariance of maximum
+likelihood, $\log P_b$ estimates $\log s_b$.
+\end{proposition}
+\begin{proof}
+Ignoring terms independent of $\bm s$, the negative log-likelihood is
+\begin{equation}
+-\log p(\{X_k\}\mid\bm s)
+=\sum_b\left(m_b\log s_b+\frac{m_bP_b}{s_b}\right)+\mathrm{const}.
+\label{eq:likelihood}
+\end{equation}
+The factorization criterion gives sufficiency. Differentiating the $b$th term
+with respect to $s_b$ yields
+$m_b/s_b-m_bP_b/s_b^2=0$, so its positive minimizer is $s_b=P_b$.
+\end{proof}
+
+The frequency-domain mean $P_b$ is proportional to the time-domain mean square
+of an \emph{ideal circular band-pass} signal. With the DFT normalization in
+Eq.~\eqref{eq:dft}, Parseval's identity gives
+\begin{equation}
+\frac{1}{N}\sum_{n=0}^{N-1}|x^{(b)}_n|^2
+=\frac{2}{N^2}\sum_{k\in\mathcal K_b}|X_k|^2
+=\frac{2m_b}{N}P_b.
+\label{eq:parseval}
+\end{equation}
+The two band-power conventions differ only by the known factor $2m_b/N$.
+Their logarithms differ by a band-dependent constant. This equivalence presumes
+the stated ideal frequency mask and excludes DC and Nyquist.
+
+\begin{remark}
+Sufficiency holds for the five parameters $\bm s$ \emph{within the model and the
+specified observation space}. If the spectral shape inside a band, the power outside
+the five bands, cross-channel relationships, or transient morphology also varies
+with the state, five band averages need not retain all state information.
+\end{remark}
+
+\subsection{Log power and estimator noise}
+
+\begin{proposition}[Distribution and variance stabilization]\label{prop:log}
+Under Assumption~\ref{as:spectral},
+\begin{equation}
+P_b=s_bG_b,\qquad G_b\sim\mathrm{Gamma}(m_b,\text{scale}=1/m_b).
+\label{eq:gamma}
+\end{equation}
+Writing $\psi$ and $\psi_1$ for the digamma and trigamma functions, respectively,
+\begin{align}
+\E[\log P_b\mid\theta]
+&=\log s_b(\theta)+\psi(m_b)-\log m_b,\label{eq:logmean}\\
+\Var(\log P_b\mid\theta)
+&=\psi_1(m_b).\label{eq:logvar}
+\end{align}
+Thus the conditional noise variance on the log scale depends on the number of
+frequency bins, but not on the state's spectral level.
+\end{proposition}
+\begin{proof}
+The sum of $m_b$ independent unit-mean exponentials is Gamma with shape $m_b$
+and unit scale. Dividing by $m_b$ gives Eq.~\eqref{eq:gamma}. The standard log-Gamma
+moments are $\E\log G_b=\psi(m_b)-\log m_b$ and
+$\Var(\log G_b)=\psi_1(m_b)$.
+\end{proof}
+
+For comparison, a single periodogram ordinate has
+$\operatorname{sd}(\log I_k\mid\theta)=\pi/\sqrt{6}\approx1.28$.
+Band averaging lowers this fluctuation as $m_b$ grows, with
+$\psi_1(m_b)\approx1/m_b$ for large $m_b$. The benefit is limited in the
+slow bands of short patches, where $m_b$ is only three in Table~\ref{tab:bins}.
+The transformed target is not noise-free: $G_b$ is a genuine stochastic
+realization that remains after conditioning on the state.
+
+An additive offset inside the logarithm changes the statement. For the
+mathematical family $Y_b^{(a)}=\log(a+P_b)$ with $a>0$, a first-order delta-method
+approximation around $G_b=1$ gives
+\begin{equation}
+\Var(Y_b^{(a)}\mid\theta)
+\approx\frac{1}{m_b}\left(\frac{s_b(\theta)}{a+s_b(\theta)}\right)^2.
+\label{eq:logoffset}
+\end{equation}
+Unlike Eq.~\eqref{eq:logvar}, this variance depends on the state unless the
+spectral level is large relative to $a$. Equation~\eqref{eq:logoffset} is an
+approximation about a mathematical alternative, not part of the exact
+sufficiency argument.
+
+\section{Masked prediction and irreducible uncertainty}
+
+The sufficient-statistic result concerns inference from an \emph{observed} patch.
+Masked prediction asks a different question: what can a model infer about a
+\emph{missing} patch from its context? A separate temporal assumption is required.
+
+\begin{assumption}[Shared state and conditional independence]\label{as:context}
+The visible context $C$ and the masked target $Y$ are associated with a latent
+state $\Theta$. Conditional on $\Theta$, $Y$ is independent of $C$. The target
+has a finite second moment.
+\end{assumption}
+
+This is an idealization of state persistence across patches. It is not implied
+by Assumption~\ref{as:spectral}; adjacent samples of a continuous process may
+remain correlated even after its broad state is fixed.
+
+\begin{proposition}[Bayes risk decomposition]\label{prop:risk}
+Let $\bm Y$ be any vector target satisfying Assumption~\ref{as:context}, and put
+$\bm\mu(\theta)=\E[\bm Y\mid\Theta=\theta]$ and
+$\Sigma_Y(\theta)=\Cov(\bm Y\mid\Theta=\theta)$. Under squared-error loss,
+the Bayes predictor is $\widehat{\bm Y}(C)=\E[\bm Y\mid C]$ and its risk is
+\begin{equation}
+\E\|\bm Y-\widehat{\bm Y}(C)\|_2^2
+=\E\,\tr\!\left[\Cov\!\left(\bm\mu(\Theta)\mid C\right)\right]
++\E\,\tr\!\left[\Sigma_Y(\Theta)\right].
+\label{eq:risk}
+\end{equation}
+\end{proposition}
+\begin{proof}
+Conditional independence gives
+$\E[\bm Y\mid C]=\E[\bm\mu(\Theta)\mid C]$.
+The law of total covariance, conditional on $C$, yields
+$\Cov(\bm Y\mid C)=\Cov(\bm\mu(\Theta)\mid C)
++\E[\Sigma_Y(\Theta)\mid C]$.
+Take traces and expectations.
+\end{proof}
+
+For the five-band log-power target in Eq.~\eqref{eq:bandpower}, if the
+conditional distribution in Assumption~\ref{as:spectral} applies to the masked
+patch, Eq.~\eqref{eq:logmean} gives
+\begin{equation}
+\mu_b(\theta)=\log s_b(\theta)+\kappa_b,
+\qquad\kappa_b=\psi(m_b)-\log m_b,
+\label{eq:mu}
+\end{equation}
+and Eq.~\eqref{eq:logvar} gives conditional variance $\psi_1(m_b)$.
+Consequently, the state-independent part of the five-dimensional squared-error
+risk is $\sum_b\psi_1(m_b)$ before any optional averaging over bands.
+The other term is posterior uncertainty about the five log spectral levels that
+remains even for the Bayes predictor with this fixed context. It is not reducible
+merely by improving a predictor while keeping the same context. For any predictor
+$f$, the actual excess risk is
+\begin{equation}
+R(f)-R^*=\E\|f(C)-\E[\bm Y\mid C]\|_2^2,
+\end{equation}
+where $R^*$ is the full Bayes risk in Eq.~\eqref{eq:risk}.
+If one instead uses $\log(a+P_b)$, the conditional sampling term generally
+depends on the state, as Eq.~\eqref{eq:logoffset} illustrates.
+
+For waveform reconstruction, suppose that, conditional on a known $\theta$,
+the masked sample vector $\bm x_M$ and an observed waveform context $\bm x_C$
+are jointly zero-mean Gaussian with covariance blocks
+$\Sigma_{MM},\Sigma_{MC},\Sigma_{CM},\Sigma_{CC}$, with $\Sigma_{CC}$ invertible.
+Then
+\begin{align}
+\E[\bm x_M\mid\bm x_C,\theta]
+&=\Sigma_{MC}\Sigma_{CC}^{-1}\bm x_C,\label{eq:wiener}\\
+\Cov(\bm x_M\mid\bm x_C,\theta)
+&=\Sigma_{MM}-\Sigma_{MC}\Sigma_{CC}^{-1}\Sigma_{CM}.
+\label{eq:innovation}
+\end{align}
+The trace of Eq.~\eqref{eq:innovation}, divided by the number of masked samples,
+is the conditional mean-squared \emph{waveform innovation} even when the state
+is known. It includes unpredictable amplitude and phase, not phase alone.
+Uncertainty about $\Theta$ can add further error to prediction from $C$.
+
+Equations~\eqref{eq:risk}--\eqref{eq:innovation} motivate the hypothesis that
+a band-power target can direct learning toward persistent spectral-state
+information rather than the full waveform realization. They do \emph{not}
+establish a universal ordering between the two objectives: their target
+dimensions, units, loss normalizations, and Bayes-risk floors differ. Nor do
+they prove better downstream classification, faster optimization, or greater
+data efficiency. Such claims require controlled empirical comparisons.
+
+\section{Where the model ceases to apply}
+
+Several EEG properties lie outside this five-band account. Sleep spindles,
+K-complexes, epileptiform events, and other transients may be distinguished by
+shape and timing rather than average energy. Cross-channel coherence,
+interregional phase relationships, phase--amplitude coupling, and fine spectral
+structure are absent from five single-channel band powers. Eye movement,
+muscle activity, and recording artifacts can contribute energy inside the same
+bands as cortical rhythms. A state transition inside a patch violates the
+locally persistent-state picture. Finally, finite windows limit frequency
+resolution, especially for the lowest frequencies, as Table~\ref{tab:bins}
+shows.
+
+These are not minor technical exceptions. They delimit when spectral energy
+is a plausible target for learning task-relevant structure and when it may
+discard information that the downstream label actually needs.
+
+\section{Conclusion}
+
+Under an explicitly defined five-band Gaussian spectral model, the phases of
+the observed Fourier coefficients are ancillary, the five classical band
+powers are sufficient for the five spectral levels, and the log-power target
+has state-independent conditional variance. A separate shared-state
+assumption connects these properties to masked prediction through an exact
+Bayes-risk decomposition. The analysis provides a principled reason to test
+band-power prediction for labels tied to sustained EEG rhythms, while leaving
+its comparative representation quality to experiment.
+
+\end{document}

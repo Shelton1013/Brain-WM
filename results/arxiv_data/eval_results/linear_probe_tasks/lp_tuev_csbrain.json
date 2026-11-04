@@ -1,0 +1,14 @@
+{
+  "task": "tuev",
+  "results": {
+    "csbrain": {
+      "C": 0.1,
+      "val_ba": 0.4714526319916892,
+      "test": {
+        "balanced_accuracy": 0.5642844504033528,
+        "cohen_kappa": 0.4209548426647589,
+        "weighted_f1": 0.6834089897643307
+      }
+    }
+  }
+}

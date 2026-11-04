@@ -1,0 +1,15 @@
+{
+  "task": "faced",
+  "results": {
+    "m_s44": {
+      "test": {
+        "balanced_accuracy": 0.2758990874932904,
+        "cohen_kappa": 0.18708356831046236,
+        "weighted_f1": 0.2780849077616917
+      },
+      "val_ba": 0.32469135802469135,
+      "epochs": 33,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s44_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

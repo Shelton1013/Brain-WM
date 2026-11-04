@@ -1,0 +1,105 @@
+\section{Results}\label{sec:results}
+
+\input{tables/overview}
+
+\subsection{Strict linear probe across tasks}\label{sec:lpfm}
+Table~\ref{tab:overview} summarizes the strict linear probe on all tasks, grouped by task type.
+As for the external models, which are released as single checkpoints, we evaluate one
+checkpoint of SpecBraM, our main released model, and give every model a 95\% confidence
+interval from 1{,}000 bootstrap resamples of the test subjects (TUEV: recordings). SpecBraM has
+higher point estimates than CBraMod and LaBraM on every task, BIOT on sleep staging, and CSBrain
+on every task except event classification (TUEV $0.555$ vs.\ $0.564$). REVE, of similar size but
+pretrained on about 25 times more data, is the strongest baseline. On \emph{sleep staging}
+SpecBraM has no detected difference on ISRUC ($0.790$ vs.\ $0.793$) and a higher point estimate on HMC ($0.742$ vs.\
+$0.704$); on \emph{workload}, \emph{depression}, \emph{emotion} and \emph{motor imagery} its
+point estimates are higher (mental arithmetic $0.781$ vs.\ $0.684$, Mumtaz $0.939$ vs.\ $0.902$, FACED $0.221$ vs.\
+$0.200$, PhysioNet-MI $0.417$ vs.\ $0.403$); on \emph{clinical EEG} there is no detected
+difference on event classification (TUEV $0.555$ vs.\ $0.546$), and its abnormality-detection point estimate is lower (TUAB $0.813$
+vs.\ $0.821$). The intervals are wide for the small cohorts (mental arithmetic has four test
+subjects, Mumtaz eleven), and the TUH tasks share corpus provenance with TUEG; their patients
+were not excluded from our pretraining. Table~\ref{tab:paired} reports nominal, unadjusted
+paired bootstrap intervals for the differences (Appendix~\ref{app:fullmetrics}). Intervals
+containing zero indicate no detected difference under this procedure, not equivalence.
+Appendix~\ref{app:fullmetrics} reports Cohen's $\kappa$, weighted F1 and, for
+binary tasks, AUROC and AUC-PR for every dataset, together with the mean and standard deviation
+over our three pretraining seeds.
+
+Model size, input convention and readout also differ between the models; varying each in turn
+(Appendix~\ref{app:confounds}) does not close the gap to CBraMod and LaBraM. Although our focus
+is frozen use, SpecBraM also fine-tunes well: with full fine-tuning on sleep staging it reaches
+$0.818$/$0.770$ balanced accuracy on ISRUC/HMC, above the listed published point estimates of
+CBraMod, CSBrain and REVE under their respective recipes (Appendix~\ref{app:fttasks}).
+
+\IfFileExists{tables/compute.tex}{\input{tables/compute}}{}
+\IfFileExists{tables/target_r2.tex}{\input{tables/target_r2}}{}
+\input{tables/labeleff}
+
+\begin{figure}[t]\centering
+\includegraphics[width=\columnwidth]{figures/label_efficiency_lp.pdf}
+\caption{\textbf{Label efficiency} under the strict linear probe (balanced accuracy;
+SpecBraM: main checkpoint).}
+\label{fig:labeleff}
+\end{figure}
+
+\input{tables/cluster}
+
+\subsection{Efficiency}\label{sec:efficiency}
+\noindent\textbf{Pretraining steps.} Table~\ref{tab:compute} follows the linear probe along
+pretraining for the two targets, with everything else fixed. After a single epoch, band power
+reaches $0.772$ on ISRUC, above raw-waveform reconstruction after sixteen epochs ($0.763$); on
+HMC it is close after one epoch ($0.713$ vs.\ $0.715$) and exceeds it after two ($0.722$).
+Band power thus reaches the final quality of waveform reconstruction with 8 to 16 times fewer
+pretraining steps (P2). Target computation uses one FFT per
+patch, the head has five outputs per patch instead of 200, no tokenizer is trained beforehand
+(as for LaBraM) and no target network is maintained (as for latent prediction).
+
+\noindent\textbf{Achieved target prediction.} Table~\ref{tab:target_r2} measures prediction
+on TUAB evaluation windows with the masks of pretraining. These windows are held out from
+downstream training; exclusion from pretraining is not established. The
+band-power model explains $80\%$ of its target's variance after one epoch and $92\%$ after
+sixteen; the waveform model explains $1.2\%$ after one epoch and $3.1\%$ after sixteen. Band-power
+$R^2$ is averaged over the five per-band scores, whereas waveform $R^2$ pools the sample
+coordinates. These are achieved scores, not Bayes predictability ceilings: residual error
+combines contextual uncertainty with model and optimization error, and does not determine a
+fraction of gradient noise. The early improvement of band-power prediction accompanies the
+early rise of its linear probe.
+
+\noindent\textbf{Model size and data.} At 4.2M parameters, the size of CBraMod, the band-power
+model ($0.788$/$0.728$ on ISRUC/HMC) surpasses the 51.3M-parameter waveform model
+($0.770$/$0.715$; Table~\ref{tab:ablation}), and it exceeds CBraMod, pretrained on about four
+times more data, by $6.0$/$10.9$ points. SpecBraM is pretrained on $2{,}388$ hours, about a
+quarter of the data of CBraMod and CSBrain and a twenty-fifth of REVE's, and ranks first on
+most tasks of Table~\ref{tab:overview}.
+
+\noindent\textbf{Labels.} On sleep staging, SpecBraM remains effective with few labelled
+training epochs (Table~\ref{tab:labeleff}, Fig.~\ref{fig:labeleff}). With $1\%$ of the training epochs SpecBraM
+reaches $0.760$/$0.662$ on ISRUC/HMC, more than BIOT, CBraMod, LaBraM and CSBrain obtain with all
+labels, and against $0.736$/$0.635$ for REVE with $1\%$. It approaches REVE's full-training-label score
+with $25\%$ of the training epochs on ISRUC ($0.791$ vs.\ $0.792$) and exceeds it with $10\%$ on HMC
+($0.717$ vs.\ $0.704$), and on HMC it leads every external model at every label fraction.
+
+\noindent\textbf{Unsupervised clustering.} To assess the representation without a supervised classifier,
+we cluster the frozen sleep features with k-means and compare the clusters with the expert
+stages (Table~\ref{tab:cluster}). SpecBraM's features are organized by sleep stage more than
+those of any other model: NMI $0.417$/$0.236$, against $0.401$/$0.182$ for the same-architecture
+raw-reconstruction model and at most $0.356$/$0.155$ for the external models. These results
+support sleep-stage structure in the frozen features. Clustering is unsupervised, but REVE's
+readout is selected by validation NMI using stage labels; this comparison is therefore not
+entirely label-free.
+
+\input{tables/ablation}
+
+\subsection{Controlled target study}\label{sec:targetstudy}
+Table~\ref{tab:ablation} changes only the pretext target, with backbone, data, steps and
+launcher fixed, and reports the mean over three pretraining seeds. With the linear patch
+embedding the band-power target reaches $0.7965$/$0.7433$ balanced accuracy on ISRUC/HMC, against
+$0.7701$/$0.7153$ for raw-waveform reconstruction (P1). The difference is $+2.6$/$+2.8$ points with the linear embedding,
+$+2.5$/$+1.7$ with a learnable filterbank tokenizer and $+3.5$/$+5.5$ at 4.2M parameters;
+paired by pretraining seed, it is positive on all eighteen seed--dataset pairs, and it grows to
+$+3.2$ to $+6.3$ points with $1\%$ of the labels. Reconstructing five band-pass-filtered
+waveforms instead of the raw one gives lower mean scores ($0.7646$/$0.7173$ vs.\ $0.7716$/$0.7201$; P3).
+This is consistent with benefits from an aggregated, phase-invariant target, but does not
+isolate phase removal: output dimension and loss scale also change. Beyond sleep, band power
+has higher mean scores on mental arithmetic, depression screening and event classification,
+and close scores on the other tasks (Appendix~\ref{app:targettasks}). Both studied spectral
+estimators give strong sleep results (Appendix~\ref{app:variants}).

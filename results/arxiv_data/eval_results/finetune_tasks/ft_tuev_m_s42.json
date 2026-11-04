@@ -1,0 +1,15 @@
+{
+  "task": "tuev",
+  "results": {
+    "m_s42": {
+      "test": {
+        "balanced_accuracy": 0.5728515997195985,
+        "cohen_kappa": 0.4987057386749749,
+        "weighted_f1": 0.7387399819599814
+      },
+      "val_ba": 0.5457546578309439,
+      "epochs": 10,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig4g_s42_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "dataset": "isruc",
+  "results": {
+    "reve_base_chan": {
+      "avg3": {
+        "C": 0.01,
+        "val_ba": 0.7193422797051718,
+        "test": {
+          "balanced_accuracy": 0.7995141048820109,
+          "cohen_kappa": 0.7390740756418935,
+          "weighted_f1": 0.8003955801509214
+        },
+        "label_eff": {
+          "1.00": {
+            "balanced_accuracy": [
+              0.7992553455114934,
+              0.0
+            ],
+            "cohen_kappa": [
+              0.7385225435155407,
+              0.0
+            ],
+            "weighted_f1": [
+              0.7999387675092592,
+              0.0
+            ]
+          }
+        },
+        "dim": 3072
+      },
+      "checkpoint": null
+    }
+  }
+}

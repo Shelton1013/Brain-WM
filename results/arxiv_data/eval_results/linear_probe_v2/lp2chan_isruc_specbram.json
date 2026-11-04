@@ -1,0 +1,179 @@
+{
+  "dataset": "isruc",
+  "results": {
+    "m_s42": {
+      "avg3": {
+        "C": 0.01,
+        "val_ba": 0.7853735378706922,
+        "test": {
+          "balanced_accuracy": 0.7994285193961094,
+          "cohen_kappa": 0.7579286802883705,
+          "weighted_f1": 0.8133551214519813
+        },
+        "label_eff": {
+          "1.00": {
+            "balanced_accuracy": [
+              0.7992378616268053,
+              0.0
+            ],
+            "cohen_kappa": [
+              0.7577794635285001,
+              0.0
+            ],
+            "weighted_f1": [
+              0.8132260577975675,
+              0.0
+            ]
+          }
+        },
+        "dim": 3072
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig4g_s42_sub2100/checkpoint_ep16.pt"
+    },
+    "m_s43": {
+      "avg3": {
+        "C": 0.01,
+        "val_ba": 0.7871272992181007,
+        "test": {
+          "balanced_accuracy": 0.7934135493806209,
+          "cohen_kappa": 0.7507562588194056,
+          "weighted_f1": 0.8091543306476344
+        },
+        "label_eff": {
+          "1.00": {
+            "balanced_accuracy": [
+              0.7932368765333248,
+              0.0
+            ],
+            "cohen_kappa": [
+              0.7506156844665541,
+              0.0
+            ],
+            "weighted_f1": [
+              0.8090544532771736,
+              0.0
+            ]
+          }
+        },
+        "dim": 3072
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "m_s44": {
+      "avg3": {
+        "C": 0.01,
+        "val_ba": 0.7799690467271363,
+        "test": {
+          "balanced_accuracy": 0.794274834109457,
+          "cohen_kappa": 0.7477429078770554,
+          "weighted_f1": 0.8063442889753573
+        },
+        "label_eff": {
+          "1.00": {
+            "balanced_accuracy": [
+              0.794433332135747,
+              0.0
+            ],
+            "cohen_kappa": [
+              0.7476156538797404,
+              0.0
+            ],
+            "weighted_f1": [
+              0.806296731226199,
+              0.0
+            ]
+          }
+        },
+        "dim": 3072
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "lr_s42": {
+      "avg3": {
+        "C": 0.01,
+        "val_ba": 0.7586495546096096,
+        "test": {
+          "balanced_accuracy": 0.7692212857991869,
+          "cohen_kappa": 0.714086222039353,
+          "weighted_f1": 0.7825642843132775
+        },
+        "label_eff": {
+          "1.00": {
+            "balanced_accuracy": [
+              0.7683365354227505,
+              0.0
+            ],
+            "cohen_kappa": [
+              0.7129382825407431,
+              0.0
+            ],
+            "weighted_f1": [
+              0.7816977097915397,
+              0.0
+            ]
+          }
+        },
+        "dim": 3072
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_nosig_s42_sub2100/checkpoint_ep16.pt"
+    },
+    "lr_s43": {
+      "avg3": {
+        "C": 0.01,
+        "val_ba": 0.7659436101280758,
+        "test": {
+          "balanced_accuracy": 0.7769304132575021,
+          "cohen_kappa": 0.7250842596810161,
+          "weighted_f1": 0.7916632512321835
+        },
+        "label_eff": {
+          "1.00": {
+            "balanced_accuracy": [
+              0.7770077712130545,
+              0.0
+            ],
+            "cohen_kappa": [
+              0.7250904923364363,
+              0.0
+            ],
+            "weighted_f1": [
+              0.791662522490362,
+              0.0
+            ]
+          }
+        },
+        "dim": 3072
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_nosig_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "lr_s44": {
+      "avg3": {
+        "C": 0.01,
+        "val_ba": 0.760869226467092,
+        "test": {
+          "balanced_accuracy": 0.7739301262156583,
+          "cohen_kappa": 0.7225184066885231,
+          "weighted_f1": 0.7901469751220948
+        },
+        "label_eff": {
+          "1.00": {
+            "balanced_accuracy": [
+              0.7736594301460766,
+              0.0
+            ],
+            "cohen_kappa": [
+              0.7223569496548852,
+              0.0
+            ],
+            "weighted_f1": [
+              0.7899627006505529,
+              0.0
+            ]
+          }
+        },
+        "dim": 3072
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_nosig_s44_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "task": "tuev",
+  "results": {
+    "srr_s42": {
+      "C": 1.0,
+      "val_ba": 0.4156988392558009,
+      "test": {
+        "balanced_accuracy": 0.45350027601929055,
+        "cohen_kappa": 0.330144878699295,
+        "weighted_f1": 0.6363764111602842
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_small144_rawrecon_nosig_s42_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

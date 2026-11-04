@@ -1,0 +1,23 @@
+\begin{abstract}
+EEG foundation models aim to decode brain states across clinical and cognitive tasks from few
+labels. They are pretrained on large unlabeled corpora with objectives borrowed from images and
+language, reconstructing the raw waveform of masked patches or predicting discrete tokens, and
+their progress has come mainly from more data and larger models. These objectives also fit
+waveform details beyond the spectral information relevant to many EEG labels. Sleep stages,
+clinical slowing and many cognitive states are associated with the power of neural rhythms,
+while a short patch also contains phase and sample-level variation that may be only partly
+predictable from context. We present \textbf{SpecBraM}, an EEG foundation model pretrained by
+\emph{masked band-power prediction}: from the visible context, it predicts the log power of each
+masked (channel, time) patch in the classical frequency bands, a parameter-free physical target
+computed from the patch's spectrum. Under an idealized spectral model, band-averaged power is
+sufficient for the band levels, and its logarithm stabilizes sampling variance when the numerical
+floor is ignored. This motivates a compact target for efficient learning. With backbone, data
+and training steps fixed, the trained models explain substantially more of the band-power
+target's variance than of the waveform's, and on sleep staging band-power pretraining reaches
+the linear-probe quality of waveform reconstruction with a fraction of the steps and with a
+model a tenth of the size. Under an identical strict linear probe on eight datasets spanning six task types,
+SpecBraM, pretrained on a fraction of the data of recent models, outperforms CBraMod, LaBraM
+and CSBrain on nearly all tasks and has higher point estimates than REVE, which uses far more
+data, on most tasks. On sleep staging it also leads the compared models with few labelled
+training epochs and in unsupervised clustering agreement.
+\end{abstract}

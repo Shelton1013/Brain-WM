@@ -1,0 +1,14 @@
+{
+  "task": "faced",
+  "results": {
+    "csbrain": {
+      "C": 0.1,
+      "val_ba": 0.18163580246913577,
+      "test": {
+        "balanced_accuracy": 0.17941492216854538,
+        "cohen_kappa": 0.07653326133460714,
+        "weighted_f1": 0.1711878068924159
+      }
+    }
+  }
+}

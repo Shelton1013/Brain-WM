@@ -1,0 +1,63 @@
+{
+  "dataset": "hmc",
+  "results": {
+    "reve_base_mean": {
+      "avg3": {
+        "C": 0.01,
+        "val_ba": 0.6950136073689349,
+        "test": {
+          "balanced_accuracy": 0.7005845297132908,
+          "cohen_kappa": 0.6191215725784873,
+          "weighted_f1": 0.7051261244714447
+        },
+        "label_eff": {
+          "1.00": {
+            "balanced_accuracy": [
+              0.7002700257124117,
+              0.0
+            ],
+            "cohen_kappa": [
+              0.6187811369610761,
+              0.0
+            ],
+            "weighted_f1": [
+              0.704906417941426,
+              0.0
+            ]
+          }
+        },
+        "dim": 512
+      },
+      "checkpoint": null
+    },
+    "reve_base_attn": {
+      "avg3": {
+        "C": 0.01,
+        "val_ba": 0.6955708623641129,
+        "test": {
+          "balanced_accuracy": 0.703996687096238,
+          "cohen_kappa": 0.6232418770430315,
+          "weighted_f1": 0.7074696723616057
+        },
+        "label_eff": {
+          "1.00": {
+            "balanced_accuracy": [
+              0.703676546839397,
+              0.0
+            ],
+            "cohen_kappa": [
+              0.6229169441805086,
+              0.0
+            ],
+            "weighted_f1": [
+              0.7072624422684619,
+              0.0
+            ]
+          }
+        },
+        "dim": 512
+      },
+      "checkpoint": null
+    }
+  }
+}

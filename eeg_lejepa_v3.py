@@ -1,27 +1,14 @@
-"""EEG-LeJEPA v3 — frequency-native pretraining.
+"""SpecBraM model and historical EEG-LeJEPA v3 ablations.
 
-Motivation (see design doc / memory frozen-probe-consolidated):
-v2's continuous-MSE targets (latent JEPA + raw-waveform MAE) are easy to satisfy
-without learning the discriminative *spectral* structure that separates EEG
-classes — which is why v2 barely beats a random encoder. v3 makes frequency an
-architectural prior:
+The current paper uses tokenizer_type='linear', mask_axis='time',
+target_type='fft_bandpower', fft_bands='standard', target_log='log',
+jepa_weight=0 and sigreg_lambda=0. See configs/specbram_main.json.
+Targets are classical-band powers computed by a patch-local FFT, with log(P+1e-3).
 
-  1. Learnable FILTERBANK tokenizer: each patch is decomposed into N frequency
-     bands by a learnable Conv1d bank (physiologically initialised δ/θ/α/β/γ),
-     so the encoder input already carries band structure.
-  2. Real CROSS-FREQUENCY masked prediction: random bands are masked at the
-     tokenizer (removed from the encoder input); the model predicts the masked
-     band's log-power from the *other* bands + spatio-temporal context. No
-     leakage (target band excluded), a hard spectral target, genuine cross-band
-     coupling — this is the primary objective.
-  3. Cross-band JEPA (latent consistency): predict the full-band encoding from
-     the band-masked encoding (dense latent MSE). Secondary.
-  4. SIGReg anti-collapse (unchanged).
-  MAE (raw-waveform reconstruction) is DROPPED — it conflicted with JEPA and
-  reconstructed noise.
-
-Downstream interface (`_tokenize` / `_encode` / `d_model`) matches v2 so the
-existing eval code works unchanged.
+Constructor defaults retain the earlier filterbank/frequency-mask/log1p model
+for backwards compatibility. They are not the current paper configuration.
+Always use v3_kwargs_from_args when loading an existing checkpoint.
+The downstream `_tokenize` / `_encode` interface matches the older encoders.
 """
 from __future__ import annotations
 import math
@@ -37,9 +24,17 @@ from regularizers import distribution_reg
 _BAND_CENTERS_HZ = [2.0, 6.0, 10.0, 21.0, 38.0]    # δ θ α β γ
 # Exact clinical band edges (Hz) for the FFT band-power target (ablation).
 _BAND_EDGES_HZ = [(0.5, 4.0), (4.0, 8.0), (8.0, 13.0), (13.0, 30.0), (30.0, 45.0)]
+# Measured -3 dB passbands of the fixed 65-tap target filters at 256 Hz (the
+# "narrow" bands the default `bandpower` target actually measures). Used by the
+# FFT target to separate band definition from estimator.
+_NARROW_EDGES_HZ = [(2.9, 6.3), (3.7, 8.5), (7.2, 12.8), (18.1, 23.9), (35.1, 40.9)]
+# "nodelta": standard theta..gamma only -- equivalent to computing the standard-band
+# target on a 4-Hz high-passed signal (tests whether the slow/ocular band hurts vigilance)
+FFT_BANDS = {"standard": _BAND_EDGES_HZ, "narrow": _NARROW_EDGES_HZ,
+             "nodelta": _BAND_EDGES_HZ[1:]}
 
 # Pretext targets (ablation — isolates the prediction target on a fixed backbone):
-#   bandpower     : log band-power from the FIXED Hann filterbank (paper default)
+#   bandpower     : legacy log1p power from the fixed Hann filterbank
 #   fft_bandpower : log band-power in exact δθαβγ bands via per-patch FFT
 #   raw_recon     : reconstruct the raw masked waveform (CBraMod-style MAE)
 #   band_recon    : reconstruct the fixed-filterbank band WAVEFORMS of the patch
@@ -48,8 +43,7 @@ TARGET_TYPES = ("bandpower", "fft_bandpower", "raw_recon", "band_recon")
 
 def v3_kwargs_from_args(a: dict) -> dict:
     """Constructor kwargs for EEGLeJEPA_v3 from a checkpoint's saved args.
-    Single source of truth for train/eval loaders (new ablation flags default
-    to the paper model, so old checkpoints load unchanged)."""
+    Defaults preserve legacy checkpoints; saved fields select the current paper model."""
     return dict(
         d_model=a.get("d_model", 512),
         encoder_layers=a.get("encoder_layers", 12), n_heads=8,
@@ -69,6 +63,9 @@ def v3_kwargs_from_args(a: dict) -> dict:
         target_type=a.get("target_type", "bandpower"),
         patch_local_filter=bool(a.get("patch_local_filter", False)),
         tokenizer_type=a.get("tokenizer_type", "filterbank"),
+        fft_bands=a.get("fft_bands", "standard"),
+        fft_taper=a.get("fft_taper", "rect"),
+        target_log=a.get("target_log", "log1p"),
     )
 
 
@@ -176,7 +173,7 @@ class FilterbankTokenizer(nn.Module):
 
 
 class LinearPatchTokenizer(FilterbankTokenizer):
-    """Ablation: plain CBraMod-style linear patch embedding — NO spectral bias
+    """Main-model plain linear patch embedding, without a learnable input filterbank.
     at the input. The raw patch is projected straight to N*d_band features
     (split into N chunks so masking / _combine / the encoder are unchanged).
     The fixed reference filterbank is kept ONLY to compute the band-power
@@ -234,6 +231,9 @@ class EEGLeJEPA_v3(nn.Module):
         target_type: str = "bandpower",      # ablation: pretext target (TARGET_TYPES)
         patch_local_filter: bool = False,    # ablation: per-patch filtering (no leak)
         tokenizer_type: str = "filterbank",  # ablation: "linear" = no spectral input bias
+        fft_bands: str = "standard",         # fft_bandpower: "standard" | "narrow" edges
+        fft_taper: str = "rect",             # fft_bandpower: "rect" | "multitaper" (DPSS)
+        target_log: str = "log1p",           # fft_bandpower: "log1p" | "log" (log(P+floor))
         **_ignored,          # tolerate extra ckpt args
     ):
         super().__init__()
@@ -248,6 +248,13 @@ class EEGLeJEPA_v3(nn.Module):
         if target_type in ("raw_recon", "band_recon"):
             assert mask_axis == "time", "waveform targets need whole-patch masking"
         self.target_type = target_type
+        assert fft_bands in FFT_BANDS, fft_bands
+        self.fft_edges = FFT_BANDS[fft_bands]
+        assert fft_taper in ("rect", "multitaper") and target_log in ("log1p", "log")
+        self.fft_taper, self.target_log = fft_taper, target_log
+        self.mt_nw, self.mt_k = 2.0, 3          # time-bandwidth 2 -> +-2.6 Hz at 0.78 s
+        self.log_floor = 1e-3                   # robust-scaled units: well below band powers
+        self._dpss = None
         self.sample_rate = sample_rate
         self.jepa_weight = jepa_weight
         self.cf_weight = cf_weight
@@ -275,7 +282,9 @@ class EEGLeJEPA_v3(nn.Module):
         # heads
         self.jepa_predictor = nn.Sequential(
             nn.Linear(d_model, d_model), nn.GELU(), nn.Linear(d_model, d_model))
-        self.cf_head = nn.Linear(d_model, n_bands)   # predict per-band log-power
+        # predict per-band log-power (FFT targets may use fewer bands than the tokenizer)
+        n_tgt = len(self.fft_edges) if target_type == "fft_bandpower" else n_bands
+        self.cf_head = nn.Linear(d_model, n_tgt)
         # waveform-reconstruction heads exist only for those ablations, so the
         # paper model's state_dict is unchanged
         if target_type == "raw_recon":
@@ -331,7 +340,12 @@ class EEGLeJEPA_v3(nn.Module):
             if self.target_type == "fft_bandpower":
                 band_logpow = self._fft_band_logpow(eeg)[:, :C, :Tp]
             cf_pred = self.cf_head(enc_ctx)                  # [B,C,Tp,N]
-            if bmask.any():
+            if bmask.any() and cf_pred.shape[-1] != N:
+                # fewer target bands than tokenizer bands (fft_bands=nodelta): time
+                # masking hides whole patches, so mask by patch
+                pm = bmask.any(-1)
+                loss_cf = F.mse_loss(cf_pred[pm], band_logpow[pm])
+            elif bmask.any():
                 loss_cf = F.mse_loss(cf_pred[bmask], band_logpow[bmask])
             else:
                 loss_cf = enc_ctx.sum() * 0.0
@@ -372,20 +386,32 @@ class EEGLeJEPA_v3(nn.Module):
 
     @torch.no_grad()
     def _fft_band_logpow(self, eeg: torch.Tensor) -> torch.Tensor:
-        """log(1+band variance) in exact δθαβγ bands via per-patch FFT:
+        """Classical-band variance via patch-local FFT, then log(P+floor) or legacy log1p:
         [B,C,Tp,N]. Patch-local by construction (no cross-patch leakage)."""
         B, T, C = eeg.shape
         P = self.patch_len
         Tp = T // P
         xp = eeg[:, :Tp * P, :].permute(0, 2, 1).reshape(B, C, Tp, P).float()
-        spec = torch.fft.rfft(xp, dim=-1).abs() ** 2          # [B,C,Tp,P//2+1]
+        if self.fft_taper == "multitaper":
+            # K DPSS tapers (unit energy): averaging the K eigenspectra cuts the
+            # variance of each bin by ~1/K at the cost of +-W Hz smoothing
+            if getattr(self, "_dpss", None) is None or self._dpss.device != eeg.device:
+                from scipy.signal.windows import dpss
+                w = torch.tensor(dpss(P, self.mt_nw, self.mt_k).copy(), dtype=torch.float32)
+                self._dpss = (w / w.norm(dim=-1, keepdim=True)).to(eeg.device)   # [K,P]
+            spec = (torch.fft.rfft(xp.unsqueeze(-2) * self._dpss, dim=-1).abs() ** 2).mean(-2) * P
+        else:
+            spec = torch.fft.rfft(xp, dim=-1).abs() ** 2      # [B,C,Tp,P//2+1]
         freqs = torch.fft.rfftfreq(P, d=1.0 / self.sample_rate).to(eeg.device)
         out = []
-        for lo, hi in _BAND_EDGES_HZ[: self.n_bands]:
+        for lo, hi in self.fft_edges:
             sel = (freqs >= lo) & (freqs < hi)
             # one-sided Parseval: band variance = 2 * sum|X_k|^2 / P^2
             out.append(2.0 * spec[..., sel].sum(-1) / (P * P))
-        return torch.log1p(torch.stack(out, dim=-1))
+        bp = torch.stack(out, dim=-1)
+        if self.target_log == "log":                           # true log, small floor
+            return torch.log(bp + self.log_floor)
+        return torch.log1p(bp)
 
     # ── downstream interface (matches v2) ───────────────────────────
     def _tokenize(self, eeg: torch.Tensor) -> torch.Tensor:

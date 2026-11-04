@@ -275,6 +275,7 @@ class ISRUCDataset(Dataset):
                 # Bump when channel handling changes so stale caches don't hit.
                 # v2 = F3/F4-optional (keep 4-channel subjects, zero-pad frontal).
                 "channels": "core4_optfrontal_reref_v3",
+                "label_alignment_version": 2,
             })
             cache_path = Path(cache_dir) / f"isruc_{key}.pt"
             if cache_path.exists():
@@ -353,17 +354,11 @@ class ISRUCDataset(Dataset):
             sig = _robust_scale_per_recording(sig)
 
         # ── Read labels (one per 30-s epoch, expert 1) ──
-        labels_raw: list[int] = []
+        from label_utils import map_epoch_labels
         with open(txt) as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                if line in LABEL_MAP:
-                    labels_raw.append(LABEL_MAP[line])
-                # ignore unknown codes (sometimes MT, ?, etc.)
+            labels_raw = map_epoch_labels(f, LABEL_MAP)
 
-        if not labels_raw:
+        if not any(label is not None for label in labels_raw):
             raise ValueError(f"No valid labels in {txt}")
 
         # ── Segment into 30-s epochs, then take MIDDLE trial_duration_s ──
@@ -374,6 +369,8 @@ class ISRUCDataset(Dataset):
         n_epochs = min(n_epochs_available, len(labels_raw))
 
         for ep in range(n_epochs):
+            if labels_raw[ep] is None:
+                continue
             ep_start = ep * epoch_samples
             mid_start = ep_start + offset
             mid_end = mid_start + self.trial_samples

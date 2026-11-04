@@ -1,0 +1,13 @@
+\begin{strip}
+\centering
+\includegraphics[width=\linewidth]{figures/teaser.pdf}
+\captionsetup{hypcap=false}
+\captionof{figure}{\textbf{What should an EEG foundation model predict?} The model families encode the
+same masked token grid with a transformer and differ in the pretraining target. LaBraM predicts
+the discrete codes of a separately trained vector-quantized tokenizer; CBraMod, CSBrain and REVE
+reconstruct every sample of the masked patch. SpecBraM predicts the log power of each masked
+patch in the five classical frequency bands, computed from the patch's spectrum: a phase-invariant
+physical quantity associated with the spectral state.}
+\captionsetup{hypcap=true}
+\label{fig:contrast}
+\end{strip}

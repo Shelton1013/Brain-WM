@@ -1,0 +1,153 @@
+{
+  "task": "ma",
+  "results": {
+    "linbp_s42": {
+      "C": 1.0,
+      "val_ba": 0.5870295698924731,
+      "test": {
+        "balanced_accuracy": 0.7361111111111112,
+        "auc_pr": 0.6294049231173424,
+        "auroc": 0.82421875
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_bandpower_sub2100/checkpoint_ep16.pt"
+    },
+    "linraw_s42": {
+      "C": 0.01,
+      "val_ba": 0.6340725806451613,
+      "test": {
+        "balanced_accuracy": 0.6527777777777778,
+        "auc_pr": 0.6114093381587626,
+        "auroc": 0.7486979166666666
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_sub2100/checkpoint_ep16.pt"
+    },
+    "fbbp_s42": {
+      "C": 1.0,
+      "val_ba": 0.689516129032258,
+      "test": {
+        "balanced_accuracy": 0.7430555555555556,
+        "auc_pr": 0.723846326584135,
+        "auroc": 0.8622685185185186
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_bandpower_rerun_sub2100/checkpoint_ep16.pt"
+    },
+    "fbraw_s42": {
+      "C": 0.01,
+      "val_ba": 0.685483870967742,
+      "test": {
+        "balanced_accuracy": 0.7152777777777778,
+        "auc_pr": 0.7011327919619555,
+        "auroc": 0.780960648148148
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_rawrecon_sub2100/checkpoint_ep16.pt"
+    },
+    "linbp_s43": {
+      "C": 1.0,
+      "val_ba": 0.5944220430107527,
+      "test": {
+        "balanced_accuracy": 0.7638888888888888,
+        "auc_pr": 0.6675662965061595,
+        "auroc": 0.8342013888888888
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_bandpower_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "linraw_s43": {
+      "C": 0.01,
+      "val_ba": 0.595766129032258,
+      "test": {
+        "balanced_accuracy": 0.6527777777777778,
+        "auc_pr": 0.5779591746892433,
+        "auroc": 0.796875
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "fbbp_s43": {
+      "C": 0.01,
+      "val_ba": 0.6038306451612903,
+      "test": {
+        "balanced_accuracy": 0.6493055555555556,
+        "auc_pr": 0.5982082236446877,
+        "auroc": 0.7735821759259259
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_bandpower_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "fbraw_s43": {
+      "C": 0.01,
+      "val_ba": 0.6606182795698925,
+      "test": {
+        "balanced_accuracy": 0.7222222222222223,
+        "auc_pr": 0.6575158389601699,
+        "auroc": 0.8315972222222222
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_rawrecon_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "linbp_s44": {
+      "C": 0.01,
+      "val_ba": 0.7553763440860215,
+      "test": {
+        "balanced_accuracy": 0.7569444444444444,
+        "auc_pr": 0.6975374616429836,
+        "auroc": 0.8624131944444445
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_bandpower_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "linraw_s44": {
+      "C": 1.0,
+      "val_ba": 0.6639784946236559,
+      "test": {
+        "balanced_accuracy": 0.6909722222222222,
+        "auc_pr": 0.6300154748105176,
+        "auroc": 0.773726851851852
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "fbbp_s44": {
+      "C": 0.1,
+      "val_ba": 0.6102150537634409,
+      "test": {
+        "balanced_accuracy": 0.6875,
+        "auc_pr": 0.6441639661661871,
+        "auroc": 0.8113425925925926
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_bandpower_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "fbraw_s44": {
+      "C": 0.01,
+      "val_ba": 0.7022849462365591,
+      "test": {
+        "balanced_accuracy": 0.7534722222222223,
+        "auc_pr": 0.738511565820241,
+        "auroc": 0.8174189814814815
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_rawrecon_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "random_init": {
+      "C": 0.1,
+      "val_ba": 0.5530913978494624,
+      "test": {
+        "balanced_accuracy": 0.5381944444444444,
+        "auc_pr": 0.2761400594969773,
+        "auroc": 0.5771122685185185
+      },
+      "checkpoint": null
+    },
+    "cbramod": {
+      "C": 1.0,
+      "val_ba": 0.6125672043010753,
+      "test": {
+        "balanced_accuracy": 0.6527777777777778,
+        "auc_pr": 0.5145394925344408,
+        "auroc": 0.7084780092592592
+      }
+    },
+    "labram": {
+      "C": 1.0,
+      "val_ba": 0.6461693548387097,
+      "test": {
+        "balanced_accuracy": 0.6805555555555556,
+        "auc_pr": 0.5714615835653264,
+        "auroc": 0.734375
+      }
+    }
+  }
+}

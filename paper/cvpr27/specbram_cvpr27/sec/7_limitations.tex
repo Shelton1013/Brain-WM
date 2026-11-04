@@ -1,0 +1,28 @@
+\section{Limitations}\label{sec:limits}
+\noindent\emph{The implemented target.} With $0.78$-s patches the frequency resolution is
+$1.28$\,Hz, so the $\delta$ band has only three bins (1.28/2.56/3.84\,Hz) and activity below
+about 1\,Hz, including much of slow-wave activity, is barely represented; the zero-floor
+idealization gives $\mathrm{sd}[\log P_b\mid\theta]\approx0.63$ for $\delta$ and $\theta$
+(Table~\ref{tab:bins}). Longer patches, multitaper estimates (which give higher mean scores at $1\%$ of the labels,
+Table~\ref{tab:variants}) or per-band standardization (as in FAME \cite{yu2026fame}) are
+natural refinements. The classical band edges are conventions, and we did not search over
+partitions.
+
+\noindent\emph{Probing protocol.} Our probe mean-pools tokens and fits a linear classifier,
+which is strict and identical across models but is not each model's preferred readout; a
+per-channel readout raises CBraMod and LaBraM noticeably (Appendix~\ref{app:confounds}), and
+tasks that depend on spatially localized activity may favour other readouts.
+
+\noindent\emph{Scope.} The advantage of the target is clearest for sleep staging and is
+smaller or absent on emotion recognition, motor imagery and abnormality detection, and REVE,
+pretrained on 25 times more data, has a higher point estimate on abnormality detection. Several cohorts are small
+(MA has four test subjects). Downstream recordings may overlap TUEG; TUAB and TUEV come from
+the same corpus family, and we did not exclude their patients from pretraining. The efficiency comparisons in steps and
+model size are controlled, but those with external models, which differ in data, duration and
+architecture, are not, and pretraining uses a single 2{,}388-hour budget.
+
+\noindent\emph{Theory.} Sec.~\ref{sec:theory} assumes stationarity, Gaussianity and a state
+that acts only through the spectrum. Real EEG contains transients (K-complexes, spikes,
+blinks), heavy tails and cross-channel phase relations. Contextual dependence, posterior state
+uncertainty and the positive log floor limit the idealized noise calculations. The analysis
+motivates the target, but does not identify the mechanism of the observed efficiency or prove optimality.

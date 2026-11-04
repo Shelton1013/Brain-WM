@@ -1,0 +1,46 @@
+% SpecBraM -- CVPR 2027 submission (built from paper/arxiv/specbram_arxiv.tex by build_cvpr.py;
+% CVPR 2026 author kit, conference year set to 2027).
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+%%%%%%%%% PAPER TYPE
+% \usepackage{cvpr}              % camera-ready
+\usepackage[review]{cvpr}      % review version
+% \usepackage[pagenumbers]{cvpr} % arXiv version
+
+\input{preamble}
+
+\definecolor{cvprblue}{rgb}{0.21,0.49,0.74}
+\usepackage[pagebackref,breaklinks,colorlinks,allcolors=cvprblue]{hyperref}
+
+\def\paperID{*****} % *** Enter the Paper ID here
+\def\confName{CVPR}
+\def\confYear{2027}
+
+\title{SpecBraM: Efficient EEG Foundation Model Pretraining\\
+by Predicting Masked Band Power}
+
+\author{Anonymous CVPR submission}
+
+\begin{document}
+\maketitle
+\input{fig/teaser}
+\input{sec/0_abstract}
+\input{sec/1_introduction}
+\input{sec/2_related_work}
+\input{sec/3_specbram}
+\input{sec/4_why_predicting_band_powe}
+\input{sec/5_experimental_setup}
+\input{sec/6_results}
+\input{sec/7_limitations}
+\input{sec/8_conclusion}
+
+{
+    \small
+    \bibliographystyle{ieeenat_fullname}
+    \bibliography{main}
+}
+
+% Supplementary material, compiled after the references (split it off for submission).
+\input{sec/X_suppl}
+
+\end{document}

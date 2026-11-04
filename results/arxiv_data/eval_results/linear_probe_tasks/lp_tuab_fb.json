@@ -1,0 +1,65 @@
+{
+  "task": "tuab",
+  "results": {
+    "fbbp_s42": {
+      "C": 0.01,
+      "val_ba": 0.8265303816363738,
+      "test": {
+        "balanced_accuracy": 0.813277802056591,
+        "auc_pr": 0.8941515927792123,
+        "auroc": 0.8845106768424105
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_bandpower_rerun_sub2100/checkpoint_ep16.pt"
+    },
+    "fbraw_s42": {
+      "C": 0.1,
+      "val_ba": 0.8089391988143647,
+      "test": {
+        "balanced_accuracy": 0.7929959149816573,
+        "auc_pr": 0.8791008151430048,
+        "auroc": 0.8733356114855313
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_rawrecon_sub2100/checkpoint_ep16.pt"
+    },
+    "fbbp_s43": {
+      "C": 0.1,
+      "val_ba": 0.822481170285086,
+      "test": {
+        "balanced_accuracy": 0.805123978218401,
+        "auc_pr": 0.8872173310675052,
+        "auroc": 0.8824657028701481
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_bandpower_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "fbraw_s43": {
+      "C": 0.01,
+      "val_ba": 0.7993500460949063,
+      "test": {
+        "balanced_accuracy": 0.7928398689072635,
+        "auc_pr": 0.8817474363608462,
+        "auroc": 0.87637852320368
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_rawrecon_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "fbbp_s44": {
+      "C": 0.01,
+      "val_ba": 0.8193317091205912,
+      "test": {
+        "balanced_accuracy": 0.8052637288924664,
+        "auc_pr": 0.8878807820152421,
+        "auroc": 0.8795998470007262
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_bandpower_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "fbraw_s44": {
+      "C": 0.1,
+      "val_ba": 0.8056923884123434,
+      "test": {
+        "balanced_accuracy": 0.7819227570546037,
+        "auc_pr": 0.8670910335588432,
+        "auroc": 0.8623357740149755
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_rawrecon_s44_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

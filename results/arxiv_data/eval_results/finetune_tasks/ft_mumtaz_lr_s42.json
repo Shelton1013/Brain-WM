@@ -1,0 +1,15 @@
+{
+  "task": "mumtaz",
+  "results": {
+    "lr_s42": {
+      "test": {
+        "balanced_accuracy": 0.929338960209944,
+        "auc_pr": 0.9859140966216962,
+        "auroc": 0.9850644071865435
+      },
+      "val_ba": 0.9942012032085561,
+      "epochs": 21,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_nosig_s42_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

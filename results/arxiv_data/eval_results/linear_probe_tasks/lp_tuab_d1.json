@@ -1,0 +1,35 @@
+{
+  "task": "tuab",
+  "results": {
+    "d1_s42": {
+      "C": 0.01,
+      "val_ba": 0.8229451303053819,
+      "test": {
+        "balanced_accuracy": 0.8131158917608741,
+        "auc_pr": 0.8926475981408277,
+        "auroc": 0.886594120578285
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_s42_sub2100/checkpoint_ep16.pt"
+    },
+    "d1_s43": {
+      "C": 0.01,
+      "val_ba": 0.8238274402817718,
+      "test": {
+        "balanced_accuracy": 0.8019145553410989,
+        "auc_pr": 0.8841205701930969,
+        "auroc": 0.8738984912310844
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "d1_s44": {
+      "C": 0.01,
+      "val_ba": 0.8257466120222726,
+      "test": {
+        "balanced_accuracy": 0.8151284267712925,
+        "auc_pr": 0.8968476018800808,
+        "auroc": 0.8863820297662686
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_s44_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

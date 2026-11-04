@@ -1,0 +1,35 @@
+{
+  "task": "mumtaz",
+  "results": {
+    "d1_s42": {
+      "C": 1.0,
+      "val_ba": 0.9700924688057041,
+      "test": {
+        "balanced_accuracy": 0.9467951900571235,
+        "auc_pr": 0.9914865834802405,
+        "auroc": 0.9912105059278618
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_s42_sub2100/checkpoint_ep16.pt"
+    },
+    "d1_s43": {
+      "C": 1.0,
+      "val_ba": 0.9510416666666667,
+      "test": {
+        "balanced_accuracy": 0.9139409778107558,
+        "auc_pr": 0.9910124257202201,
+        "auroc": 0.9904221248642839
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "d1_s44": {
+      "C": 1.0,
+      "val_ba": 0.9605670677361854,
+      "test": {
+        "balanced_accuracy": 0.9457544724939575,
+        "auc_pr": 0.9946160044357628,
+        "auroc": 0.9945631714196861
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_s44_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

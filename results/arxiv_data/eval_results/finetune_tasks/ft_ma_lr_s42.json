@@ -1,0 +1,15 @@
+{
+  "task": "ma",
+  "results": {
+    "lr_s42": {
+      "test": {
+        "balanced_accuracy": 0.6631944444444444,
+        "auc_pr": 0.5423134717392301,
+        "auroc": 0.7552083333333334
+      },
+      "val_ba": 0.759744623655914,
+      "epochs": 13,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_nosig_s42_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

@@ -1,0 +1,245 @@
+{
+  "mode": "lp",
+  "seed": 0,
+  "split": {
+    "train": [
+      "1_20151124_noon_2.mat",
+      "2_20151106_noon.mat",
+      "3_20151024_noon.mat",
+      "4_20151105_noon.mat",
+      "4_20151107_noon.mat",
+      "5_20141108_noon.mat",
+      "5_20151012_night.mat",
+      "6_20151121_noon.mat",
+      "7_20151015_night.mat",
+      "8_20151022_noon.mat",
+      "9_20151017_night.mat",
+      "10_20151125_noon.mat",
+      "11_20151024_night.mat",
+      "12_20150928_noon.mat",
+      "13_20150929_noon.mat"
+    ],
+    "val": [
+      "14_20151014_night.mat",
+      "15_20151126_night.mat",
+      "16_20151128_night.mat",
+      "17_20150925_noon.mat"
+    ],
+    "test": [
+      "18_20150926_noon.mat",
+      "19_20151114_noon.mat",
+      "20_20151129_night.mat",
+      "21_20151016_noon.mat"
+    ]
+  },
+  "results": {
+    "linbp_s42": {
+      "test": {
+        "pearson": 0.5516677070733981,
+        "r2": 0.1450181007385254,
+        "rmse": 0.29367091910167853
+      },
+      "val": {
+        "pearson": 0.6692356943599558,
+        "r2": 0.4275195002555847,
+        "rmse": 0.19057756208909168
+      },
+      "alpha": 100000.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_bandpower_sub2100/checkpoint_ep16.pt"
+    },
+    "random_init": {
+      "test": {
+        "pearson": 0.4415269929063777,
+        "r2": 0.04734230041503906,
+        "rmse": 0.3099923130589772
+      },
+      "val": {
+        "pearson": 0.5189530802909539,
+        "r2": 0.2474350929260254,
+        "rmse": 0.21850602133974006
+      },
+      "alpha": 100.0,
+      "checkpoint": null
+    },
+    "linraw_s42": {
+      "test": {
+        "pearson": 0.5677102439285128,
+        "r2": 0.20124655961990356,
+        "rmse": 0.28384996405240603
+      },
+      "val": {
+        "pearson": 0.6485585148011004,
+        "r2": 0.41915732622146606,
+        "rmse": 0.19196439640859408
+      },
+      "alpha": 10000.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_sub2100/checkpoint_ep16.pt"
+    },
+    "fbbp_s42": {
+      "test": {
+        "pearson": 0.560744772338401,
+        "r2": 0.21171289682388306,
+        "rmse": 0.2819841393092315
+      },
+      "val": {
+        "pearson": 0.6630318470821241,
+        "r2": 0.434501588344574,
+        "rmse": 0.18941183721801122
+      },
+      "alpha": 10000.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_bandpower_rerun_sub2100/checkpoint_ep16.pt"
+    },
+    "fbraw_s42": {
+      "test": {
+        "pearson": 0.566365955931621,
+        "r2": 0.20438385009765625,
+        "rmse": 0.28329198035291864
+      },
+      "val": {
+        "pearson": 0.6181856257912047,
+        "r2": 0.37151241302490234,
+        "rmse": 0.19968238809098798
+      },
+      "alpha": 1000.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_rawrecon_sub2100/checkpoint_ep16.pt"
+    },
+    "linbp_s43": {
+      "test": {
+        "pearson": 0.5693100224208326,
+        "r2": 0.14656788110733032,
+        "rmse": 0.29340463637089986
+      },
+      "val": {
+        "pearson": 0.6490671588403673,
+        "r2": 0.40291672945022583,
+        "rmse": 0.194629591095098
+      },
+      "alpha": 100000.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_bandpower_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "linraw_s43": {
+      "test": {
+        "pearson": 0.5641727592890934,
+        "r2": 0.2507854700088501,
+        "rmse": 0.274906856303334
+      },
+      "val": {
+        "pearson": 0.6422981238843638,
+        "r2": 0.3998752236366272,
+        "rmse": 0.19512467890229768
+      },
+      "alpha": 10.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "fbbp_s43": {
+      "test": {
+        "pearson": 0.51925057877521,
+        "r2": 0.17562991380691528,
+        "rmse": 0.2883656840743949
+      },
+      "val": {
+        "pearson": 0.684446974318307,
+        "r2": 0.46673911809921265,
+        "rmse": 0.18393368397278956
+      },
+      "alpha": 10.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_bandpower_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "fbraw_s43": {
+      "test": {
+        "pearson": 0.5573061614023123,
+        "r2": 0.2050687074661255,
+        "rmse": 0.28317002727863655
+      },
+      "val": {
+        "pearson": 0.6310774506297905,
+        "r2": 0.3939902186393738,
+        "rmse": 0.196079065905332
+      },
+      "alpha": 1000.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_rawrecon_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "linbp_s44": {
+      "test": {
+        "pearson": 0.5753955977557377,
+        "r2": 0.20693236589431763,
+        "rmse": 0.2828378887266736
+      },
+      "val": {
+        "pearson": 0.6727193326257697,
+        "r2": 0.4492684006690979,
+        "rmse": 0.18692243551316756
+      },
+      "alpha": 10000.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_bandpower_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "linraw_s44": {
+      "test": {
+        "pearson": 0.512189181205117,
+        "r2": 0.1758989691734314,
+        "rmse": 0.2883186305758955
+      },
+      "val": {
+        "pearson": 0.6440907911149721,
+        "r2": 0.4137064218521118,
+        "rmse": 0.19286302960111892
+      },
+      "alpha": 1000.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "fbbp_s44": {
+      "test": {
+        "pearson": 0.5385970789559372,
+        "r2": 0.14103543758392334,
+        "rmse": 0.29435411332578787
+      },
+      "val": {
+        "pearson": 0.6333675787219614,
+        "r2": 0.3700384497642517,
+        "rmse": 0.19991641272312344
+      },
+      "alpha": 100000.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_bandpower_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "fbraw_s44": {
+      "test": {
+        "pearson": 0.5671388789394969,
+        "r2": 0.2547036409378052,
+        "rmse": 0.27418708238032935
+      },
+      "val": {
+        "pearson": 0.6178203744669822,
+        "r2": 0.3724483251571655,
+        "rmse": 0.19953366241550086
+      },
+      "alpha": 100.0,
+      "checkpoint": "/home/pxieaf/home2/model/abl_rawrecon_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "cbramod": {
+      "test": {
+        "pearson": 0.3425815462866508,
+        "r2": -0.01744234561920166,
+        "rmse": 0.32035934291806506
+      },
+      "val": {
+        "pearson": 0.43666930150951877,
+        "r2": 0.1534104347229004,
+        "rmse": 0.23175434614682214
+      },
+      "alpha": 1000.0
+    },
+    "labram": {
+      "test": {
+        "pearson": 0.5316267451880207,
+        "r2": 0.16215699911117554,
+        "rmse": 0.29071257000008827
+      },
+      "val": {
+        "pearson": 0.45964716336172723,
+        "r2": 0.15795570611953735,
+        "rmse": 0.2311313688933584
+      },
+      "alpha": 1000.0
+    }
+  }
+}

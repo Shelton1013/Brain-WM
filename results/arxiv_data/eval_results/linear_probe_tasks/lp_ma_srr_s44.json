@@ -1,0 +1,15 @@
+{
+  "task": "ma",
+  "results": {
+    "srr_s44": {
+      "C": 1.0,
+      "val_ba": 0.6525537634408602,
+      "test": {
+        "balanced_accuracy": 0.6319444444444444,
+        "auc_pr": 0.5476241425615163,
+        "auroc": 0.7239583333333333
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_small144_rawrecon_nosig_s44_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

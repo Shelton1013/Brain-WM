@@ -1,0 +1,15 @@
+{
+  "task": "tuab",
+  "results": {
+    "nd_s42": {
+      "C": 0.01,
+      "val_ba": 0.8199319693570214,
+      "test": {
+        "balanced_accuracy": 0.8038456162982024,
+        "auc_pr": 0.8882323767435962,
+        "auroc": 0.8716765999814386
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftnodelta_nosig_s42_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

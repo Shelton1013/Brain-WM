@@ -1,0 +1,41 @@
+\section{Experimental Setup}\label{sec:setup}
+\noindent\textbf{Pretraining.} TUEG v2.0.1 at 256\,Hz, 10-s windows, per-recording robust
+normalization, with recordings shorter than 5\,min dropped, 60\,s trimmed from each end and
+windows exceeding $150\,\mu$V rejected. All models use a random subset of 2{,}100 patients
+(859{,}606 windows, 2{,}388\,h; the same subset for every run), AdamW (learning rate
+$1.7{\times}10^{-3}$, weight decay $0.05$), 7 warm-up epochs and a cosine schedule defined
+over 105 epochs, stopped after epoch 16 for every run (matched steps), effective batch 512 on
+four RTX A6000 GPUs. Pretraining seeds 42/43/44 change initialization and data order on the
+same subset. Downstream patients are not excluded from pretraining (as in prior work).
+
+\noindent\textbf{Strict linear probe (primary metric)}\label{sec:lpproto}. The encoder is
+frozen; the tokens of a window are mean-pooled; features are standardized on the training
+split; a class-balanced logistic regression is fitted with $C\in\{0.01,0.1,1\}$ selected on the
+validation split by balanced accuracy, and the test split is scored once. For sleep, a 30-s
+epoch is the mean of its three 10-s window features. The probe is deterministic, so baselines
+with a single released checkpoint need no repetitions; our models are reported over three
+pretraining seeds. Sleep label efficiency reuses the full-label-selected $C$ on 1--50\% of the
+training epochs (five fixed random subsets, identical for all models); these fractions do not
+include the labels used for hyperparameter selection and do not subsample subjects. Each model receives the same
+samples in its own documented input convention: ours at 256\,Hz with per-recording robust
+scaling on the 19 standard leads; CBraMod and LaBraM at 200\,Hz, raw $\mu$V$/100$, with the
+recording's own channels (LaBraM by its channel names); BIOT with its 95th-percentile scaling
+on C3/C4 fed to its C3--A2/C4--A1 channel tokens; CSBrain as CBraMod, with the brain-region
+layout of its own wrapper for each dataset; REVE at 200\,Hz with per-recording z-scoring clipped
+at ${\pm}15$ SD and its own electrode-position bank. We compare with released models of
+comparable size (3--70M parameters: BIOT, CBraMod, LaBraM-Base, CSBrain, REVE-Base; ours 51M);
+REVE-Large (390M) belongs to a different scale class and is not included. Every baseline is
+measured with this probe; no linear-probe number is quoted from other papers. For REVE, the readout (mean pooling, or its own pretrained attention pooling; both
+frozen and fitted without downstream labels) is selected using validation labels, like $C$.
+
+\noindent\textbf{Downstream tasks.} We evaluate on eight public datasets from six task types:
+sleep staging (ISRUC \cite{khalighi2016isruc}, HMC \cite{alvarez2021hmc}; five stages),
+clinical EEG (abnormality detection on TUAB and six-class event classification on TUEV
+\cite{obeid2016tuh}), mental workload (MA \cite{zyma2019mentalarith}), depression (Mumtaz
+\cite{mumtaz2016mdd}), emotion recognition (FACED \cite{chen2023faced}, nine classes) and motor
+imagery (PhysioNet-MI \cite{schalk2004bci2000}, four classes). We reproduce the preprocessing
+and split protocols of CBraMod and CSBrain, with matching sample counts. In TUAB's original
+per-class training/validation split, three patients occur in both splits; its test patients are
+disjoint from both. This limits validation independence and is separate from possible TUEG
+pretraining overlap. TUEV has no patient overlap among its downstream splits.
+Appendix~\ref{app:fullmetrics} describes every dataset.

@@ -1,0 +1,23 @@
+{
+  "task": "tuev",
+  "results": {
+    "cbramod": {
+      "C": 0.1,
+      "val_ba": 0.5140188079935787,
+      "test": {
+        "balanced_accuracy": 0.5252106101248617,
+        "cohen_kappa": 0.39886598008000784,
+        "weighted_f1": 0.6694278098063045
+      }
+    },
+    "labram": {
+      "C": 0.01,
+      "val_ba": 0.3994250559409716,
+      "test": {
+        "balanced_accuracy": 0.467632223795504,
+        "cohen_kappa": 0.3270786557242915,
+        "weighted_f1": 0.623737767421106
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "task": "ma",
+  "results": {
+    "nd_s42": {
+      "C": 0.01,
+      "val_ba": 0.5661962365591398,
+      "test": {
+        "balanced_accuracy": 0.8090277777777777,
+        "auc_pr": 0.8455119669698846,
+        "auroc": 0.923611111111111
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftnodelta_nosig_s42_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

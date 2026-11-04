@@ -1,0 +1,15 @@
+{
+  "task": "ma",
+  "results": {
+    "g_s43": {
+      "C": 0.1,
+      "val_ba": 0.6182795698924731,
+      "test": {
+        "balanced_accuracy": 0.7326388888888888,
+        "auc_pr": 0.7517774469108109,
+        "auroc": 0.8609664351851852
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s43_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

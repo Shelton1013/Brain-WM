@@ -1,0 +1,41 @@
+{
+  "task": "faced",
+  "results": {
+    "reve_base_mean": {
+      "C": 1.0,
+      "val_ba": 0.19074074074074077,
+      "test": {
+        "balanced_accuracy": 0.20491143317230273,
+        "cohen_kappa": 0.10729542186751129,
+        "weighted_f1": 0.20560757264050705
+      }
+    },
+    "reve_base_attn": {
+      "C": 1.0,
+      "val_ba": 0.2021604938271605,
+      "test": {
+        "balanced_accuracy": 0.20021470746108427,
+        "cohen_kappa": 0.10072481879530126,
+        "weighted_f1": 0.20013243457107913
+      }
+    },
+    "reve_large_mean": {
+      "C": 0.01,
+      "val_ba": 0.28348765432098766,
+      "test": {
+        "balanced_accuracy": 0.28086419753086417,
+        "cohen_kappa": 0.1903880932088885,
+        "weighted_f1": 0.27997438197348623
+      }
+    },
+    "reve_large_attn": {
+      "C": 0.01,
+      "val_ba": 0.3219135802469136,
+      "test": {
+        "balanced_accuracy": 0.32286634460547503,
+        "cohen_kappa": 0.23595599093196906,
+        "weighted_f1": 0.3206346354917761
+      }
+    }
+  }
+}

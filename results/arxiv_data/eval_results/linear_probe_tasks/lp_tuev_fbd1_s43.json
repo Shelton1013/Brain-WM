@@ -1,0 +1,15 @@
+{
+  "task": "tuev",
+  "results": {
+    "fbd1_s43": {
+      "C": 0.01,
+      "val_ba": 0.4405082899316248,
+      "test": {
+        "balanced_accuracy": 0.6396130539330005,
+        "cohen_kappa": 0.5272390035917551,
+        "weighted_f1": 0.7558587837529741
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_fb_fftstdlog_nosig_s43_sub2100/checkpoint_ep16.pt"
+    }
+  }
+}

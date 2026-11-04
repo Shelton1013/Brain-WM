@@ -1,0 +1,80 @@
+{
+  "task": "ma",
+  "results": {
+    "m_s42": {
+      "C": 0.1,
+      "val_ba": 0.6310483870967742,
+      "test": {
+        "balanced_accuracy": 0.78125,
+        "auc_pr": 0.7833167803974782,
+        "auroc": 0.912326388888889
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig4g_s42_sub2100/checkpoint_ep16.pt"
+    },
+    "m_s43": {
+      "C": 0.1,
+      "val_ba": 0.6182795698924731,
+      "test": {
+        "balanced_accuracy": 0.7326388888888888,
+        "auc_pr": 0.7517774469108109,
+        "auroc": 0.8609664351851852
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "m_s44": {
+      "C": 1.0,
+      "val_ba": 0.6663306451612903,
+      "test": {
+        "balanced_accuracy": 0.7256944444444444,
+        "auc_pr": 0.5824938279537192,
+        "auroc": 0.8093171296296295
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "cbramod": {
+      "C": 1.0,
+      "val_ba": 0.6125672043010753,
+      "test": {
+        "balanced_accuracy": 0.6527777777777778,
+        "auc_pr": 0.5145394925344408,
+        "auroc": 0.7084780092592592
+      }
+    },
+    "labram": {
+      "C": 1.0,
+      "val_ba": 0.6461693548387097,
+      "test": {
+        "balanced_accuracy": 0.6805555555555556,
+        "auc_pr": 0.5714615835653264,
+        "auroc": 0.734375
+      }
+    },
+    "csbrain": {
+      "C": 1.0,
+      "val_ba": 0.6774193548387097,
+      "test": {
+        "balanced_accuracy": 0.5555555555555556,
+        "auc_pr": 0.3059452619022778,
+        "auroc": 0.5860821759259259
+      }
+    },
+    "reve_base_mean": {
+      "C": 1.0,
+      "val_ba": 0.6525537634408602,
+      "test": {
+        "balanced_accuracy": 0.6840277777777777,
+        "auc_pr": 0.5865631088825249,
+        "auroc": 0.7570891203703703
+      }
+    },
+    "reve_base_attn": {
+      "C": 0.01,
+      "val_ba": 0.5940860215053764,
+      "test": {
+        "balanced_accuracy": 0.7430555555555556,
+        "auc_pr": 0.6394129313619165,
+        "auroc": 0.8285590277777778
+      }
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "task": "physio",
+  "results": {
+    "csbrain": {
+      "C": 1.0,
+      "val_ba": 0.3143020680705371,
+      "test": {
+        "balanced_accuracy": 0.29773289010255416,
+        "cohen_kappa": 0.06372392588211262,
+        "weighted_f1": 0.2948731772479682
+      }
+    }
+  }
+}

@@ -1,0 +1,75 @@
+{
+  "task": "tuev",
+  "results": {
+    "linbp_s42": {
+      "C": 1.0,
+      "val_ba": 0.41001796664885876,
+      "test": {
+        "balanced_accuracy": 0.5060094786106978,
+        "cohen_kappa": 0.3780588514010771,
+        "weighted_f1": 0.6660464627667741
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_bandpower_sub2100/checkpoint_ep16.pt"
+    },
+    "linraw_s42": {
+      "C": 0.1,
+      "val_ba": 0.45347585573334454,
+      "test": {
+        "balanced_accuracy": 0.5062190262098927,
+        "cohen_kappa": 0.4447594780507903,
+        "weighted_f1": 0.7078510281129468
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_sub2100/checkpoint_ep16.pt"
+    },
+    "linbp_s43": {
+      "C": 0.01,
+      "val_ba": 0.46020196186171347,
+      "test": {
+        "balanced_accuracy": 0.5200866521325964,
+        "cohen_kappa": 0.40793181886615293,
+        "weighted_f1": 0.6857486242213895
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_bandpower_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "linraw_s43": {
+      "C": 0.01,
+      "val_ba": 0.43096350707394654,
+      "test": {
+        "balanced_accuracy": 0.5320573521953013,
+        "cohen_kappa": 0.42492436370983544,
+        "weighted_f1": 0.6949660438727577
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "linbp_s44": {
+      "C": 0.01,
+      "val_ba": 0.4040900313166183,
+      "test": {
+        "balanced_accuracy": 0.5877361841552997,
+        "cohen_kappa": 0.48592064924897005,
+        "weighted_f1": 0.7341842683474721
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_bandpower_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "linraw_s44": {
+      "C": 1.0,
+      "val_ba": 0.38051173830248247,
+      "test": {
+        "balanced_accuracy": 0.5325192214768314,
+        "cohen_kappa": 0.47159487694071434,
+        "weighted_f1": 0.7256838908216338
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_rawrecon_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "random_init": {
+      "C": 0.01,
+      "val_ba": 0.30209908583686257,
+      "test": {
+        "balanced_accuracy": 0.3591299093413673,
+        "cohen_kappa": 0.2135482746971029,
+        "weighted_f1": 0.5320266628004462
+      },
+      "checkpoint": null
+    }
+  }
+}

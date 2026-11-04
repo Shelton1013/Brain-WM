@@ -1,0 +1,35 @@
+\section{Related Work}\label{sec:related}
+\noindent\textbf{EEG foundation models.} Early self-supervised EEG models used contrastive or
+autoregressive objectives (BENDR \cite{kostas2021bendr}, Neuro-GPT \cite{cui2024neurogpt}).
+Most recent models pretrain a transformer on TUEG with a masked-prediction objective: CBraMod
+\cite{wang2025cbramod}, CSBrain \cite{csbrain} and REVE \cite{reve2025} reconstruct the raw
+waveform of masked patches; LaBraM \cite{jiang2024labram} predicts the codes of a
+vector-quantized tokenizer; EEGPT \cite{wang2024eegpt} combines reconstruction with latent
+alignment; NeuroLM \cite{jiang2025neurolm} maps EEG to language tokens; BIOT
+\cite{yang2023biot} handles heterogeneous biosignals. These models differ mainly in
+architecture, scale and data, while their targets are inherited from vision and language. A
+waveform target asks the model to predict sample-level details, including phase, in addition
+to spectral structure; some of this variation may remain uncertain given the context. A
+learned codebook target is defined by a tokenizer rather than by a physiological quantity. Our
+target directly measures band power, a spectral quantity relevant to many EEG labels.
+
+\noindent\textbf{Spectral information in EEG pretraining.} Spectral features enter several
+models as inputs or tokenizers: BIOT tokenizes STFT magnitudes, CBraMod adds a
+frequency-domain patch embedding, LaBraM's tokenizer reconstructs the Fourier amplitude and
+phase, BioSerenity-E1 \cite{bettinardi2025bioserenity} and BandVQ \cite{sukhbaatar2026bandvq}
+quantize log spectra, and BrainBERT \cite{wang2023brainbert} reconstructs intracranial
+spectrograms. Concurrently, FAME \cite{yu2026fame} decodes band-averaged log power of the whole
+sequence to counter the low-frequency bias of masked autoencoders, and MANAS-2
+\cite{kulkarni2026manas2} adds band log-power to waveform reconstruction. In these works
+spectral information is an input, a quantized code or an auxiliary term, and its role as the
+target is neither motivated nor isolated. We use band power of the masked patches as the sole
+target, derive it from a likelihood argument, and isolate its effect with matched controls.
+
+\noindent\textbf{Feature and latent prediction.} In vision and speech, predicting fixed
+hand-crafted features of masked inputs (HOG in MaskFeat \cite{wei2022maskfeat}, MFCC clusters in
+HuBERT \cite{hsu2021hubert}) can outperform predicting the raw signal, and latent-predictive
+methods (I-JEPA \cite{assran2023ijepa}, data2vec \cite{baevski2022data2vec}, EEG2Rep
+\cite{foumani2024eeg2rep}) predict learned representations but need anti-collapse mechanisms
+such as SIGReg \cite{balestriero2025lejepa}. Band power plays the role of such a feature for
+EEG: it is a physiological quantity relevant to many labels, and we use the fixed target
+without an explicit anti-collapse regularizer.

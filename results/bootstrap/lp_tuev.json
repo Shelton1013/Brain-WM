@@ -1,0 +1,80 @@
+{
+  "task": "tuev",
+  "results": {
+    "m_s42": {
+      "C": 0.01,
+      "val_ba": 0.41279897551702865,
+      "test": {
+        "balanced_accuracy": 0.5552360434540078,
+        "cohen_kappa": 0.4666940374533465,
+        "weighted_f1": 0.7221187666215781
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig4g_s42_sub2100/checkpoint_ep16.pt"
+    },
+    "m_s43": {
+      "C": 0.01,
+      "val_ba": 0.4111268206967777,
+      "test": {
+        "balanced_accuracy": 0.5391437818719013,
+        "cohen_kappa": 0.4287616672571871,
+        "weighted_f1": 0.6977131506298213
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s43_sub2100/checkpoint_ep16.pt"
+    },
+    "m_s44": {
+      "C": 0.01,
+      "val_ba": 0.40541588495455216,
+      "test": {
+        "balanced_accuracy": 0.5874224240608658,
+        "cohen_kappa": 0.5255136050166271,
+        "weighted_f1": 0.7520482250534224
+      },
+      "checkpoint": "/home/pxieaf/home2/model/abl_linear_fftstdlog_nosig_s44_sub2100/checkpoint_ep16.pt"
+    },
+    "cbramod": {
+      "C": 0.1,
+      "val_ba": 0.5140188079935787,
+      "test": {
+        "balanced_accuracy": 0.5252106101248617,
+        "cohen_kappa": 0.39886598008000784,
+        "weighted_f1": 0.6694278098063045
+      }
+    },
+    "labram": {
+      "C": 0.01,
+      "val_ba": 0.3994250559409716,
+      "test": {
+        "balanced_accuracy": 0.467632223795504,
+        "cohen_kappa": 0.3270786557242915,
+        "weighted_f1": 0.623737767421106
+      }
+    },
+    "csbrain": {
+      "C": 0.1,
+      "val_ba": 0.4714526319916892,
+      "test": {
+        "balanced_accuracy": 0.5642844504033528,
+        "cohen_kappa": 0.4209548426647589,
+        "weighted_f1": 0.6834089897643307
+      }
+    },
+    "reve_base_mean": {
+      "C": 0.01,
+      "val_ba": 0.42063971276106454,
+      "test": {
+        "balanced_accuracy": 0.5716976750185547,
+        "cohen_kappa": 0.5633554016863203,
+        "weighted_f1": 0.7771252236686634
+      }
+    },
+    "reve_base_attn": {
+      "C": 0.01,
+      "val_ba": 0.440908293333546,
+      "test": {
+        "balanced_accuracy": 0.5458188185222729,
+        "cohen_kappa": 0.5658487090464133,
+        "weighted_f1": 0.7783195276772391
+      }
+    }
+  }
+}

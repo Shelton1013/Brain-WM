@@ -1,0 +1,34 @@
+{
+  "dataset": "isruc",
+  "results": {
+    "labram": {
+      "avg3": {
+        "C": 0.01,
+        "val_ba": 0.7566525579393368,
+        "test": {
+          "balanced_accuracy": 0.7643889642548886,
+          "cohen_kappa": 0.6985812629370252,
+          "weighted_f1": 0.7671586316461565
+        },
+        "label_eff": {
+          "1.00": {
+            "balanced_accuracy": [
+              0.7639046207293437,
+              0.0
+            ],
+            "cohen_kappa": [
+              0.6981440700809205,
+              0.0
+            ],
+            "weighted_f1": [
+              0.7668425277071508,
+              0.0
+            ]
+          }
+        },
+        "dim": 1200
+      },
+      "checkpoint": null
+    }
+  }
+}

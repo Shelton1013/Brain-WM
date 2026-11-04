@@ -1,0 +1,23 @@
+{
+  "task": "physio",
+  "results": {
+    "hc_basic": {
+      "C": 1.0,
+      "val_ba": 0.4026310440418318,
+      "test": {
+        "balanced_accuracy": 0.39105217454702607,
+        "cohen_kappa": 0.18807299941843925,
+        "weighted_f1": 0.3911576842392876
+      }
+    },
+    "hc_rich": {
+      "C": 0.01,
+      "val_ba": 0.4014814162727741,
+      "test": {
+        "balanced_accuracy": 0.4104550637939359,
+        "cohen_kappa": 0.2139598996671429,
+        "weighted_f1": 0.41027458479748113
+      }
+    }
+  }
+}

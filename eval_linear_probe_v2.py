@@ -18,6 +18,7 @@ Each model gets its own documented input contract:
         --checkpoint .../checkpoint_ep16.pt --output out.json
 """
 import argparse
+import os
 import json
 import sys
 import time
@@ -31,9 +32,15 @@ from sklearn.preprocessing import StandardScaler
 
 from dataset_mumtaz import OUR_19CH_ORDER
 
-BASE = Path("/home/pxieaf/home2/baselines")
+BASE = Path(os.environ.get("SPECBRAM_BASELINES", "/home/pxieaf/home2/baselines"))
 C_GRID = (0.01, 0.1, 1.0)
 FRACS = (0.01, 0.05, 0.10, 0.25, 0.50, 1.00)
+# readout of the frozen tokens: "mean" = mean over all (channel, time) tokens (main
+# protocol); "chan" = mean over time within each present channel, channels concatenated
+# (keeps spatial information; still frozen + logistic regression)
+READOUT = {"mode": "mean"}
+PRED = {"dir": None, "name": None, "ds": None}   # --pred_dir: save test predictions
+SUBJ = {}                                         # split -> subject id of every epoch
 
 
 def load_split(a, sample_rate, normalization):
@@ -50,7 +57,55 @@ def load_split(a, sample_rate, normalization):
     out = {}
     for k in ("train", "val", "test"):
         ds = mk(SP[k])
-        out[k] = (ds.trials, np.asarray(ds.labels, np.int64))
+        trials = ds.trials
+        if normalization == "none" and getattr(a, "reve_norm", False):
+            trials = reve_normalize(trials, ds.subject_ids)
+        if normalization == "none" and getattr(a, "rn_scale", None) is not None:
+            trials = robust_rescale(trials, ds.subject_ids, a.rn_scale)
+        out[k] = (trials, np.asarray(ds.labels, np.int64))
+        SUBJ[k] = np.asarray(ds.subject_ids)
+    return out
+
+
+def raw_scale(trials):
+    """dataset-wide typical amplitude: median over channels of IQR/1.349 (µV)."""
+    x = np.concatenate([np.asarray(t, np.float32) for t in trials[:2000]], 0)
+    iqr = (np.percentile(x, 75, 0) - np.percentile(x, 25, 0)) / 1.349
+    return float(np.median(iqr[iqr > 0]))
+
+
+def robust_rescale(trials, rec_ids, scale):
+    """Our input normalization (per-recording, per-channel median/IQR) for a baseline
+    that expects µV: rescaled to the dataset-wide typical amplitude, so only the
+    recording-to-recording differences are removed."""
+    trials = [np.asarray(t, np.float32) for t in trials]
+    rec_ids = np.asarray(rec_ids)
+    out = [None] * len(trials)
+    for r in np.unique(rec_ids):
+        idx = np.where(rec_ids == r)[0]
+        x = np.concatenate([trials[i] for i in idx], 0)
+        med = np.median(x, 0)
+        iqr = (np.percentile(x, 75, 0) - np.percentile(x, 25, 0)) / 1.349
+        iqr[iqr == 0] = 1.0
+        for i in idx:
+            out[i] = ((trials[i] - med) / iqr * scale).astype(np.float32)
+    return out
+
+
+def reve_normalize(trials, rec_ids, clip=15.0):
+    """REVE's input convention: z-score each recording (statistics over the whole
+    recording, per channel), then clip at +-15 SD. Channels that are absent (all
+    zero) stay zero."""
+    trials = [np.asarray(t, np.float32) for t in trials]
+    rec_ids = np.asarray(rec_ids)
+    out = [None] * len(trials)
+    for r in np.unique(rec_ids):
+        idx = np.where(rec_ids == r)[0]
+        x = np.concatenate([trials[i] for i in idx], 0)          # [n*T, 19]
+        mu, sd = x.mean(0), x.std(0)
+        sd[sd == 0] = 1.0
+        for i in idx:
+            out[i] = np.clip((trials[i] - mu) / sd, -clip, clip).astype(np.float32)
     return out
 
 
@@ -71,7 +126,12 @@ def specbram_encoder(ckpt, device, random_init=False):
     model.eval()
 
     def enc(x):                                   # x [B, 2560, 19]
-        return model._encode(model._tokenize(x)).mean(1)
+        h = model._encode(model._tokenize(x))     # [B, 19*Tp, D], channel-major
+        if READOUT["mode"] == "chan":
+            B, N, D = h.shape
+            return h.reshape(B, 19, N // 19, D).mean(2)[:, enc.chans].flatten(1)
+        return h.mean(1)
+    enc.chans = list(range(19))
     return enc, 256, "per_recording_robust", None
 
 
@@ -88,7 +148,8 @@ def cbramod_encoder(device):
     def enc(x, chans):                            # x [B, 2000, C] raw µV
         x = x[:, :, chans].permute(0, 2, 1) / 100.0
         B, C, T = x.shape
-        return m(x.reshape(B, C, T // 200, 200)).mean(dim=(1, 2))
+        h = m(x.reshape(B, C, T // 200, 200))                     # [B, C, P, D]
+        return h.mean(2).flatten(1) if READOUT["mode"] == "chan" else h.mean(dim=(1, 2))
     return enc, 200, "none", "cbramod"
 
 
@@ -124,6 +185,10 @@ def labram_encoder(device):
         ids = torch.tensor([0] + [std.index(n) + 1 for n in names], device=x.device)
         x = x[:, :, chans].permute(0, 2, 1) / 100.0
         B, C, T = x.shape
+        if READOUT["mode"] == "chan":
+            h = m.forward_features(x.reshape(B, C, T // 200, 200), input_chans=ids,
+                                   return_patch_tokens=True)       # [B, C*A, D], channel-major
+            return h.reshape(B, C, -1, h.shape[-1]).mean(2).flatten(1)
         return m.forward_features(x.reshape(B, C, T // 200, 200), input_chans=ids)
     return enc, 200, "none", "labram"
 
@@ -147,6 +212,163 @@ def biot_encoder(device, ckpt_name="EEG-six-datasets-18-channels.ckpt"):
         x = x / (torch.quantile(x.abs(), 0.95, dim=-1, keepdim=True) + 1e-8)
         return m(x, n_channel_offset=16)
     return enc, 200, "none", "biot"
+
+
+CSB_DIR = BASE / "CSBrain"
+# CSBrain assigns every channel to a brain region (0 frontal, 1 parietal, 2 temporal,
+# 3 occipital, 4 central) and orders channels within a region; we use the table of
+# CSBrain's own wrapper for each dataset (models/model_for_<task>.py)
+CSB_FILE = {"isruc": "isruc", "hmc": "hmc", "ma": "stress", "mumtaz": "mumtaz", "faced": "faced",
+            "physio": "physio", "tuab": "tuab", "tuev": "tuev", "seedvig": "seedvig"}
+
+
+def _csb_topology(fname):
+    import re
+    txt = (CSB_DIR / "models" / f"model_for_{fname}.py").read_text()
+    out = {}
+    for reg, body in re.findall(r"(\d)\s*:\s*\[([^\]]*)\]", txt):
+        for pos, nm in enumerate(re.findall(r"['\"]([^'\"]+)['\"]", body)):
+            out.setdefault(nm.upper(), (int(reg), pos))
+    return out
+
+
+def csbrain_layout(names, task):
+    """-> kept channel indices, brain_regions (in kept order), sorted_indices."""
+    topo = _csb_topology(CSB_FILE.get(task, "mumtaz"))
+    merged = {}
+    for f in (CSB_DIR / "models").glob("model_for_*.py"):
+        for k, v in _csb_topology(f.stem[len("model_for_"):]).items():
+            merged.setdefault(k, v)
+    keep, regions, order = [], [], []
+    for i, n in enumerate(names):
+        key = str(n).upper().split("-")[0]          # bipolar TCP: region of the first electrode
+        rp = topo.get(key) or merged.get(key)
+        if rp is None:
+            continue
+        keep.append(i); regions.append(rp[0]); order.append(rp[1])
+    sorted_idx = sorted(range(len(keep)), key=lambda j: (regions[j], order[j]))
+    return keep, regions, sorted_idx
+
+
+def csbrain_encoder(device, task):
+    """CSBrain (official release, models/CSBrain.py + pth/CSBrain.pth): CBraMod's input
+    convention (200 Hz, uV/100, 1-s patches); the region layout depends on the channel
+    set, so the backbone is built per channel set (same weights)."""
+    # CBraMod's repo also has a top-level package named `models`: import CSBrain's in
+    # isolation and restore whatever `models` was loaded before
+    saved = {k: sys.modules.pop(k) for k in list(sys.modules) if k == "models" or k.startswith("models.")}
+    sys.path.insert(0, str(CSB_DIR))
+    try:
+        from models.CSBrain import CSBrain
+    finally:
+        sys.path.remove(str(CSB_DIR))
+        for k in [k for k in sys.modules if k == "models" or k.startswith("models.")]:
+            sys.modules.pop(k)
+        sys.modules.update(saved)
+    sd = torch.load(CSB_DIR / "gdrive/pth/CSBrain.pth", map_location="cpu")
+    sd = {k.replace("module.", ""): v for k, v in sd.items()}
+    cache = {}
+
+    def build(names):
+        keep, regions, sidx = csbrain_layout(names, task)
+        m = CSBrain(in_dim=200, out_dim=200, d_model=200, dim_feedforward=800, seq_len=30,
+                    n_layer=12, nhead=8, brain_regions=regions, sorted_indices=sidx)
+        ms = m.state_dict()
+        miss = [k for k in ms if k not in sd or sd[k].shape != ms[k].shape]
+        ms.update({k: v for k, v in sd.items() if k in ms and v.shape == ms[k].shape})
+        m.load_state_dict(ms)
+        m.proj_out = torch.nn.Identity()
+        print(f"    CSBrain: {len(keep)}/{len(names)} channels, regions {sorted(set(regions))}, "
+              f"unmatched weights {miss}", flush=True)
+        return keep, m.to(device).eval()
+
+    def enc(x, chans, names=None):               # x [B, T, C] raw uV, 200 Hz
+        names = names or [OUR_19CH_ORDER[c].upper() for c in chans]
+        key = tuple(names)
+        if key not in cache:
+            cache[key] = build(names)
+        keep, m = cache[key]
+        x = x[:, :, [chans[i] for i in keep]].permute(0, 2, 1) / 100.0
+        B, C, T = x.shape
+        h = m(x.reshape(B, C, T // 200, 200))                     # [B, C, P, D] (sorted)
+        return h.mean(2).flatten(1) if READOUT["mode"] == "chan" else h.mean(dim=(1, 2))
+    return enc, 200, "none", "csbrain"
+
+
+REVE_DIR = BASE / "reve"
+
+
+def reve_encoder(device, size="base", pool="mean"):
+    """REVE (official HF release, brain-bzh/reve-{base,large}). Input: 200 Hz,
+    per-recording z-score clipped at +-15 SD (REVE paper, Sec. 3.1.1), electrode
+    positions from REVE's own position bank. Patch 200 samples, overlap 20.
+    pool: "mean" = our strict protocol (mean over channel x time tokens);
+          "attn" = REVE's own pretrained attention pooling (frozen query)."""
+    import importlib.util
+    import types
+    from safetensors.torch import load_file
+    pkg = types.ModuleType("reve_pkg"); pkg.__path__ = [str(REVE_DIR / f"reve-{size}")]
+    sys.modules["reve_pkg"] = pkg
+    for mod in ("configuration_reve", "modeling_reve"):
+        spec = importlib.util.spec_from_file_location(f"reve_pkg.{mod}", REVE_DIR / f"reve-{size}" / f"{mod}.py")
+        m_ = importlib.util.module_from_spec(spec); sys.modules[f"reve_pkg.{mod}"] = m_
+        spec.loader.exec_module(m_)
+    cfg_mod, mdl_mod = sys.modules["reve_pkg.configuration_reve"], sys.modules["reve_pkg.modeling_reve"]
+    cfg = json.load(open(REVE_DIR / f"reve-{size}" / "config.json"))
+    conf = cfg_mod.ReveConfig(**{k: v for k, v in cfg.items()
+                                 if k not in ("architectures", "auto_map", "model_type",
+                                              "transformers_version", "dtype")})
+    # transformers 4.17's post_init() calls _init_weights, which REVE does not define;
+    # the weights are overwritten by the checkpoint right below anyway
+    mdl_mod.Reve._init_weights = lambda self, module: None
+    model = mdl_mod.Reve(conf)
+    sd = load_file(str(REVE_DIR / f"reve-{size}" / "model.safetensors"))
+    missing, unexpected = model.load_state_dict(sd, strict=False)
+    print(f"REVE-{size} load: missing {missing} | unexpected {unexpected}", flush=True)
+    model.to(device).eval()
+    bank = json.load(open(REVE_DIR / "reve-positions" / "positions.json"))
+    bank = {k.upper(): v for k, v in bank.items()}
+
+    def enc(x, chans, names=None):               # x [B, T, 19] z-scored, 200 Hz
+        names = names or [OUR_19CH_ORDER[c].upper() for c in chans]
+        pos = torch.tensor([bank[n] for n in names], dtype=torch.float32, device=x.device)
+        x = x[:, :, chans].permute(0, 2, 1).contiguous()
+        h = model(x, pos.unsqueeze(0).expand(x.shape[0], -1, -1))    # [B, C, P, E]
+        if READOUT["mode"] == "chan":
+            return h.mean(2).flatten(1)
+        return model.attention_pooling(h) if pool == "attn" else h.mean(dim=(1, 2))
+    enc.model = model
+    return enc, 200, "none", "reve"
+
+
+@torch.no_grad()
+def reve_features(size, X, names, rec, device, bs=64, clip=15.0):
+    """Both frozen REVE readouts for windows X [N, T, C] (µV, 200 Hz; array or
+    memmap) with channel names and recording ids: per-recording, per-channel
+    z-score clipped at +-15 SD (REVE's convention), channels outside REVE's
+    position bank dropped. -> {"mean": [N, E], "attn": [N, E]}."""
+    model = reve_encoder(device, size, "mean")[0].model
+    bank = json.load(open(REVE_DIR / "reve-positions" / "positions.json"))
+    bank = {k.upper(): v for k, v in bank.items()}
+    names = [str(n).upper() for n in names]
+    keep = [i for i, n in enumerate(names) if n in bank]
+    print(f"    REVE-{size}: {len(keep)}/{len(names)} channels in its position bank", flush=True)
+    pos = torch.tensor([bank[names[i]] for i in keep], dtype=torch.float32, device=device)
+    rec = np.asarray(rec)
+    out = {"mean": np.zeros((len(X), model.embed_dim), np.float32),
+           "attn": np.zeros((len(X), model.embed_dim), np.float32)}
+    for r in np.unique(rec):
+        idx = np.where(rec == r)[0]
+        xr = np.asarray(X[idx], np.float32)[:, :, keep]              # [n, T, c]
+        mu = xr.mean((0, 1), keepdims=True); sd = xr.std((0, 1), keepdims=True)
+        sd[sd == 0] = 1.0
+        xr = np.clip((xr - mu) / sd, -clip, clip)
+        for j in range(0, len(idx), bs):
+            x = torch.from_numpy(np.ascontiguousarray(xr[j:j + bs].transpose(0, 2, 1))).to(device)
+            h = model(x, pos.unsqueeze(0).expand(x.shape[0], -1, -1))          # [B, c, P, E]
+            out["mean"][idx[j:j + bs]] = h.mean(dim=(1, 2)).float().cpu().numpy()
+            out["attn"][idx[j:j + bs]] = model.attention_pooling(h).float().cpu().numpy()
+    return out
 
 
 # ------------------------------- probing ----------------------------------
@@ -185,7 +407,13 @@ def probe_modes(enc, kind, data, sr, chans, dev, modes):
         best = max(((balanced_accuracy_score(y["val"], fit(F["train"], y["train"], C)
                                              .predict(F["val"])), C) for C in C_GRID))
         C = best[1]
-        full = score(y["test"], fit(F["train"], y["train"], C).predict(F["test"]))
+        clf_full = fit(F["train"], y["train"], C)
+        full = score(y["test"], clf_full.predict(F["test"]))
+        if PRED["dir"]:
+            Path(PRED["dir"]).mkdir(parents=True, exist_ok=True)
+            np.savez(Path(PRED["dir"]) / f"{PRED['ds']}__{PRED['name']}__{mode}.npz", y=y["test"],
+                     pred=clf_full.predict(F["test"]), subj=SUBJ.get("test"), val_ba=float(best[0]),
+                     **({"feat": F["test"].astype(np.float16)} if os.environ.get("SAVE_FEAT") else {}))
         curve = {}
         for fr in FRACS:
             reps = []
@@ -210,23 +438,44 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", choices=["isruc", "hmc"], required=True)
     ap.add_argument("--data_dir", required=True)
-    ap.add_argument("--model", choices=["specbram", "cbramod", "labram", "biot", "biot_sleep"],
+    ap.add_argument("--model", choices=["specbram", "cbramod", "labram", "biot", "biot_sleep",
+                                        "reve_base", "reve_large", "cbramod_rn", "labram_rn", "csbrain"],
                     required=True)
     ap.add_argument("--checkpoints", nargs="*", default=[], metavar="NAME=PATH",
                     help="specbram only: several checkpoints probed on one data load")
     ap.add_argument("--random_init", action="store_true",
                     help="specbram only: also probe the randomly initialised architecture")
     ap.add_argument("--modes", nargs="+", default=["avg3", "center10"])
+    ap.add_argument("--readout", choices=["mean", "chan"], default="mean")
+    ap.add_argument("--pred_dir", default=None, help="save test predictions per model")
+    ap.add_argument("--no_label_eff", action="store_true", help="full-label probe only")
     ap.add_argument("--output", required=True)
     a = ap.parse_args()
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     t0 = time.time()
+    READOUT["mode"] = a.readout
+    if a.no_label_eff:
+        global FRACS
+        FRACS = (1.00,)
 
     if a.model == "specbram":
         todo = [c.split("=", 1) for c in a.checkpoints]
         if a.random_init:
             todo.append(("random_init", todo[0][1]))
         sr, norm = 256, "per_recording_robust"
+    elif a.model.endswith("_rn"):
+        # input-convention check: the baseline on our per-recording normalization
+        todo = [(a.model, None)]
+        sr, norm = 200, "none"
+        a.rn_scale = raw_scale(load_split(a, sr, "none")["train"][0])
+        print(f"  rescale to dataset median amplitude {a.rn_scale:.2f} uV", flush=True)
+    elif a.model.startswith("reve"):
+        # two frozen, label-free readouts: mean pooling (ours) and REVE's own
+        # pretrained attention pooling
+        todo = ([(f"{a.model}_chan", None)] if a.readout == "chan"
+                else [(f"{a.model}_mean", None), (f"{a.model}_attn", None)])
+        sr, norm = 200, "none"
+        a.reve_norm = True
     else:
         todo = [(a.model, None)]
         sr, norm = 200, "none"
@@ -243,16 +492,24 @@ def main():
         if name in res["results"]:
             print(f"  skip {name} (done)"); continue
         t = time.time()
-        if a.model == "cbramod":
+        if a.model in ("cbramod", "cbramod_rn"):
             enc, _, _, kind = cbramod_encoder(dev)
         elif a.model == "biot":
             enc, _, _, kind = biot_encoder(dev)
         elif a.model == "biot_sleep":
             enc, _, _, kind = biot_encoder(dev, "EEG-SHHS+PREST-18-channels.ckpt")
-        elif a.model == "labram":
+        elif a.model in ("labram", "labram_rn"):
             enc, _, _, kind = labram_encoder(dev)
+        elif a.model == "csbrain":
+            enc, _, _, kind = csbrain_encoder(dev, a.dataset)
+        elif a.model.startswith("reve"):
+            enc, _, _, kind = reve_encoder(dev, a.model.split("_")[1],
+                                           "mean" if a.readout == "chan" else name.rsplit("_", 1)[1])
         else:
             enc, _, _, kind = specbram_encoder(path, dev, random_init=(name == "random_init"))
+        PRED.update(dir=a.pred_dir, name=name, ds=a.dataset)
+        if kind is None:
+            enc.chans = chans                          # our models: present leads only
         print(f"  {name}", flush=True)
         res["results"][name] = probe_modes(enc, kind, data, sr, chans, dev, a.modes)
         res["results"][name]["checkpoint"] = path
